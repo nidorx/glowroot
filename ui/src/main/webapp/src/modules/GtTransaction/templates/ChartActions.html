@@ -1,0 +1,79 @@
+<!--
+  Copyright 2015-2016 the original author or authors.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<div style="margin: 20px 0 10px;">
+    <div class="pull-right">
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-default" ng-click="zoomOut()" title="Zoom out">
+                <span class="glyphicon glyphicon-zoom-out"></span>
+            </button>
+            <button type="button" class="btn btn-default" ng-click="refresh()" title="Refresh">
+                <span class="glyphicon glyphicon-refresh"></span>
+            </button>
+            <button
+                type="button"
+                class="btn btn-info"
+                uib-popover-template="'modules/GtTransaction/templates/help/ChartHelp.html'"
+                popover-placement="left"
+                popover-append-to-body="true"
+                popover-animation="false"
+                popover-trigger="mouseenter"
+                ng-hide="$state.is('page.transaction.detail.traces') || $state.is('page.error.detail.traces')"
+                >
+                <span class="glyphicon glyphicon-question-sign"></span>
+            </button>
+            <button
+                type="button"
+                class="btn btn-info"
+                uib-popover-template="'modules/GtTransaction/templates/help/ChartTracesHelp.html'"
+                popover-placement="left"
+                popover-append-to-body="true"
+                popover-animation="false"
+                popover-trigger="mouseenter"
+                ng-show="$state.is('page.transaction.detail.traces') || $state.is('page.error.detail.traces')"
+                >
+                <span class="glyphicon glyphicon-question-sign"></span>
+            </button>
+        </div>
+    </div>
+    <div style="max-width: 50%" ng-if="$state.is('page.error.detail.messages')">
+        <div class="input-group" ng-form gt-form-enter="refresh()">
+            <input
+                type="text"
+                ng-model="$parent.filter"
+                class="form-control"
+                placeholder="filter the error messages"
+                id="filter"
+                >
+            <div class="input-group-btn">
+                <button
+                    class="btn btn-info"
+                    uib-popover-template="'modules/GtTransaction/templates/help/ErrorMessageFilterHelp.html'"
+                    popover-placement="bottom"
+                    popover-trigger="mouseenter"
+                    popover-append-to-body="true"
+                    popover-animation="false"
+                    >
+                    <span class="glyphicon glyphicon-question-sign"></span>
+                </button>
+            </div>
+        </div>
+
+        <div ng-if="parsingError" class="gt-red" style="margin-top: 10px; margin-bottom: -5px;">
+            {{parsingError}}
+        </div>
+    </div>
+    <div class="clearfix"></div>
+</div>

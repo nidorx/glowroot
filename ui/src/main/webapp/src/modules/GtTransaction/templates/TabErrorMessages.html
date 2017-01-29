@@ -1,0 +1,79 @@
+<!--
+  Copyright 2015-2016 the original author or authors.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<div style="position: relative;" ng-controller="ErrorMessagesCtrl">
+    <div ng-include src="'modules/GtApp/templates/GtHttpErrorOverlay.html'"></div>
+
+    <div ng-include src="'modules/GtTransaction/templates/ChartActions.html'"></div>
+
+    <div>
+        <div class="gt-chart-container">
+            <div class="gt-chart-dimensions" id="chart"></div>
+
+            <div ng-show="chartNoData && !showChartSpinner" class="chart-alert">
+                <div class="chart-alert-container">
+                    <div class="alert alert-info chart-alert-message">
+                        <span class="pficon pficon-info"></span>
+                        <span>
+                            No data for this time period
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- 32px + 8px (padding on tds) is to match 40px margin on transactions tab -->
+        <div ng-hide="chartNoData" style="padding-top: 40px;">
+            <table class="table table-striped table-bordered table-hover dataTable ">
+                <thead>
+                    <tr>
+                        <th width="98%">
+                            Error
+                        </th>
+                        <th width="1%">
+                            Count
+                        </th>
+                        <th width="1%">
+                            Traces
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr ng-repeat="errorMessage in errorMessages">
+                        <!-- no whitespace/indentation inside td is important here -->
+                        <td class="gt-monospace" style="word-break: break-all; white-space: pre-line;">{{errorMessage.message}}</td>
+                        <td style="text-align: right;">
+                            {{errorMessage.count}}
+                        </td>
+                        <td class="table-view-pf-actions">
+                            <div class="table-view-pf-btn">
+                                <a ng-href="#error/traces{{tracesQueryString(errorMessage)}}" class="btn btn-default">
+                                    see traces
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="text-right" ng-show="moreErrorMessagesAvailable" style="padding-top: 20px ">
+                <button
+                    class="btn btn-default"
+                    ng-click="showMoreErrorMessages(deferred)"
+                    >
+                    Show more
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

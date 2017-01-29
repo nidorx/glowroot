@@ -1,0 +1,35 @@
+
+
+<div>
+    <ul class="list-group row">
+        <li ng-show="threadStats.totalCpuNanos != -1" class="list-group-item">
+            <small class="pull-right">
+                {{threadStats.totalCpuNanos / (1000000 * transactionCount) | gtMillis}} ms
+            </small>
+            <strong>
+                CPU time:
+            </strong>
+        </li>
+        
+        <li ng-show="threadStats.totalBlockedNanos != -1" class="list-group-item">
+            <small class="pull-right">
+                {{threadStats.totalBlockedNanos / (1000000 * transactionCount) | gtMillis}} ms
+            </small>
+            <strong>Blocked time:</strong>
+        </li>
+
+        <li ng-show="threadStats.totalWaitedNanos != -1" class="list-group-item">
+            <small class="pull-right">
+                {{threadStats.totalWaitedNanos / (1000000 * transactionCount) | gtMillis}} ms
+            </small>
+            <strong>Waited time:</strong>
+        </li>
+
+        <li ng-show="threadStats.totalAllocatedBytes != -1" class="list-group-item">
+            <small class="pull-right">
+                {{threadStats.totalAllocatedBytes / transactionCount| gtBytes}}
+            </small>        
+            <strong>Allocated memory:</strong>
+        </li>
+    </ul>
+</div>

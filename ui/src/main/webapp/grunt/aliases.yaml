@@ -1,0 +1,22 @@
+
+server:
+    - 'sass:development'
+    - 'includeSource:development'
+    - 'configureProxies:development'
+    - 'connect:development'
+    - 'watch'
+
+dist:
+    - 'packModules'
+    - 'replace:concat'
+    - 'processhtml:dist'
+    - 'concat:distVendorJS'
+    - 'concat:distVendorCSS'
+    - 'sync:distVendor'
+
+dist-server:
+    - 'dist'
+    - 'connect:dist'
+
+default:
+    - 'server'

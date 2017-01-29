@@ -1,0 +1,181 @@
+<!doctype html>
+<!--
+  Copyright 2012-2017 the original author or authors.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<html ng-app="GtApp">
+    <head>
+        <meta charset="utf-8">
+        <!--
+        intentionally not using <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        and instead sending http response header X-UA-Compatible: IE=edge
+        see https://github.com/h5bp/html5-boilerplate/blob/master/src/doc/html.md#x-ua-compatible
+        -->
+        <title>Glowroot</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+
+        <!--
+        this base href tag is replaced with server-side dynamic base href tag plus layout
+        json object (see IndexHtmlService.java)
+        -->
+        <base href="/">
+
+        <!-- this is needed when base href is not / -->
+        <link rel="shortcut icon" href="favicon.ico">
+
+        <!-- concat:css[:distVendorCSS] vendor/styles/vendor.min.css -->
+        <link rel="stylesheet" href="vendor/bootstrap/dist/css/bootstrap.min.css"/>
+        <link rel="stylesheet" href="vendor/angular-block-ui/dist/angular-block-ui.min.css"/>
+        <!--<link rel="stylesheet" href="vendor/bootstrap-select/dist/css/bootstrap-select.min.css"/>-->
+        <!--<link rel="stylesheet" href="vendor/bootstrap-touchspin/dist/jquery.bootstrap-touchspin.min.css"/>-->
+        <link rel="stylesheet" href="vendor/patternfly/dist/css/patternfly.min.css"/>
+        <link rel="stylesheet" href="vendor/patternfly/dist/css/patternfly-additions.min.css"/>
+        <link rel="stylesheet" href="vendor/angular-patternfly/dist/styles/angular-patternfly.min.css"/>
+        <link rel="stylesheet" href="vendor/angular-ui-bootstrap/src/typeahead/typeahead.css">
+        <link rel="stylesheet" href="vendor/angular-ui-bootstrap/src/tooltip/tooltip.css">
+        <!--<link rel="stylesheet" href="vendor/angular-ui-select/dist/select.css">-->
+        <link rel="stylesheet" href="vendor/d3-flame-graph/src/d3.flameGraph.css">
+        <!-- /concat -->
+
+        <!-- build:remove -->
+        <!--Todos os estilos são adicionados automaticamente pela task includeSource-->
+        <!-- include: "type": "css", "files": "modules/**/*.scss,!modules/**/_*.scss", "ordering": "top-down" -->
+        <!-- /build -->
+
+        <!--[if IE 9]>
+        <script>
+          if (contextPath !== '/' && location.pathname === contextPath) {
+            location.pathname += '/';
+          }
+        </script>
+        <![endif]-->
+    </head>
+    <body id="ng-app">
+        <div ui-view></div>
+        <!--[if lt IE 9]>
+        <style>
+          body div {
+            display: none;
+          }
+        </style>
+        <p style="text-align: center; padding-top: 50px; font-size: 20px;">
+          Glowroot UI does not support IE8 or prior
+        </p>
+        <![endif]-->
+
+        <div class="ng-cloak gt-button-message-success"
+             ng-if="displaySignOutMessage"
+             style="text-align: center; font-size: 20px; font-weight: 600;">
+            You have been signed out
+        </div>
+        <div class="ng-cloak gt-button-message-error"
+             ng-if="navbarErrorMessage"
+             style="text-align: center; font-size: 20px; font-weight: 600;">
+            {{navbarErrorMessage}}
+        </div>
+        <div class="container" id="container">
+            <!-- autoscroll=true behavior is overridden to scroll to top of page, see $uiViewScroll decorator in routes.js -->
+            <div id="push"></div>
+        </div>
+
+
+        <!-- concat:js[:distVendorJS] vendor/vendor.min.js -->
+        <script src="vendor/jquery/dist/jquery.min.js"></script>
+        <script src="vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+        <script src="vendor/angular/angular.min.js"></script>
+        <!--<script src="vendor/angular-route/angular-route.min.js"></script>-->
+        <script src="vendor/angular-sanitize/angular-sanitize.min.js"></script>
+        <script src="vendor/angular-messages/angular-messages.min.js"></script>
+        <script src="vendor/angular-ui-router/release/angular-ui-router.min.js"></script>
+        <script src="vendor/angular-block-ui/dist/angular-block-ui.min.js"></script>
+        <script src="vendor/angular-bootstrap/ui-bootstrap.min.js"></script>
+        <script src="vendor/angular-bootstrap/ui-bootstrap-tpls.min.js"></script>
+        <!--<script src="vendor/bootstrap-select/dist/js/bootstrap-select.min.js"></script>-->
+        <!--<script src="vendor/bootstrap-touchspin/dist/jquery.bootstrap-touchspin.min.js"></script>-->
+        <!--<script src="vendor/patternfly/dist/js/patternfly.min.js"></script>-->
+        <!--<script src="vendor/angular-patternfly/dist/angular-patternfly.min.js"></script>-->
+        <script src="vendor/oclazyload/dist/ocLazyLoad.min.js"></script>
+
+
+
+        <!--<script src="vendor/angular-ui-router/release/angular-ui-router.js"></script>-->
+        <!--<script src="vendor/handlebars/handlebars.runtime.js"></script>-->
+        <!-- bootstrap modal is much better than angular-ui-modal
+             in particular around dealing with vertical scrollbar to prevent background jitter -->
+        <!--<script src="vendor/bootstrap/js/modal.js"></script>-->
+        <!-- collapse is needed for the navbar on small screen (mobile) -->
+        <!--<script src="vendor/bootstrap/js/collapse.js"></script>-->
+        <!-- transition is needed for the navbar open/close effect on small screen (mobile) -->
+        <!--<script src="vendor/bootstrap/js/transition.js"></script>-->
+        <!-- dropdown is needed for bootstrap-select (used by transaction sidebar) -->
+        <!--<script src="vendor/bootstrap/js/dropdown.js"></script>-->
+        <!-- tooltip is used by copy to clipboard -->
+        <!--<script src="vendor/bootstrap/js/tooltip.js"></script>-->
+        <!-- buttons is used by button-group styled radio buttons (e.g. On/Off) -->
+        <!--<script src="vendor/angular-ui-bootstrap/src/buttons/buttons.js"></script>-->
+        <!-- dropdown is used by the trace search form (e.g. begins with / equals / ends with / contains) -->
+        <!--<script src="vendor/angular-ui-bootstrap/src/dropdown/dropdown.js"></script>-->
+        <!-- typeahead is used by instrumentation view -->
+        <!--<script src="vendor/angular-ui-bootstrap/src/typeahead/typeahead.js"></script>-->
+        <!-- position is needed by typeahead -->
+        <!--<script src="vendor/angular-ui-bootstrap/src/position/position.js"></script>-->
+        <!-- debounce is needed by typeahead -->
+        <!--<script src="vendor/angular-ui-bootstrap/src/debounce/debounce.js"></script>-->
+        <!-- modal is used for config unsaved changes confirmation -->
+        <!--<script src="vendor/angular-ui-bootstrap/src/modal/modal.js"></script>-->
+        <!-- popover is used for chart help -->
+        <!--<script src="vendor/angular-ui-bootstrap/src/popover/popover.js"></script>-->
+        <!-- tooltip is needed by popover -->
+        <!--<script src="vendor/angular-ui-bootstrap/src/tooltip/tooltip.js"></script>-->
+        <!-- stackedMap is needed by tooltip -->
+        <!--<script src="vendor/angular-ui-bootstrap/src/stackedMap/stackedMap.js"></script>-->
+        <!-- multiMap is needed by dropdown and modal -->
+        <!--<script src="vendor/angular-ui-bootstrap/src/multiMap/multiMap.js"></script>-->
+        <!--<script src="vendor/angular-ui-select/dist/select.js"></script>-->
+        <!-- angular-sanitize is needed by angular-ui-select -->
+        <script src="vendor/moment/moment.js"></script>
+        <script src="vendor/moment-timezone/builds/moment-timezone-with-data-2010-2020.js"></script>
+        <!--<script src="vendor/eonasdan-bootstrap-datetimepicker/src/js/bootstrap-datetimepicker.js"></script>-->
+        <!--<script src="vendor/bootstrap-select/js/bootstrap-select.js"></script>-->
+        <script src="vendor/flot/src/jquery.flot.js"></script>
+        <script src="vendor/flot/lib/jquery.colorhelpers.js"></script>
+        <script src="vendor/flot/lib/jquery.mousewheel.js"></script>
+        <script src="vendor/flot/src/plugins/jquery.flot.navigate.js"></script>
+        <script src="vendor/flot/src/plugins/jquery.flot.selection.js"></script>
+        <script src="vendor/flot/src/plugins/jquery.flot.time.js"></script>
+        <script src="vendor/flot/src/plugins/jquery.flot.stack.js"></script>
+        <script src="vendor/flot.tooltip/js/jquery.flot.tooltip.js"></script>
+        <!--<script src="vendor/sequeljs/web/js/parser/SqlParser.js"></script>-->
+        <!--<script src="vendor/sequeljs/web/js/parser/SqlPrettyPrinter.js"></script>-->
+        <script src="vendor/sql-formatter/dist/sql-formatter.min.js"></script>
+        <!-- /concat -->
+
+        <!-- build:js modules/App/App.bundle.min.js -->
+        <!--Todos os js são adicionados automaticamente pela task includeSource-->
+        <!-- include: "type": "js", "files": "modules/**/*.js", "ordering": "top-down" -->
+        <!-- /build -->
+        <!-- build:js modules/Components/Components.bundle.min.js -->
+        <!-- /build -->
+
+        <!-- build:js(.) scripts/vendor-flame-graph.js -->
+        <!-- large d3.js is loaded async since only needed on flame graph page
+             (but can't mark these all async which then causes failures under grunt serve since d3-tip and d3-flame-graph
+             can be loaded before d3, see grunt-usemin issue #391, and workaround in Grunfile.js)
+             also, the angular route for the flame graph page waits for window.d3 to be present (see routes.js) -->
+        <script src="vendor/d3/d3.js"></script>
+        <script src="vendor/d3-tip/index.js"></script>
+        <script src="vendor/d3-flame-graph/src/d3.flameGraph.js"></script>
+        <!-- endbuild -->
+    </body>
+</html>

@@ -1,0 +1,77 @@
+/*
+ * Copyright 2012-2016 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+.gt-full-screen-modal .modal-dialog {
+    width: auto;
+    overflow-y: scroll;
+    position: fixed;
+    left: 25px;
+    top: 25px;
+    right: 25px;
+    bottom: 25px;
+    margin: 0;
+    background-color: #fff;
+    border-top-left-radius: 6px;
+    border-bottom-left-radius: 6px;
+    border: 1px solid #aaa;
+}
+
+.gt-full-screen-modal.modal .close {
+    position: absolute;
+    right: 60px;
+    top: 35px;
+}
+
+#queryModal .gt-clip {
+    position: absolute;
+    right: 58px;
+    top: 64px;
+    z-index: 100;
+    color: #7f7f7f;
+}
+
+.modal .close {
+    z-index: 100;
+    // override bootstrap styling for modal close icon
+    // important: IE9 (haven't tried other IE versions) has strange behavior after hovering over and out of close button
+    // this override is no longer applied and the button gets very light (default bootstrap opacity .2)
+    // so bootstrap close.less is duplicated/modified to handle this
+    opacity: .4 !important;
+    font-size: 24px !important;
+}
+
+// override bootstrap styling for modal close icon
+.modal .close:hover, .modal .close:focus {
+    opacity: .6 !important;
+}
+
+@media screen and (min-width: $screen-lg-min) {
+    .trace-filters label {
+        padding-left: 0;
+    }
+}
+
+@media screen and (min-width: $screen-md-min) {
+    .gt-trace-timer-table {
+        max-width: 80%;
+    }
+}
+
+@media screen and (min-width: 1400px) {
+    .gt-trace-timer-table {
+        max-width: 85%;
+    }
+}

@@ -1,0 +1,323 @@
+<div ng-controller="TraceRenderCtrl" class="container trace-page">
+    <div class="row" ng-if="::data">
+        <div class="col-md-12">
+
+            <header class="page-header">
+                <h1>
+                    <div class="pull-right" ng-if="::data.showExport">
+                        <button class="btn btn-primary" ng-click="downloadTrace()">
+                            export
+                        </button>
+                    </div>
+                    {{::data.headline}}
+                </h1>
+            </header>
+
+            <div ng-if="::data.active">
+                <strong>ACTIVE</strong>
+            </div>
+            <div ng-if="::data.partial">
+                <strong>PARTIAL</strong>
+            </div>
+            <div ng-if="::data.error">
+                <strong>ERROR</strong>
+            </div>
+            <div ng-if="::data.async">
+                <strong>ASYNC</strong>
+            </div>
+            <div ng-if="::data.agent">
+                <strong>{{::data.agent}}</strong>
+            </div>
+
+            <dl class="dl-horizontal">
+                <dt>Transaction type:</dt>
+                <dd>{{::data.transactionType}}</dd>
+                <dt>Transaction name:</dt>
+                <dd>{{::data.transactionName}}</dd>
+                <div ng-if="::data.error">
+                    <dt>Error:</dt>
+                    <dd>{{::data.error.message}}</dd>
+                    <div ng-if="::data.error.exception">
+                        <dt>Exception:</dt>
+                        <dd>
+                            <button class="btn btn-primary">
+                                Show
+                            </button>
+                            <p>{{::data.error.exception| exceptionHtml}}</p>
+                        </dd>
+                    </div>
+                </div>
+                <dt>Start:</dt>
+                <dd>{{::data.startTime| date : 'yyyy-MM-dd HH:mm:ss.sss a (Z)'}}</dd>
+                <dt>Duration:</dt>
+                <dd>
+                    {{::data.durationNanos| gtNanosToMillis }}
+                    <span ng-if="::(data.active || data.partial)">..</span>
+                    &nbsp;milliseconds
+                </dd>
+                <div ng-if="data.user">
+                    <dt>User:</dt>
+                    <dd>{{::data.user}}</dd>
+                </div>
+
+                <!-- attributes START -->
+                <dt ng-repeat-start="(key, value) in ::data.attributes">{{::key}}:</dt>
+                <dd ng-repeat-end>{{::value}}</dd>
+                <!-- attributes END -->
+            </dl>
+
+            <div ng-if="::data.detail" ng-bind-html="::data.detail| messageDetailHtml:true"></div>
+
+
+            <!--Timers START-->
+            <div
+                gt-timer-display
+                ng-if="::data.mainThreadRootTimer"
+                heading="Breakdown"
+                sub-heading="{{::(data.auxThreadRootTimers.length ? ' (Main Thread)' : '')}}"
+                flattened-timers="data.mainBreakdown.flattenedTimers"
+                tree-timers="data.mainBreakdown.timers"
+                transaction-count="data.mainThreadRootTimer.count">
+            </div>
+
+            <div
+                gt-timer-display
+                ng-if="::data.auxThreadRootTimers.length"
+                heading="Breakdown"
+                sub-heading="{{::(data.mainThreadRootTimer ? ' (Auxiliary Thread)' : '')}}"
+                flattened-timers="data.auxBreakdown.flattenedTimers"
+                tree-timers="data.auxBreakdown.timers"
+                transaction-count="data.auxThreadRootTimers.count">
+            </div>
+
+            <div
+                gt-timer-display
+                ng-if="asyncTimers"
+                heading="Breakdown"
+                sub-heading="(Async Timers)"
+                flattened-timers="data.asyncTimers"
+                tree-timers="data.asyncTimers"
+                transaction-count="data.asyncTimers.count">
+            </div>
+            <!--Timers END-->
+
+            <!--JVM Thread Stats START-->
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="card-pf" ng-if="::data.mainThreadStats">
+                        <h2 class="card-pf-title">
+                            <p>JVM Thread Stats</p>
+                            <small ng-if="::data.auxThreadStats" style="display: block;"> (Main Thread)</small>
+                        </h2>
+                        <div class="card-pf-body">
+                            <div
+                                gt-thread-stats
+                                thread-stats="data.mainThreadStats"
+                                transaction-count="1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card-pf" ng-if="::data.auxThreadStats">
+                        <h2 class="card-pf-title">
+                            <p>JVM Thread Stats</p>
+                            <small ng-if="::data.mainThreadStats"> (Auxiliary Threads)</small>
+                        </h2>
+                        <div class="card-pf-body">
+                            <div
+                                gt-thread-stats
+                                thread-stats="data.auxThreadStats"
+                                transaction-count="1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!--JVM Thread Stats END-->
+
+            <!--Entries START-->
+            <div ng-if="::data.entriesExistence === 'yes'">
+                <div class="section-header">
+                    <h2>
+                        Trace entries <small>({{::data.entryCount}})</small>
+                        <button
+                            class="btn btn-default pull-right"
+                            ng-click="data._showEntries = true; loadEntries();"
+                            ng-if="!data._showEntries"
+                            >
+                            <span class="glyphicon glyphicon-eye-open"></span>
+                            Show
+                        </button>
+                        <button
+                            class="btn btn-default pull-right"
+                            ng-click="data._showEntries = false;"
+                            ng-if="data._showEntries"
+                            >
+                            <span class="glyphicon glyphicon-eye-close"></span>
+                            Hide
+                        </button>
+                    </h2>
+                </div>
+                <div class="row" ng-if="data._showEntries">
+                    <div ng-if="::entriesExpired" class="chart-alert">
+                        <div class="chart-alert-container">
+                            <div class="alert alert-info chart-alert-message">
+                                <span class="pficon pficon-info"></span>
+                                <span>
+                                    The trace entries have expired.
+                                </span>
+                                <span ng-if="::entriesOverwritten">
+                                    <br />
+                                    See
+                                    <a href="admin/storage#trace-capped-database-size">
+                                        Configuration &gt; Storage &gt; Trace detail data
+                                    </a>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+
+                    <trace-entries entries="entries"></trace-entries>
+                </div>
+            </div>
+            <!--Entries END-->
+
+
+            <div ng-if="::data.profileExistence === 'yes'">
+                <!--Main Thread Profiles START-->
+                <div ng-if="::data.mainThreadProfileSampleCount">
+                    <div class="section-header">
+                        <h2>
+                            Profile <small>({{::data.mainThreadProfileSampleCount}} samples)</small>
+                            <button
+                                class="btn btn-default pull-right"
+                                ng-click="data._showMainProfiles = true; loadMainThreadProfile();"
+                                ng-if="!data._showMainProfiles"
+                                >
+                                <span class="glyphicon glyphicon-eye-open"></span>
+                                Show
+                            </button>
+                            <button
+                                class="btn btn-default pull-right"
+                                ng-click="data._showMainProfiles = false;"
+                                ng-if="data._showMainProfiles"
+                                >
+                                <span class="glyphicon glyphicon-eye-close"></span>
+                                Hide
+                            </button>
+                        </h2>
+                    </div>
+                    <div class="row" ng-if="data._showMainProfiles">
+                        <div ng-if="::mainThreadProfileExpired" class="chart-alert">
+                            <div class="chart-alert-container">
+                                <div class="alert alert-info chart-alert-message">
+                                    <span class="pficon pficon-info"></span>
+                                    <span>
+                                        This trace has expired.
+                                    </span>
+                                    <span ng-if="::mainThreadProfileOverwritten">
+                                        <br />
+                                        See
+                                        <a href="admin/storage#trace-capped-database-size">
+                                            Configuration &gt; Storage &gt; Trace detail data
+                                        </a>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <profile-entries profiles="mainThreadProfile"></profile-entries>
+                    </div>
+                </div>
+                <!--Main Thread Profiles END-->
+
+
+                <!--Auxiliary Thread Profile START-->
+                <div ng-if="::(data.auxThreadProfileSampleCount)">
+                    <div class="section-header">
+                        <h2>
+                            Auxiliary Thread Profile <small>({{::data.auxThreadProfileSampleCount}} samples)</small>
+                            <button
+                                class="btn btn-default pull-right"
+                                ng-click="data._showAuxProfiles = true; loadAuxThreadProfile();"
+                                ng-if="!data._showAuxProfiles"
+                                >
+                                <span class="glyphicon glyphicon-eye-open"></span>
+                                Show
+                            </button>
+                            <button
+                                class="btn btn-default pull-right"
+                                ng-click="data._showAuxProfiles = false;"
+                                ng-if="data._showAuxProfiles"
+                                >
+                                <span class="glyphicon glyphicon-eye-close"></span>
+                                Hide
+                            </button>
+                        </h2>
+                    </div>
+                    <div class="row" ng-if="data._showAuxProfiles">
+                        <div ng-if="::auxThreadProfileExpired" class="chart-alert">
+                            <div class="chart-alert-container">
+                                <div class="alert alert-info chart-alert-message">
+                                    <span class="pficon pficon-info"></span>
+                                    <span>
+                                        This trace has expired.
+                                    </span>
+                                    <span ng-if="::mainThreadProfileOverwritten">
+                                        <br />
+                                        See
+                                        <a href="admin/storage#trace-capped-database-size">
+                                            Configuration &gt; Storage &gt; Trace detail data
+                                        </a>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <profile-entries profiles="auxThreadProfile"></profile-entries>
+                    </div>
+                </div>
+                <!--Auxiliary Thread Profile END-->
+            </div>
+
+
+
+
+
+            <!--Expired message START-->
+            <div ng-if="::(data.entriesExistence === 'expired' || data.profileExistence === 'expired')">
+                <div class="chart-alert" style="position: relative; padding: 30px 0;">
+                    <div class="chart-alert-container">
+                        <div class="alert alert-info chart-alert-message">
+                            <span class="pficon pficon-info"></span>
+
+                            <span ng-if="::(data.entriesExistence === 'expired' && data.profileExistence === 'expired')">
+                                Entries and profile for this trace have expired.
+                            </span>
+
+                            <span ng-if="::data.entriesExistence === 'expired'">
+                                Entries for this trace have expired
+                            </span>
+
+                            <span ng-if="::data.profileExistence === 'expired'">
+                                Profile for this trace has expired
+                            </span>
+
+                            <span>
+                                <br />
+                                See
+                                <a href="admin/storage#trace-capped-database-size">
+                                    Configuration &gt; Storage &gt; Trace detail data
+                                </a>
+                            </span>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!--Expired message END-->
+        </div>
+    </div>
+</div>

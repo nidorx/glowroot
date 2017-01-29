@@ -1,0 +1,154 @@
+<!--
+  Copyright 2012-2016 the original author or authors.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<div class="panel panel-default">
+  <div class="panel-heading">
+    <h2>
+      <a class="pull-right"
+         style="font-size: 16px; padding-top: 14px;"
+         href="config/gauge-list{{agentQueryString()}}">
+        Return to list
+      </a>
+      <span ng-class="{'gt-lighten-font': !loaded && !httpError}">
+        Gauges
+        <span class="gt-inline-block gt-separator">
+          |
+        </span>
+        <span style="font-size: 24px;">{{heading}}</span>
+      </span>
+    </h2>
+  </div>
+  <div class="panel-body">
+    <div ng-include src="'template/gt-loading-overlay.html'"></div>
+    <div ng-include src="'template/gt-http-error-overlay.html'"></div>
+    <div ng-if="agentNotConnected" class="alert alert-warning">
+      Limited functionality since agent is not currently connected
+    </div>
+    <div ng-form
+         gt-form-autofocus-on-first-input
+         class="form-horizontal"
+         name="formCtrl"
+         style="padding-top: 15px;">
+      <div class="form-group gt-form-group-without-help-block"
+           ng-class="{'has-error': hasMBeanObjectNameError()}">
+        <label class="col-lg-3 control-label"
+               for="mbeanObjectName{{$id}}">
+          MBean object name
+        </label>
+
+        <div class="col-lg-9">
+          <input type="text"
+                 class="form-control"
+                 ng-model="config.mbeanObjectName"
+                 ng-required="true"
+                 ng-disabled="!agentPermissions.config.edit.gauge"
+                 uib-typeahead="suggestion for suggestion in mbeanObjectNames($viewValue)"
+                 typeahead-on-select="onSelectMBeanObjectName()"
+                 ng-blur="onBlurMBeanObjectName()"
+                 name="mbeanObjectName"
+                 id="mbeanObjectName{{$id}}"
+                 style="max-width: 40em; display: inline-block">
+
+          <div gt-spinner
+               gt-spinner-inline="true"
+               gt-show="showMBeanObjectNameSpinner"
+               class="gt-inline-spinner">
+          </div>
+          <div ng-show="mbeanUnavailable"
+               class="gt-red"
+               style="padding-top: 10px;">
+            MBean not found
+          </div>
+          <div ng-show="mbeanUnmatched"
+               class="gt-red"
+               style="padding-top: 10px;">
+            No matching MBean found
+          </div>
+          <div ng-show="duplicateMBean"
+               class="gt-red"
+               style="padding-top: 10px;">
+            There is already a gauge for this MBean
+          </div>
+        </div>
+      </div>
+      <div class="form-group gt-form-group-without-help-block">
+        <label class="col-lg-3 control-label">
+          MBean attributes
+        </label>
+
+        <div class="col-lg-9">
+          <div gt-spinner
+               gt-show="mbeanAttributesLoading && !httpError"
+               class="gt-inline-spinner hide"
+               style="height: 50px;">
+          </div>
+          <table>
+            <tr ng-repeat="mbeanAttribute in allMBeanAttributes | orderBy:'name'">
+              <td class="checkbox">
+                <label>
+                  <input type="checkbox"
+                         ng-model="mbeanAttribute.checked"
+                         ng-disabled="!agentPermissions.config.edit.gauge">
+                  {{mbeanAttribute.name.replace('/', ' / ')}}
+                  <span ng-show="!mbeanAttribute.available && !mbeanUnavailable && !mbeanUnmatched"
+                        class="gt-red"
+                        style="padding-left: 10px;">
+                    Attribute not found
+                  </span>
+                </label>
+              </td>
+              <td style="padding-left: 40px;">
+                <div class="checkbox"
+                     ng-show="mbeanAttribute.checked">
+                  <label>
+                    <input type="checkbox"
+                           ng-model="mbeanAttribute.counter"
+                           ng-disabled="!agentPermissions.config.edit.gauge">
+                    Counter?
+                  </label>
+                </div>
+              </td>
+            </tr>
+          </table>
+          <div
+              ng-show="!allMBeanAttributes.length && !mbeanUnavailable && !mbeanUnmatched && config.selectedMBeanObjectName"
+              class="gt-red">
+            There are no number-valued attributes for this MBean
+          </div>
+        </div>
+      </div>
+      <div class="form-group gt-form-buttons"
+           ng-if="agentPermissions.config.edit.gauge">
+        <div class="col-lg-offset-3 col-lg-9">
+          <div gt-button-group>
+            <div gt-button
+                 gt-label="{{config.version ? 'Save changes' : 'Add'}}"
+                 gt-click="save(deferred)"
+                 gt-disabled="saveDisabled()"
+                 class="gt-inline-block">
+            </div>
+            <div gt-button
+                 ng-show="config.version"
+                 gt-label="Delete"
+                 gt-click="delete(deferred)"
+                 gt-btn-class="btn-default"
+                 class="gt-inline-block">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

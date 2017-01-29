@@ -1,0 +1,20 @@
+<div class="gt-http-error" ng-show="httpError">
+    {{httpError.headline}}<br>
+    <div class="gt-http-error-message" ng-show="httpError.message">
+        {{httpError.message}}
+    </div>
+    <a 
+        ng-click="showHttpErrorStackTrace = !showHttpErrorStackTrace"
+        ng-show="httpError.stackTrace"
+        class="gt-http-error-message"
+        href=""
+        >
+        {{showHttpErrorStackTrace ? 'hide stack trace' : 'show stack trace'}}
+    </a>
+    <div ng-show="showHttpErrorStackTrace">
+        <!-- lack of spaces around {{httpError.stackTrace}} is important since it is formatted as 'pre' -->
+        <div class="gt-http-error-stack-trace" ng-show="httpError.stackTrace">
+            {{httpError.stackTrace}}
+        </div>
+    </div>
+</div>

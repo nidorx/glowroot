@@ -1,0 +1,5 @@
+<!-- z-index 900 to keep error overlay on top of chart controls (which are at z-index 800),
+ but below date and navbar dropdown (which are at z-index 1000) -->
+<div class="gt-panel-overlay" ng-show="httpError">
+  <div ng-include src="'modules/GtApp/templates/GtHttpError.html'"></div>
+</div>

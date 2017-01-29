@@ -1,0 +1,106 @@
+<!--
+  Copyright 2015-2017 the original author or authors.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<div class="dropdown btn-group">
+    <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+        {{timeDisplay()}}
+        <span class="caret"></span>
+    </button>
+    <ul class="dropdown-menu">
+        <li
+            ng-repeat="last in rangeSelections"
+            ng-class="{selected:last === range.last}"
+            >
+            <a
+                role="menuitem"
+                tabindex="-1"
+                ng-href="#{{currentTabUrl()}}{{headerRangeQueryString(last)}}"
+                ng-click="updateLast(last, $event)"
+                >
+                {{lastDisplay(last)}}
+            </a>
+        </li>
+        <li>
+            <a ng-click="openCustomRange()">Custom range...</a>
+        </li>
+    </ul>
+
+    <div class="modal" id="customDateRangeModal" tabindex="-1">
+        <div class="modal-dialog"
+             style="max-width: 500px; font-size: 14px; ">
+            <div class="modal-content">
+                <div ng-form
+                     gt-form-with-primary-button>
+                    <div class="modal-header">
+                        <button type="button"
+                                class="close"
+                                data-dismiss="modal">
+                            &times;
+                        </button>
+                        <h4 class="modal-title">Custom date range</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="container">
+                            <div class="form-group">
+                                <label class="control-label">
+                                    From
+                                </label>
+
+                                <div class="clearfix">
+                                    <div style="width: 12em; float: left; margin-right: 10px; margin-bottom: 10px;">
+                                        <div class="input-group date" id="customDateRangeFromDate">
+                                            <input type="text" class="form-control">
+                                            <span class="input-group-addon"><span class="fa fa-calendar"></span></span>
+                                        </div>
+                                    </div>
+                                    <div style="width: 10em; float: left;">
+                                        <div class="input-group date" id="customDateRangeFromTime">
+                                            <input type="text" class="form-control">
+                                            <span class="input-group-addon"><span class="fa fa-clock-o"></span></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="control-label">
+                                    To
+                                </label>
+
+                                <div class="clearfix">
+                                    <div style="width: 12em; float: left; margin-right: 10px; margin-bottom: 10px;">
+                                        <div class="input-group date" id="customDateRangeToDate">
+                                            <input type="text" class="form-control">
+                                            <span class="input-group-addon"><span class="fa fa-calendar"></span></span>
+                                        </div>
+                                    </div>
+                                    <div style="width: 10em; float: left;">
+                                        <div class="input-group date" id="customDateRangeToTime">
+                                            <input type="text" class="form-control">
+                                            <span class="input-group-addon"><span class="fa fa-clock-o"></span></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" ng-click="applyCustomDateRange()">Apply</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

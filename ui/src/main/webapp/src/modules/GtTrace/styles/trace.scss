@@ -1,0 +1,131 @@
+
+
+.trace-page{
+
+    .list-view-pf{
+
+        .list-view-pf-description{
+            display: block;
+        }
+
+        .list-group-item-heading,
+        .list-group-item-text
+        {
+            width: 100%;
+            margin: 0;
+        }
+
+        .list-view-pf-expand{
+            margin: 0 2px 0 0;
+        }
+
+        .list-group-item .list-group-item-container{
+            padding-top: 0;
+            padding-bottom: 0;
+
+            & > .close{
+                top: 8px;
+                position: absolute;
+                right: 10px;
+            }
+
+            & > *:last-child{
+                margin-bottom: 30px;
+            }
+
+            & .entry-message{
+                margin: 0 -15px;
+                border-right: 0;
+                border-left: 0;
+                border-top: 0;
+                padding-right: 30px;
+
+                &:last-child{
+                    border-bottom: 0;
+                    margin-bottom: 0;
+                }
+            }
+        }
+    }
+
+    .trace-entries,
+    .profile-entries{
+        background: #f0f;
+
+        .list-group{
+            margin-top: 10px;
+        }
+
+        .list-group > .list-group-item{
+            border-bottom: 0;
+
+            &:last-child {
+                border-bottom: 1px solid #eaeaea;
+
+                &:hover {
+                    border-bottom: 1px solid #7dc3e8;
+                }
+            }
+
+            &.active,
+            &.list-group-item.list-view-pf-expand-active{
+                &:last-child {
+                    border-bottom: 1px solid #39a5dc;
+                }
+            }
+        }
+
+        .list-group-item.active + .list-group-item,
+        .list-group-item.list-view-pf-expand-active + .list-group-item {
+            border-top: 1px solid #39a5dc;
+        }
+
+        .trace-entries,
+        .profile-entries{
+            margin: 0 -15px;
+
+            .list-group > .list-group-item{
+                border-right: 0;
+                border-left: 0;
+                border-bottom: 0;
+
+                &:last-child {
+                    border-bottom: 1px solid #eaeaea;
+
+                    &:hover {
+                        border-bottom: 1px solid #7dc3e8;
+                    }
+                }
+            }
+
+            .list-group-item.active + .list-group-item,
+            .list-group-item.list-view-pf-expand-active + .list-group-item {
+                border-top: 1px solid #39a5dc;
+            }
+        }
+    }
+
+    .profile-entries{
+        .list-group{
+            margin: 0;
+
+            .list-group{
+
+                .list-group-item{
+                    &:first-child {
+                        border-top:0;
+                    }
+
+                    &:last-child {
+                        border-bottom: 0;
+
+                        &:hover {
+                            border-bottom: 0;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+}

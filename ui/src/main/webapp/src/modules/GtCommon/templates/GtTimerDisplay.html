@@ -1,0 +1,119 @@
+<div class="card-pf" >
+    <h2 class="card-pf-title">
+        <p>{{heading}}</p>
+        <small style="display: block;" ng-show="subHeading">
+            {{subHeading}}
+        </small>
+    </h2>
+    <div class="card-pf-body ">
+        <div class="row">
+            <table
+                class="table table-striped table-bordered table-hover"
+                ng-hide="showTreeView"
+                >
+                <thead>
+                    <tr>
+                        <td></td>
+                        <td style="width: 80px;">total&nbsp;(ms)</td>
+                        <td style="width: 50px;">count</td>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="align-top"
+                        ng-repeat="flattenedTimer in flattenedTimers| filter:{show: true}">
+                        <td style="text-align: left;">
+                            <div class="gt-indent2">
+                                <div class="gt-break-word gt-second-line-indent">{{flattenedTimer.name}}</div>
+                            </div>
+                        </td>
+                        <td>{{flattenedTimer.totalNanos / (1000000 * transactionCount) | gtMillis}}</td>
+                        <td>{{flattenedTimer.count / transactionCount| gtCount}}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+
+            <table
+                class="gt-timers-table gt-inline-block table table-striped table-bordered table-hover"
+                ng-show="showTreeView"
+                >
+                <thead>
+                    <tr>
+                        <td></td>
+                        <td style="width: 80px;">total&nbsp;(ms)</td>
+                        <td style="width: 50px;">count</td>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="align-top"
+                        ng-repeat="treeTimer in treeTimers| filter:{show: true}">
+                        <td style="text-align: left;">
+                            <div class="gt-indent2">
+                                <div class="gt-break-word gt-second-line-indent" ng-style="{'margin-left': treeTimer.nestingIndent + 'px'}">
+                                    {{treeTimer.name}}{{treeTimer.extended ? ' (extended)' : ''}}
+                                </div>
+                            </div>
+                        </td>
+                        <td>{{treeTimer.totalNanos / (1000000 * transactionCount) | gtMillis}}</td>
+                        <td>{{treeTimer.count / transactionCount| gtCount}}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card-pf-footer">
+        <div class="dropdown card-pf-time-frame-filter">
+            <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown">
+                {{showTreeView ? 'Tree':'Flat'}} <span class="caret"></span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-right" role="menu">
+                <li class="selected">
+                    <a href="#" ng-click="showTreeView = false; $event.preventDefault()">
+                        Flat
+                    </a>
+                </li>
+                <li>
+                    <a href="#" ng-click="showTreeView = true; $event.preventDefault()">
+                        Tree
+                    </a>
+                </li>
+            </ul>
+        </div>
+        <p>
+            <a
+                href="#"
+                class="btn btn-default"
+                ng-click="clickShowMore(); $event.preventDefault()"
+                ng-if="ftShowMore || ttShowMore"
+                >
+                Show more
+            </a>
+            <a
+                href="#"
+                class="btn btn-default"
+                ng-click="clickShowAll(); $event.preventDefault()"
+                ng-if="ftShowMore || ttShowMore"
+                >
+                Show all
+            </a>
+            <a
+                href="#"
+                class="btn btn-default"
+                ng-click="clickShowLessTT(); $event.preventDefault()"
+                ng-if="showTreeView && showLess"
+                >
+                Show less
+            </a>
+            <a
+                href="#"
+                class="btn btn-default"
+                ng-click="clickShowLessFT(); $event.preventDefault()"
+                ng-if="!showTreeView && showLess"
+                >
+                Show less
+            </a>
+        </p>
+        <div class="clearfix"></div>
+    </div>
+</div>

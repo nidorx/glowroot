@@ -1,0 +1,70 @@
+<div ng-if="::profiles" class="profile-entries">
+    <!--entries-->
+    <ul
+        class="list-group list-view-pf list-view-pf-view"
+        >
+        <li class="list-group-item"
+            ng-class="{'list-view-pf-expand-active': (aux._active === entry && entry.childEntries)}"
+            ng-animate="'animate'"
+            ng-repeat="entry in ::profiles track by entry.index"
+            >
+
+            <div
+                class="list-group-item-header"
+                ng-click="aux._active = aux._active === entry ? null : entry"
+                >
+                <div class="list-view-pf-expand" >
+                    <span
+                        class="fa"
+                        ng-if="::entry.childEntries"
+                        ng-class="{'fa-angle-down': aux._active === entry, 'fa-angle-right': aux._active !== entry}"
+                        >
+                    </span>
+                    <span
+                        class="fa fa-circle-o"
+                        ng-if="::!entry.childEntries"
+                        style="color: transparent;"
+                        >
+                    </span>
+                </div>
+                <div class="list-view-pf-main-info">
+                    <div class="list-view-pf-left" style="align-self: center;">
+                        <span style="display: block; text-align: right; width: 40px;">
+                            {{::entry.samplePercentage | gtFormatPercent}} %
+                        </span>
+                    </div>
+                    <div class="list-view-pf-body">
+                        <div class="list-view-pf-description">
+                            <div class="list-group-item-heading">
+                                <div
+                                    class="pull-right"
+                                    >
+                                    <span
+                                        class="badge"
+                                        ng-if="::entry.leafThreadState"
+                                        title="Java Thread State"
+                                        >
+                                        {{::entry.leafThreadState}}
+                                    </span>
+                                    <span
+                                        ng-if="::entry.childEntries"
+                                        class="glyphicon glyphicon-indent-left"
+                                        title="Drilldown"
+                                        >
+                                    </span>
+                                </div>
+                                {{::entry.stackTraceElement}}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div
+                class="list-group-item-container container-fluid"
+                ng-if="entry.childEntries && aux._active === entry"
+                >
+                <profile-entries profiles="entry.childEntries"></profile-entries>
+            </div>
+        </li>
+    </ul>
+</div>

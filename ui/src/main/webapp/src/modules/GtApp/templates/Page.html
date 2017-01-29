@@ -1,0 +1,39 @@
+<div ng-controller="PageCtrl" id="page-wraper" block-ui="main" ng-cloak>
+
+    <!--Menu superior, header-->
+    <div ng-include="'modules/GtApp/templates/NavBar.html'"></div>
+
+    <div class="container main-container" id="page-content-container">
+        <ol class="breadcrumb" ng-if="page.breadcrumb.length > 0">
+            <li ng-repeat="item in page.breadcrumb">
+                <a ui-sref="{{item.sref}}" ng-if="item.sref">{{item.title}}</a>
+                <span ng-if="!item.sref">{{item.title}}</span>
+            </li>
+            <li>{{page.title}}</li>
+        </ol>
+
+        <header class="page-header {{page.titleClass}}">
+            <h1>{{page.title}}</h1>
+            <p class="lead" ng-if="page.subTitle">{{page.subTitle}}</p>
+        </header>
+
+        <!--Exibe mensagens de notificações gerais-->
+        <tc-notitication></tc-notitication>
+
+        <!--conteúdo da página-->
+        <div ui-view></div>
+
+        <div class="row" id="footer">
+            <div class="pull-right text-muted text-right">
+                <a href="https://glowroot.org">
+                    <img src="modules/GtApp/img/logo_2.png" height="15" data-pin-nopin="true">
+                    <strong>Glowroot</strong>
+                </a>
+                <div>
+                    <small>{{layout.footerMessage}}</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+

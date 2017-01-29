@@ -1,0 +1,126 @@
+<!--
+  Copyright 2015-2016 the original author or authors.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<div ng-controller="TransactionTabTimePercentilesCtrl">
+    <div ng-include src="'modules/GtApp/templates/GtHttpErrorOverlay.html'"></div>
+
+    <div ng-include src="'modules/GtTransaction/templates/ChartActions.html'"></div>
+
+
+    <div class="gt-chart-container ">
+        <div class="gt-chart-dimensions" id="chart"></div>
+        <div ng-show="chartNoData && !showChartSpinner" class="chart-alert">
+            <div class="chart-alert-container">
+                <div class="alert alert-info chart-alert-message">
+                    <span class="pficon pficon-info"></span>
+                    <span>
+                        No data for this time period
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="legend chart-lengend" id="chartLegend" ng-hide="chartNoData">
+        <div class="chart-lengend-item" ng-repeat="seriesLabel in seriesLabels">
+            <div class="chart-lengend-item-color-box">
+                <div
+                    class="chart-lengend-item-color-box-color"
+                    ng-style="{'border-color': ''+ seriesLabel.color}"
+                    >
+                </div>
+            </div>
+            <div class="chart-lengend-item-label gt-inline-block">
+                {{seriesLabel.text}}
+            </div>
+        </div>
+    </div>
+
+    <div ng-if="mergedAggregate.transactionCount">
+        <div class="section-header">
+            <h2>Current percentiles</h2>
+            <button
+                class="btn btn-default pull-right"
+                ng-click="openCustomPercentilesModal();"
+                title="Change currently displayed percentiles"
+                >
+                <span class="glyphicon glyphicon-cog"></span>
+                Change
+            </button>
+        </div>
+        <dl class="dl-horizontal">
+            <dt ng-repeat-start="percentile in mergedAggregate.percentileValues">
+                {{percentile.dataSeriesName}}:
+            </dt>
+            <dd ng-repeat-end>
+                {{percentile.value / 1000000| gtMillis}} ms
+            </dd>
+        </dl>
+    </div>
+    <div class="modal" id="customPercentilesModal" tabindex="-1">
+        <div class="modal-dialog"
+             style="max-width: 500px;">
+            <div class="modal-content">
+                <div ng-form name="formCtrl">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">
+                            &times;
+                        </button>
+                        <h4 class="modal-title">Currently displayed percentiles</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div ng-form="customPercentilesForm" class="form-group"
+                             ng-class="{'has-error': customPercentilesForm.customPercentiles.$invalid}">
+
+                            <div class="form-group">
+                                <label for="customPercentiles">
+                                    Comma-separated percentiles
+                                </label>
+
+                                <input
+                                    id="customPercentiles"
+                                    name="customPercentiles"
+                                    class="form-control"
+                                    ng-model="customPercentiles"
+                                    ng-pattern="pattern.percentileList"
+                                    >
+
+                                <p class="help-block">
+                                    Custom list of percentiles to display.
+                                    <br/>
+                                    <a href="http://hdrhistogram.github.io/HdrHistogram/">HdrHistogram</a> is used to bucket and store the
+                                    full range of values so that any percentile value can be reported with at most 1% error,
+                                    e.g. if the 99.9<sup>th</sup> percentile is reported as 1400 milliseconds, then that would be at most
+                                    14 milliseconds from the true 99.9<sup>th</sup> percentile value.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button
+                            type="button"
+                            class="btn btn-primary"
+                            ng-disabled="formCtrl.$invalid"
+                            ng-click="applyCustomPercentiles()"
+                            >
+                            Apply
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

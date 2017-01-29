@@ -1,0 +1,57 @@
+<!--
+  Copyright 2015-2016 the original author or authors.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<div ng-controller="TransactionSidebarCtrl">
+    <div class="form-group">
+        <label>Sort order</label>
+        <select  class="combobox form-control" ng-model="$parent.summarySortOrder">
+            <option ng-repeat="(value, display) in summarySortOrders" value="{{value}}">
+                {{display}}
+            </option>
+        </select>
+    </div>
+
+    <div class="alert alert-info" ng-show="!summariesLoadingMore && (summariesNoData || summariesNoSearch)">
+        <span class="pficon pficon-info"></span>
+        No data for this time period.
+    </div>
+
+    <div class="list-group" ng-if="transactionSummaries.length">
+        <a
+            class="list-group-item"
+            href="#{{currentTabUrl()}}{{sidebarQueryString(null)}}"
+            ng-class="{active: !model.transactionName}"
+            >
+            <small class="pull-right">{{overallSummaryValue()}}</small>
+            {{'All ' + model.transactionType + ' Transactions'}}
+        </a>
+        <a
+            ng-repeat="transactionSummary in transactionSummaries"
+            href="#{{currentTabUrl()}}{{sidebarQueryString(transactionSummary.transactionName)}}"
+            class="list-group-item"
+            ng-class="{active: model.transactionName === transactionSummary.transactionName}"
+            >
+            <small class="pull-right">{{transactionSummaryValue(transactionSummary)}}</small>
+            {{transactionSummary.transactionName}}
+        </a>
+        <button
+            class="list-group-item selectable-list-group-item"
+            ng-if="moreSummariesAvailable"
+            ng-click="showMoreSummaries()"
+            >
+            <span class="text-center" style="display: block;">Show more</span>
+        </button>
+    </div>
+</div>

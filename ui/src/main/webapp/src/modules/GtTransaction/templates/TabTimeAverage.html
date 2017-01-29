@@ -1,0 +1,135 @@
+<!--
+  Copyright 2015-2016 the original author or authors.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<div ng-controller="TransactionTabTimeAverageCtrl" >
+    <div ng-include src="'modules/GtApp/templates/GtHttpErrorOverlay.html'"></div>
+
+    <div ng-include src="'modules/GtTransaction/templates/ChartActions.html'"></div>
+
+    <div>
+        <!-- negative position is so that overlay will cover chart legend which sometimes stick beyond container -->
+
+        <div class="gt-chart-container">
+            <div class="gt-chart-dimensions" id="chart"></div>
+
+            <div ng-show="chartNoData && !showChartSpinner" class="chart-alert">
+                <div class="chart-alert-container">
+                    <div class="alert alert-info chart-alert-message">
+                        <span class="pficon pficon-info"></span>
+                        <span>
+                            No data for this time period
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="legend chart-lengend" id="chartLegend" ng-hide="chartNoData">
+            <div
+                class="chart-lengend-item"
+                ng-repeat="seriesLabel in seriesLabels"
+                >
+                <div class="chart-lengend-item-color-box">
+                    <div
+                        class="chart-lengend-item-color-box-color"
+                        ng-style="{'border-color': ''+ seriesLabel.color}"
+                        >
+                    </div>
+                </div>
+                <div class="chart-lengend-item-label gt-inline-block">
+                    {{seriesLabel.text}}
+                </div>
+            </div>
+        </div>
+
+
+        <div ng-if="mergedAggregate.transactionCount" class="row" style="margin-top: 30px;">
+            <div class="col-md-8">
+                <div
+                    ng-if="mainThreadFlattenedTimers.length"
+                    gt-timer-display
+                    heading="Breakdown"
+                    sub-heading="{{auxThreadFlattenedTimers.length ? ' (Main Thread)' : ''}}"
+                    flattened-timers="mainThreadFlattenedTimers"
+                    tree-timers="mainThreadTreeTimers"
+                    transaction-count="mergedAggregate.transactionCount">
+                </div>
+
+                <div
+                    ng-if="auxThreadFlattenedTimers.length"
+                    gt-timer-display
+                    heading="Breakdown"
+                    sub-heading="{{mainThreadFlattenedTimers.length ? ' (Auxiliary Thread)' : ''}}"
+                    flattened-timers="auxThreadFlattenedTimers"
+                    tree-timers="auxThreadTreeTimers"
+                    transaction-count="mergedAggregate.transactionCount">
+                </div>
+
+                <div ng-if="mergedAggregate.asyncTimers.length" style="margin-top: 10px;">
+                    <table class="gt-timers-table gt-inline-block" style="border-spacing: 0;">
+                        <thead>
+                            <tr>
+                                <td class="gt-breakdown-header gt-bold" style="text-align: left;">Breakdown (Async Timers):</td>
+                                <td class="gt-breakdown-header" style="font-weight: 600;">total&nbsp;(ms)</td>
+                                <td class="gt-breakdown-header" style="font-weight: 600;">count</td>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="align-top"
+                                ng-repeat="asyncTimer in mergedAggregate.asyncTimers">
+                                <td style="text-align: left;">
+                                    <div class="gt-indent2">
+                                        <div class="gt-break-word gt-second-line-indent">{{asyncTimer.name}}</div>
+                                    </div>
+                                </td>
+                                <td>{{asyncTimer.totalNanos / (1000000 * mergedAggregate.transactionCount) | gtMillis}}</td>
+                                <td>{{asyncTimer.count / mergedAggregate.transactionCount| gtCount}}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card-pf" ng-if="mergedAggregate.mainThreadStats">
+                    <h2 class="card-pf-title">
+                        <p>JVM Thread Stats</p>
+                        <small ng-if="mergedAggregate.auxThreadStats" style="display: block;"> (Main Thread)</small>
+                    </h2>
+                    <div class="card-pf-body">
+                        <div
+                            gt-thread-stats
+                            thread-stats="mergedAggregate.mainThreadStats"
+                            transaction-count="mergedAggregate.transactionCount">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-pf" ng-if="mergedAggregate.auxThreadStats">
+                    <h2 class="card-pf-title">
+                        <p>JVM Thread Stats</p>
+                        <small ng-if="mergedAggregate.mainThreadStats"> (Auxiliary Threads)</small>
+                    </h2>
+                    <div class="card-pf-body">
+                        <div
+                            gt-thread-stats
+                            thread-stats="mergedAggregate.auxThreadStats"
+                            transaction-count="mergedAggregate.transactionCount">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

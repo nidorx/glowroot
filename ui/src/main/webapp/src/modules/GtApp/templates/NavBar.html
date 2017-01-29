@@ -1,0 +1,122 @@
+<nav
+    class="navbar navbar-default navbar-pf container"
+    id="top-navbar"
+    role="navigation"
+    ng-controller="NavBarCtrl"
+    ng-cloak
+    >
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse-1">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="/">
+            <h1>
+                <span class="glow-logo">
+                    <span>Glowroot</span>
+                </span>
+                <small>Open source Java APM</small>
+            </h1>
+        </a>
+    </div>
+    <div class="collapse navbar-collapse navbar-collapse-1">
+
+        <ul class="nav navbar-nav navbar-utility">
+            <li class="dropdown">
+                <a href="javascript:void(0)" class="dropdown-toggle" data-toggle="dropdown">
+                    <span class="glyphicon glyphicon-cog"></span>
+                    <b class="caret"></b>
+                </a>
+                <ul class="dropdown-menu">
+                    <li>
+                        <a href="javascript:void(0)">
+                            Agent configuration
+                        </a>
+                    </li>
+                    <li>
+                        <a href="javascript:void(0)">
+                            Configuration
+                        </a>
+                    </li>
+                    <li>
+                        <a href="javascript:void(0)">
+                            Administration
+                        </a>
+                    </li>
+                    <li>
+                        <a href="javascript:void(0)">
+                            Login
+                        </a>
+                    </li>
+                    <li>
+                        <a href="javascript:void(0)">
+                            Change my password
+                        </a>
+                    </li>
+                    <li>
+                        <a href="javascript:void(0)">
+                            Sign out
+                        </a>
+                    </li>
+                </ul>
+            </li>
+        </ul>
+
+        <ul class="nav navbar-nav navbar-primary">
+            <li class="dropdown" ng-class="{active:$state.includes('page.transaction.**')}">
+                <a
+                    href="javascript:void()"
+                    class="dropdown-toggle"
+                    data-toggle="dropdown"
+                    aria-expanded="false"
+                    >
+                    Transactions
+                    <b class="caret"></b>
+                </a>
+                <ul class="dropdown-menu dropup">
+                    <li ui-sref-active="active" >
+                        <a ui-sref="page.transaction.detail.time.average({'transaction-type':'Web'})">
+                            Web
+                        </a>
+                    </li>
+                    <li ui-sref-active="active">
+                        <a ui-sref="page.transaction.detail.time.average({'transaction-type':'Startup'})">
+                            Startup
+                        </a>
+                    </li>
+                </ul>
+            </li>
+            <li class="dropdown" ng-class="{active:$state.includes('page.error.**')}">
+                <a
+                    href="javascript:void()"
+                    class="dropdown-toggle"
+                    data-toggle="dropdown"
+                    aria-expanded="false"
+                    >
+                    Errors
+                    <b class="caret"></b>
+                </a>
+                <ul class="dropdown-menu dropup">
+                    <li ui-sref-active="active" >
+                        <a ui-sref="page.error.detail.messages({'transaction-type':'Web'})">
+                            Web
+                        </a>
+                    </li>
+                    <li ui-sref-active="active">
+                        <a ui-sref="page.error.detail.messages({'transaction-type':'Startup'})">
+                            Startup
+                        </a>
+                    </li>
+                </ul>
+            </li>
+            <li ng-class="{active:$state.includes('page.jvm.*')}">
+                <a ui-sref="private.cliente.listaAgendamento">JVM</a>
+            </li>
+            <li ng-class="{active:$state.includes('page.reports.*')}">
+                <a ui-sref="private.cliente.listaAgendamento">Reports</a>
+            </li>
+        </ul>
+    </div>
+</nav>

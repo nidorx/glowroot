@@ -1,0 +1,169 @@
+<div ng-if="::entries" class="trace-entries">
+    <!--entries-->
+    <ul
+        class="list-group list-view-pf list-view-pf-view"
+        >
+        <li class="list-group-item"
+            ng-class="{'list-view-pf-expand-active': (aux._active === entry)}"
+            ng-animate="'animate'"
+            ng-repeat="entry in entries| gtStartFrom:pagination | limitTo:pagination.limit track by entry.index"
+            >
+
+            <div
+                class="list-group-item-header"
+                ng-click="aux._active = aux._active === entry ? null : entry"
+                >
+                <div class="list-view-pf-expand" >
+                    <span
+                        class="fa"
+                        ng-class="{'fa-angle-down': aux._active === entry, 'fa-angle-right': aux._active !== entry}"
+                        >
+                    </span>
+                </div>
+                <div class="list-view-pf-main-info">
+                    <div class="list-view-pf-left" style="align-self: center;">
+                        <trace-entry-bar
+                            entry="entry"
+                            trace-duration-nanos="traceDurationNanos"
+                            >
+                        </trace-entry-bar>
+                    </div>
+                    <div class="list-view-pf-body">
+                        <div class="list-view-pf-description">
+                            <div class="list-group-item-heading">
+                                <div
+                                    ng-if="::(entry.childEntries || entry.error.exception || entry.locationStackTraceElements)"
+                                    class="pull-right"
+                                    >
+                                    <span
+                                        ng-if="::entry.childEntries"
+                                        class="glyphicon glyphicon-indent-left"
+                                        title="Drilldown"
+                                        >
+                                    </span>
+                                    <span
+                                        ng-if="::entry.error.exception"
+                                        class="glyphicon glyphicon-warning-sign"
+                                        title="Exception"
+                                        >
+                                    </span>
+                                    <span
+                                        ng-if="::entry.locationStackTraceElements"
+                                        class="glyphicon glyphicon-list-alt"
+                                        title="Stack Trace"
+                                        >
+                                    </span>
+                                </div>
+                                {{::(entry.message
+                                            || entry.error.message
+                                            || entry.queryMessage.sharedQueryText.fullText
+                                            || entry.queryMessage.prefix + entry.queryMessage.sharedQueryText.truncatedText
+                                            )}}
+                            </div>
+                            <div ng-if="::entry.detail" class="list-group-item-text">
+                                {{::entry.detail| messageDetailHtml }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="list-group-item-container container-fluid" ng-show="aux._active === entry">
+                <div class="close" ng-click="aux._active = null">
+                    <span class="pficon pficon-close"></span>
+                </div>
+
+                <entry-message entry="entry" agent-rollup-id="agentRollupId"></entry-message>
+
+                <!--Exception START-->
+                <div ng-if="::entry.error.exception">
+                    <div class="section-header">
+                        <h2>
+                            Exception
+                        </h2>
+                        <button
+                            class="btn btn-default pull-right"
+                            ng-click="entry._showException = true;"
+                            ng-if="!entry._showException"
+                            >
+                            <span class="glyphicon glyphicon-eye-open"></span>
+                            Show
+                        </button>
+                        <button
+                            class="btn btn-default pull-right"
+                            ng-click="entry._showException = false;"
+                            ng-if="entry._showException"
+                            >
+                            <span class="glyphicon glyphicon-eye-close"></span>
+                            Hide
+                        </button>
+                    </div>
+                    <div
+                        ng-if="entry._showException"
+                        ng-bind-html="::entry.error.exception | exceptionHtml"
+                        >
+                    </div>
+                </div>
+                <!--Exception END-->
+
+                <!--Location stack trace START-->
+                <div ng-if="::entry.locationStackTraceElements">
+                    <div class="section-header">
+                        <h2>
+                            Location stack trace
+                            <button
+                                class="btn btn-default pull-right"
+                                ng-click="entry._showLocationStack = true;"
+                                ng-if="!entry._showLocationStack"
+                                >
+                                <span class="glyphicon glyphicon-eye-open"></span>
+                                Show
+                            </button>
+                            <button
+                                class="btn btn-default pull-right"
+                                ng-click="entry._showLocationStack = false;"
+                                ng-if="entry._showLocationStack"
+                                >
+                                <span class="glyphicon glyphicon-eye-close"></span>
+                                Hide
+                            </button>
+                        </h2>
+                    </div>
+                    <pre
+                        ng-if="entry._showLocationStack"
+                        ng-bind-html="::entry.locationStackTraceElements | locationStackTraceHtml"
+                        >
+                    </pre>
+                </div>
+                <!--Location stack trace START-->
+
+                <!-- Child entries START-->
+                <trace-entries
+                    ng-if="entry.childEntries && aux._active === entry"
+                    entries="entry.childEntries"
+                    >
+                </trace-entries>
+                <!-- Child entries START-->
+            </div>
+        </li>
+    </ul>
+
+    <div class="form-buttons col-md-12 ng-scope" ng-show="pagination.total > pagination.limit">
+        <div class="text-right form-buttons-content" style="border: 0;">
+            <ul
+                uib-pagination
+                ng-model="pagination.current"
+                total-items="pagination.total"
+                items-per-page="pagination.limit"
+                max-size="10"
+                boundary-links="true"
+                force-ellipses="true"
+                style="vertical-align: middle;"
+                first-text="&laquo;"
+                previous-text="&lsaquo;"
+                next-text="&rsaquo;"
+                last-text="&raquo;"
+                >
+            </ul>
+        </div>
+    </div>
+</div>

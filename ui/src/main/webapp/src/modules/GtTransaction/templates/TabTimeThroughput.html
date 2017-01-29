@@ -1,0 +1,63 @@
+<!--
+  Copyright 2015-2016 the original author or authors.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<div ng-controller="TransactionTabTimeThroughputCtrl">
+    <div ng-include src="'modules/GtApp/templates/GtHttpErrorOverlay.html'"></div>
+
+    <div ng-include src="'modules/GtTransaction/templates/ChartActions.html'"></div>
+
+    <div >
+
+        <div class="gt-chart-container">
+            <div class="gt-chart-dimensions" id="chart"></div>
+
+            <div ng-show="chartNoData && !showChartSpinner" class="chart-alert">
+                <div class="chart-alert-container">
+                    <div class="alert alert-info chart-alert-message">
+                        <span class="pficon pficon-info"></span>
+                        <span>
+                            No data for this time period
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div ng-if="transactionCount">
+            <div class="section-header">
+                <h2>Throughput</h2>
+            </div>
+            <dl class="dl-horizontal">
+                <dt>
+                    transactions per minute:
+                </dt>
+                <dd>
+                    {{transactionsPerMin| gtCount}}
+                    <small>
+                        ({{transactionCount| number}}
+                        <span
+                            ng-pluralize
+                            count="transactionCount"
+                            when="{'1':'transaction','other':'transactions'}"
+                            >
+                        </span>
+                        in this period)
+                    </small>
+                </dd>
+            </dl>
+
+        </div>
+    </div>
+</div>

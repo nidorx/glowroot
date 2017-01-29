@@ -1,0 +1,78 @@
+<!--
+  Copyright 2015-2016 the original author or authors.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<div ng-controller="TransactionTabsCtrl">
+    <ul class="nav nav-tabs">
+        <li ng-class="{active: $state.includes('page.transaction.detail.time.*')}">
+            <a ui-sref="page.transaction.detail.time.average(stateParams)">
+                <i class="glyphicon glyphicon-time"></i>
+                <span class="hidden-xs">Response time</span>
+            </a>
+        </li>
+
+        <li 
+            ng-class="{active: $state.is('page.transaction.detail.traces')}"
+            ng-if="agentPermissions.transaction.traces"
+            >
+            <a ui-sref="page.transaction.detail.traces(stateParams)">                
+                <i class="glyphicon glyphicon glyphicon-hourglass"></i>
+                <span class="hidden-xs">
+                    {{model.transactionType === 'Startup' ? 'Traces' : 'Slow traces'}} ({{traceCountDisplay()}})
+                </span>
+            </a>
+        </li>
+
+        <li ng-class="{active: $state.is('page.transaction.detail.queries')}">
+            <a ui-sref="page.transaction.detail.queries(stateParams)">
+                <i class="glyphicon glyphicon-list-alt"></i>
+                <span class="hidden-xs">Queries</span>
+            </a>
+        </li>
+
+        <li ng-class="{active: $state.is('page.transaction.detail.services')}">
+            <a ui-sref="page.transaction.detail.services(stateParams)">
+                <i class="glyphicon glyphicon-transfer"></i>
+                <span class="hidden-xs">Service calls</span>
+            </a>
+        </li>
+
+        <li ng-class="{active: $state.is('page.transaction.detail.threadProfile')}">
+            <a ui-sref="page.transaction.detail.threadProfile(stateParams)">
+                <i class="glyphicon glyphicon-dashboard"></i>
+                <span class="hidden-xs">Continuous profiling</span>
+            </a>
+        </li>
+    </ul>
+    <!--
+    @see TransactionAverage.html, TransactionPercentiles.html & TransactionThroughput.html
+    -->
+    <ul class="nav nav-tabs nav-tabs-pf" ng-if="$state.includes('page.transaction.detail.time.*')">
+        <li ng-class="{active: $state.is('page.transaction.detail.time.average')}">
+            <a ui-sref="page.transaction.detail.time.average(stateParams)">
+                Average
+            </a>
+        </li>
+        <li ng-class="{active: $state.is('page.transaction.detail.time.percentiles')}">
+            <a ui-sref="page.transaction.detail.time.percentiles(stateParams)">
+                Percentiles
+            </a>
+        </li>
+        <li ng-class="{active: $state.is('page.transaction.detail.time.throughput')}">
+            <a ui-sref="page.transaction.detail.time.throughput(stateParams)">
+                Throughput
+            </a>
+        </li>
+    </ul>
+</div>

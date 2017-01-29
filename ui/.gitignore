@@ -2,3 +2,7 @@
 /node_modules/
 /bower_components/
 /.tmp/
+/src/main/webapp/nbproject/private/
+/src/main/webapp/dist/
+/src/main/webapp/node_modules/
+/src/main/webapp/src/vendor/

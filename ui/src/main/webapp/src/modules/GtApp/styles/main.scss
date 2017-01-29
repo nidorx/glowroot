@@ -1,0 +1,400 @@
+/*
+ * Copyright 2012-2017 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+@import "common-trace";
+@import "chart";
+@import "transaction-sidebar";
+/*@import "traces";*/
+/*@import "report";*/
+@import "variables";
+
+$navbar-height: 50px;
+$navbar-inverse-bg: $gt-primary-color;
+$navbar-inverse-link-active-bg: darken($navbar-inverse-bg, 5%);
+$navbar-inverse-link-color: #e8e8e8;
+
+$input-border-focus: $gt-blue;
+
+$btn-primary-color: #f8f8f8;
+
+$brand-primary: $gt-blue;
+
+$state-danger-text: $gt-red;
+
+.gt-header {
+  font-size: 36px;
+  padding: 30px 0 40px;
+}
+
+.gt-header-page-name {
+  font-size: 36px;
+  color: $gt-page-title-color;
+  font-weight: 700;
+}
+
+.gt-header-page-name li a {
+  font-size: 22px;
+  cursor: pointer;
+  // padding to align left side with dropdown header
+  padding: 3px 12px;
+}
+
+.gt-header-menu {
+  color: #555;
+  font-weight: normal;
+  font-size: 32px;
+}
+
+.gt-header-page-name li a:hover, ul.nav li.dropdown > ul.dropdown-menu > li a:hover {
+  background-color: #edeae4;
+}
+
+.bootstrap-select .dropdown-menu {
+  // override default dropdown font-size 16px
+  font-size: 14px;
+}
+
+.gt-header-page-name .dropdown-toggle {
+  // 30px matches font size of panel header below it
+  font-size: 30px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-block;
+  padding: 3px 20px 4px;
+  background: #edeae4;
+  border-radius: 8px;
+  color: inherit;
+}
+
+.gt-header-page-name .dropdown-toggle:hover,
+.gt-header-page-name .dropdown-toggle:focus {
+  background-color: darken(#edeae4, 5%);
+  text-decoration: none;
+}
+
+.gt-header-page-name .gt-separator {
+  font-size: 54px;
+  font-weight: 400;
+  margin-left: -4px;
+  margin-right: -4px;
+  vertical-align: -4px;
+}
+
+.gt-header-page-name .dropdown-menu {
+  margin-top: 5px;
+  min-width: 100%;
+  border-radius: 8px;
+}
+
+
+// since the angular script is not loaded in the html head, the ng-cloak css style must be provided here
+.ng-cloak {
+  display: none !important;
+}
+
+.gt-inline-spinner {
+  // relative position needed for spinner
+  position: relative;
+  display: inline-block;
+  // using padding-left because margin-left works in chrome and IE but not firefox
+  padding-left: 32px;
+  vertical-align: middle;
+}
+
+.gt-http-error {
+  color: #660099;
+  font-size: 24px;
+  padding-left: 30px;
+  font-weight: bold;
+  font-family: Cousine, monospace;
+}
+
+// margin at top of config pages pushes down entire sidebar
+.gt-http-error {
+  margin-top: 0;
+}
+
+// put back margin inside of panels
+.gt-panel-overlay .gt-http-error {
+  margin-top: 20px;
+}
+
+.gt-http-error a {
+  color: #660099;
+  text-decoration: underline;
+}
+
+.gt-http-error a:hover {
+  color: lighten(#660099, 15);
+}
+
+.gt-http-error-message {
+  font-size: 18px;
+  padding-top: 5px;
+  // not sure what this error message might contain
+  // grunt connect server, for example, returns json string with no spaces so need to break-word
+  word-wrap: break-word;
+}
+
+.gt-http-error-stack-trace {
+  font-size: 14px;
+  overflow-x: visible;
+  // no line wrapping so stack trace will look nice
+  white-space: pre;
+  padding-top: 5px;
+  // padding-bottom gives stack trace a bit of padding from the bottom of the page
+  padding-bottom: 100px;
+}
+
+.gt-secondary-text {
+  color: #737373;
+}
+
+.gt-large-caret {
+  @extend .caret;
+  border-top: 6px solid;
+  border-right: 6px solid transparent;
+  border-left: 6px solid transparent;
+}
+
+hr.soften {
+  height: 1px;
+  margin-left: 50px;
+  margin-right: 50px;
+  background-image: -webkit-linear-gradient(left, rgba(0, 0, 0, 0), rgba(0, 0, 0, .1), rgba(0, 0, 0, 0));
+  background-image: -moz-linear-gradient(left, rgba(0, 0, 0, 0), rgba(0, 0, 0, .1), rgba(0, 0, 0, 0));
+  background-image: -ms-linear-gradient(left, rgba(0, 0, 0, 0), rgba(0, 0, 0, .1), rgba(0, 0, 0, 0));
+  background-image: -o-linear-gradient(left, rgba(0, 0, 0, 0), rgba(0, 0, 0, .1), rgba(0, 0, 0, 0));
+  border: 0;
+}
+
+.bootstrap-select .selected {
+  display: none;
+}
+
+.gt-transaction-tabs {
+  margin-bottom: 20px;
+  margin-left: -10px;
+  margin-right: -10px;
+  padding-left: 10px;
+}
+
+.modal-header {
+  // this is to match padding on modal-body
+  padding-left: 30px;
+}
+
+.input-group-left button {
+  border-right-width: 0;
+}
+
+.has-error .input-group-left button {
+  border-color: $gt-red;
+}
+
+.gt-transaction-tabs li.active > a:hover {
+  // keep default (pointer) cursor to indicate active tab can be clicked to refresh tab
+  cursor: inherit;
+}
+
+.list-group-item:focus {
+  // need higher z-index so outline won't get hidden by adjacent list-group-item
+  z-index: 3;
+}
+
+.btn-group > .btn.focus {
+  // need higher z-index so outline won't get hidden by adjacent btn-group btns
+  // this is only used by On/Off config switches
+  z-index: 3;
+}
+
+.btn-primary:focus:not(:hover) {
+  // this is to keep focus normal color, since focus already has outline to indicate focus
+  // otherwise button looks like it stays "pressed" after clicking it
+  color: $btn-primary-color;
+  background-color: $btn-primary-bg;
+  border-color: $btn-primary-border;
+}
+
+.btn-default:focus:not(:hover) {
+  // this is to keep focus normal color, since focus already has outline to indicate focus
+  // otherwise button looks like it stays "pressed" after clicking it
+  color: $btn-default-color;
+  background-color: $btn-default-bg;
+  border-color: $btn-default-border;
+}
+
+.gt-query-text-column {
+  font-family: Cousine, monospace;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gt-query-text-column:hover {
+  color: $gt-blue;
+}
+
+.gt-query-total-column {
+  width: 60px;
+  text-align: right;
+}
+
+.gt-query-other-column {
+  width: 80px;
+  text-align: right;
+}
+
+.gt-query-rows-column {
+  width: 100px;
+  text-align: right;
+}
+
+.gt-heap-histogram-other-column {
+  width: 80px;
+  text-align: right;
+}
+
+.gt-flame-graph-link {
+  margin-top: -10px;
+  margin-bottom: 10px;
+}
+
+.caret.gt-caret-sort-ascending {
+  border-top-width: 0;
+  border-bottom: 4px solid;
+}
+
+.gt-visibility-hidden {
+  visibility: hidden;
+}
+
+.gt-sortable-table-header {
+  text-decoration: none !important;
+  display: inline-block;
+}
+
+.gt-sortable-table-header:focus:not(:hover) {
+  color: $gt-blue;
+}
+
+.gt-radio-link, .gt-radio-link:hover, .gt-radio-link:focus {
+  color: #555;
+}
+
+.gt-radio-link:hover, .gt-radio-link:focus {
+  text-decoration: none;
+}
+
+.gt-radio-disabled {
+  color: #888;
+}
+
+#formattingToggle {
+  text-decoration: none !important;
+  display: inline-block;
+}
+
+#formattingToggle:focus:not(:hover) {
+  color: $gt-blue;
+}
+
+select.form-control {
+  // override default 12px so that the left padding lines up with text inputs (e.g. adhoc report page)
+  padding-left: 8px !important;
+}
+
+.ui-select-multiple.ui-select-bootstrap {
+  // override default 3px
+  padding: 6px 6px 0 6px !important;
+}
+
+.ui-select-multiple.ui-select-bootstrap .ui-select-match-item {
+  // override default 3px
+  margin: 0 6px 6px 0 !important;
+}
+
+.ui-select-multiple.ui-select-bootstrap input.ui-select-search {
+  // override default 3px
+  margin-bottom: 6px !important;
+}
+
+@media screen and (min-width: $screen-lg-min) {
+  .gt-query-text-column {
+    // !important is needed to override normal td padding-right
+    padding-right: 25px !important;
+  }
+
+  .gt-query-total-column {
+    width: 90px;
+  }
+
+  .gt-query-other-column {
+    width: 90px;
+  }
+
+  .gt-heap-histogram-other-column {
+    width: 120px;
+  }
+}
+
+.gt-everything-below-throughput-chart {
+  padding: 0 20px;
+}
+
+@media screen and (min-width: $screen-sm) {
+  .gt-gauge-chart-tools {
+    margin-top: -20px;
+  }
+}
+
+@media screen and (min-width: $screen-md) {
+  .gt-response-time-chart-tools {
+    margin-top: -20px;
+  }
+
+  .gt-everything-below-throughput-chart {
+    padding: 0 40px;
+  }
+
+  .gt-everything-below-average-chart {
+    padding: 0 20px;
+  }
+}
+
+.gt-error-messages-chart-tools {
+  margin-top: -7px;
+}
+
+@media screen and (min-width: $screen-lg) {
+  .gt-error-messages-chart-tools {
+    margin-top: -22px;
+  }
+
+  .gt-everything-below-average-chart {
+    padding: 0 40px;
+  }
+
+  .gt-everything-below-gauge-chart {
+    padding: 0 20px;
+  }
+
+  .gt-flame-graph-link {
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+}

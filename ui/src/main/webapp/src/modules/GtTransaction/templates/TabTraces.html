@@ -1,0 +1,194 @@
+<!--
+  Copyright 2012-2016 the original author or authors.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<div ng-controller="TransactionTabTracesCtrl">
+    <div ng-include src="'modules/GtApp/templates/GtHttpErrorOverlay.html'"></div>
+
+    <div ng-include src="'modules/GtTransaction/templates/ChartActions.html'"></div>
+
+    <div class="gt-chart-container">
+        <div class="gt-chart-dimensions" id="chart"></div>
+
+        <div ng-show="chartNoData && !requestsCount" class="chart-alert">
+            <div class="chart-alert-container">
+                <div class="alert alert-info chart-alert-message">
+                    <span class="pficon pficon-info"></span>
+                    <span ng-hide="showExpiredMessage">
+                        No data
+                    </span>
+                    <span ng-show="showExpiredMessage">
+                        *There were traces but they have expired, see
+                        <!-- pointer-events: auto is to override pointer-events: none from gt-chart-panel -->
+                        <a href="admin/storage#rollup-capped-database-size" style="pointer-events: auto;">
+                            Configuration &gt; Storage &gt; Trace detail data
+                        </a>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <br>
+
+    <div class="col-lg-3 col-lg-push-9" style="margin: 10px auto 0; padding-right: 0;">
+        <div ng-show="chartLimitExceeded">
+            <div class="gt-chart-warning">
+                <strong>
+                    Specified limit exceeded,
+                    only displaying slowest
+                    {{chartLimit}} matching traces
+                </strong>
+            </div>
+        </div>
+    </div>
+    <div ng-form="formCtrl" class="col-lg-12 trace-filters">
+        <div class="form-group">
+            <label for="searchHeadline">
+                Headline/URL
+            </label>
+
+            <div class="input-group">
+                <div gt-input-group-dropdown
+                     gt-model="filter.headlineComparator"
+                     gt-items="filterTextComparatorOptions"
+                     class="input-group-left">
+                </div>
+                <!-- id containing text "search" prevents lastpass from adding icon to input field -->
+                <input type="text"
+                       ng-model="filter.headline"
+                       class="form-control"
+                       id="searchHeadline">
+            </div>
+        </div>
+        <div class="form-group"
+             ng-show="showErrorMessageFilter">
+            <label for="searchErrorMessage">
+                Error
+            </label>
+
+            <div class="input-group">
+                <div gt-input-group-dropdown
+                     gt-model="filter.errorMessageComparator"
+                     gt-items="filterTextComparatorOptions"
+                     class="input-group-left">
+                </div>
+                <!-- id containing text "search" prevents lastpass from adding icon to input field -->
+                <input type="text"
+                       ng-model="filter.errorMessage"
+                       class="form-control"
+                       id="searchErrorMessage">
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="searchUser">
+                User
+            </label>
+
+            <div class="input-group">
+                <div gt-input-group-dropdown
+                     gt-model="filter.userComparator"
+                     gt-items="filterTextComparatorOptions"
+                     class="input-group-left">
+                </div>
+                <!-- id containing text "search" prevents lastpass from adding icon to input field -->
+                <input type="text"
+                       ng-model="filter.user"
+                       class="form-control"
+                       id="searchUser">
+            </div>
+        </div>
+        <div class="form-group" ng-if="traceAttributeNames.length">
+            <label for="searchAttributeName">
+                Attribute name
+            </label>
+
+            <select ng-model="filter.attributeName" class="form-control" id="searchAttributeName">
+                <option value=""></option>
+                <option
+                    ng-repeat="attributeName in traceAttributeNames"
+                    value="{{attributeName}}"
+                    ng-selected="attributeName === filter.attributeName"
+                    >
+                    {{attributeName}}
+                </option>
+            </select>
+        </div>
+        <div class="form-group" ng-if="traceAttributeNames.length">
+            <label for="searchAttributeValue">
+                Attribute value
+            </label>
+
+            <div class="input-group">
+                <div gt-input-group-dropdown
+                     gt-model="filter.attributeValueComparator"
+                     gt-items="filterTextComparatorOptions"
+                     class="input-group-left">
+                </div>
+                <!-- id containing text "search" prevents lastpass from adding icon to input field -->
+                <input type="text"
+                       ng-model="filter.attributeValue"
+                       class="form-control"
+                       id="searchAttributeValue">
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="searchLimit">
+                Result limit
+            </label>
+
+            <select
+                ng-model="filter.limit"
+                ng-options="option.value as option.text for option in filterLimitOptions"
+                class="form-control"
+                id="searchLimit"
+                style="max-width: 8em;">
+            </select>
+        </div>
+        <div class="form-group">
+            <button class="btn btn-primary pull-left"
+                    ng-click="refresh()"
+                    ng-disabled="formCtrl.$invalid">
+                Refresh
+            </button>
+            <button class="btn btn-default pull-left"
+                    ng-click="clearCriteria()"
+                    style="margin-left: 8px;">
+                Clear criteria
+            </button>
+        </div>
+    </div>
+    <!-- escape key doesn't close modal in some situations without tabindex="-1"
+         in particular, open trace modal, expand trace entries, then expand a concatenated span (one with ...)
+         then hit escape key and modal doesn't close (at least not in chrome) -->
+    <div class="modal " id="traceModal" tabindex="-1">
+        <button type="button" class="close" data-dismiss="modal">
+            &times;
+        </button>
+        <div class="modal-dialog container" style="background: #fff; width: 99%;">
+            <div class="modal-body" style="padding: 15px 0;">
+                <div ng-include
+                     src="'modules/GtTransaction/templates/TraceModal.html'"
+                     ng-if="traceModalIsOpen"
+                     >
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="gt-trace-point-normal gt-offscreen" id="offscreenNormalColor"></div>
+<div class="gt-trace-point-error gt-offscreen" id="offscreenErrorColor"></div>
+<div class="gt-trace-point-active gt-offscreen" id="offscreenActiveColor"></div>
