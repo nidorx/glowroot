@@ -26,8 +26,7 @@
             <a
                 role="menuitem"
                 tabindex="-1"
-                ng-href="#{{currentTabUrl()}}{{headerRangeQueryString(last)}}"
-                ng-click="updateLast(last, $event)"
+                ui-sref="{{::buildRangeParams(last)}}"
                 >
                 {{lastDisplay(last)}}
             </a>
@@ -36,7 +35,6 @@
             <a ng-click="openCustomRange()">Custom range...</a>
         </li>
     </ul>
-
     <div class="modal" id="customDateRangeModal" tabindex="-1">
         <div class="modal-dialog"
              style="max-width: 500px; font-size: 14px; ">
@@ -44,9 +42,7 @@
                 <div ng-form
                      gt-form-with-primary-button>
                     <div class="modal-header">
-                        <button type="button"
-                                class="close"
-                                data-dismiss="modal">
+                        <button type="button" class="close" data-dismiss="modal">
                             &times;
                         </button>
                         <h4 class="modal-title">Custom date range</h4>

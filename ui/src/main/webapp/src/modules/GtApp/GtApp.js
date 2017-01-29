@@ -17,6 +17,7 @@
 
 angular
         .module('GtApp', [
+            'GtCommon',
 //            'ngRoute',
             'ui.router',
             'ui.bootstrap',
@@ -25,14 +26,14 @@ angular
             'oc.lazyLoad',
             'ngMessages',
             'ngSanitize',
-            // old
+                    // old
 //            'ui.select'
         ])
         .config(AppConfig)
         .run(AppRun);
 
 
-AppConfig.$inject = ['blockUIConfig', '$httpProvider', '$locationProvider'];
+AppConfig.$inject = ['blockUIConfig', '$httpProvider', '$locationProvider', '$urlMatcherFactoryProvider'];
 
 /**
  * App configuration
@@ -42,7 +43,20 @@ AppConfig.$inject = ['blockUIConfig', '$httpProvider', '$locationProvider'];
  * @param {type} $locationProvider
  * @returns {undefined}
  */
-function AppConfig(blockUIConfig, $httpProvider, $locationProvider) {
+function AppConfig(blockUIConfig, $httpProvider, $locationProvider, $urlMatcherFactoryProvider) {
+
+    // Non-URI-Encoded URL Type
+    function valToString(val) {
+        return val !== null ? val.toString() : val;
+    }
+
+    $urlMatcherFactoryProvider.type('nonURIEncoded', {
+        encode: valToString,
+        decode: valToString,
+        is: function () {
+            return true;
+        }
+    });
 
     //$locationProvider.html5Mode(true);
     $locationProvider.html5Mode(false).hashPrefix('');
@@ -75,28 +89,21 @@ function AppConfig(blockUIConfig, $httpProvider, $locationProvider) {
 
 
 AppRun.$inject = [
-    '$q', '$rootScope', '$state', '$document', '$http', '$location', '$timeout', 'login', 'queryStrings'
+    '$rootScope', '$state', '$http', '$location', '$timeout', 'login',
+    'queryStrings', 'model'
 ];
 
 
 /**
  * App inicialization
  *
- * @param {type} $q
- * @param {type} $rootScope
- * @param {type} $state
- * @param {type} $document
- * @param {type} $http
- * @param {type} $location
- * @param {type} $timeout
- * @param {type} login
- * @param {type} queryStrings
- * @returns {undefined}
  */
-function AppRun($q, $rootScope, $state, $document, $http, $location, $timeout, login, queryStrings) {
+function AppRun($rootScope, $state, $http, $location, $timeout, login, queryStrings, model) {
 
-    // Add $state to all template
+    // Common vars
     $rootScope.$state = $state;
+    $rootScope.model = model;
+    $rootScope.range = model.range;
 
     /*========================================================================================
      * Eventos de rotas
@@ -128,6 +135,7 @@ function AppRun($q, $rootScope, $state, $document, $http, $location, $timeout, l
     $rootScope.$on('$locationChangeSuccess', function () {
         $rootScope.agentId = $location.search()['agent-id'] || '';
         $rootScope.agentRollupId = $location.search()['agent-rollup-id'] || $rootScope.agentId;
+        $rootScope.stateParams = $rootScope.buildStateParams();
         if ($rootScope.layout) {
             // layout doesn't exist on first page load when running under grunt serve
             if (!$rootScope.layout.central || $rootScope.agentRollupId) {
@@ -238,33 +246,125 @@ function AppRun($q, $rootScope, $state, $document, $http, $location, $timeout, l
         return $location.path() === '/login';
     };
 
-    // with responsive design, container width doesn't change on every window resize event
-    var $container = $('#container');
-    var $window = $(window);
-    $rootScope.containerWidth = $container.width();
-    $rootScope.windowHeight = $window.height();
-    $(window).resize(function () {
-        var containerWidth = $container.width();
-        var windowHeight = $window.height();
-        if (containerWidth !== $rootScope.containerWidth || windowHeight !== $rootScope.windowHeight) {
-            // one of the relevant dimensions has changed
-            $rootScope.$apply(function () {
-                $rootScope.containerWidth = containerWidth;
-                $rootScope.windowHeight = windowHeight;
-            });
+    $rootScope.buildQueryObject = function (baseQuery) {
+        var query = angular.copy(baseQuery || $location.search());
+        if ($rootScope.layout && $rootScope.layout.central) {
+            var agentRollup = $rootScope.layout.agentRollups[$rootScope.agentRollupId];
+            if (agentRollup) {
+                if (agentRollup.agent) {
+                    query['agent-id'] = $rootScope.agentRollupId;
+                } else {
+                    query['agent-rollup-id'] = $rootScope.agentRollupId;
+                }
+            }
         }
-    });
+        query['transaction-type'] = $rootScope.model.transactionType;
+        query['transaction-name'] = $rootScope.model.transactionName;
+        if (!$rootScope.range.last) {
+            query.from = Math.floor($rootScope.range.chartFrom / 60000) * 60000;
+            query.to = Math.ceil($rootScope.range.chartTo / 60000) * 60000;
+            delete query.last;
+        }
+//        else if ($rootScope.range.last !== 4 * 60 * 60 * 1000) {
+//            query.last = $rootScope.range.last;
+//            delete query.from;
+//            delete query.to;
+//        }
+        if ($rootScope.summarySortOrder !== $rootScope.defaultSummarySortOrder) {
+            query['summary-sort-order'] = $rootScope.summarySortOrder;
+        } else {
+            delete query['summary-sort-order'];
+        }
+        return query;
+    };
+
+    /**
+     * Generate object used in $state.go and ui-sref
+     *
+     * @param {type} baseParams
+     * @returns {unresolved}
+     */
+    $rootScope.buildStateParams = function (baseParams) {
+        // Input camelCase
+        var params = angular.merge({}, (function (searchParams) {
+            var out = {};
+            for (var a in searchParams) {
+                if (searchParams.hasOwnProperty(a)) {
+                    out[a.replace(/-(.)/g, function ($0, $1) {
+                        return $1.toUpperCase();
+                    })] = searchParams[a];
+                }
+            }
+            return out;
+        })($location.search()), baseParams);
+
+        if ($rootScope.layout && $rootScope.layout.central) {
+            var agentRollup = $rootScope.layout.agentRollups[$rootScope.agentRollupId];
+            if (agentRollup) {
+                if (agentRollup.agent) {
+                    params.agentId = $rootScope.agentRollupId;
+                } else {
+                    params.agentRollupId = $rootScope.agentRollupId;
+                }
+            }
+        }
+        if (!$rootScope.range.last) {
+            params.from = Math.floor($rootScope.range.chartFrom / 60000) * 60000;
+            params.to = Math.ceil($rootScope.range.chartTo / 60000) * 60000;
+            delete params.last;
+        } else if ($rootScope.range.last !== 4 * 60 * 60 * 1000) {
+            params.last = $rootScope.range.last;
+            delete params.from;
+            delete params.to;
+        }
+        if ($rootScope.summarySortOrder !== $rootScope.defaultSummarySortOrder) {
+            params.summarySortOrder = $rootScope.summarySortOrder;
+        } else {
+            delete params.summarySortOrder;
+        }
+
+        // Output as name-param:value
+        var out = (function (params) {
+            var out = {};
+            for (var a in params) {
+                if (params.hasOwnProperty(a)) {
+                    out[a.replace(/([A-Z])/g, function ($0, $1) {
+                        return '-' + $1.toLowerCase();
+                    })] = params[a];
+                }
+            }
+            return out;
+        })(params);
+
+        return out;
+    };
+
+    $rootScope.buildUiSref = function (baseQuery) {
+        var out = $state.current.name + '(' + JSON.stringify($rootScope.buildStateParams(baseQuery)) + ')';
+        console.log('out', out);
+        return out;
+    };
+
+
+    // with responsive design, container width doesn't change on every window resize event
+    $(window).resize((function (fn, delay) {
+        var timeout = null;
+
+        return function () {
+            window.clearTimeout(timeout);
+            var that = this;
+            var args = Array.prototype.slice.call(arguments);
+
+            timeout = window.setTimeout(function () {
+                fn.apply(that, args);
+            }, delay);
+        };
+    })(function () {
+        $rootScope.$broadcast('resize');
+    }, 50));
+
     $rootScope.forceResize = function () {
-        setTimeout(function () {
-            var containerWidth = $container.width();
-            var windowHeight = $window.height();
-            // one of the relevant dimensions has changed
-            $rootScope.$apply(function () {
-                $rootScope.containerWidth = containerWidth;
-                $rootScope.windowHeight = windowHeight;
-            });
-            $rootScope.$broadcast('forceResize');
-        });
+        $rootScope.$broadcast('resize');
     };
 
     // check layout every 60 seconds, this will notice when session expires and sending user to /login
@@ -331,19 +431,18 @@ function AppRun($q, $rootScope, $state, $document, $http, $location, $timeout, l
         $rootScope.setLayout(window.layout);
     } else {
         // running in dev under 'grunt serve'
-        $http.get('backend/layout')
-                .then(function (response) {
-                    $rootScope.setLayout(response.data);
-                }, function (response) {
-                    $rootScope.navbarErrorMessage = 'An error occurred getting layout';
-                    if (response.data.message) {
-                        $rootScope.navbarErrorMessage += ': ' + response.data.message;
-                    }
-                    var unregisterListener = $rootScope.$on('$stateChangeSuccess', function () {
-                        $rootScope.navbarErrorMessage = '';
-                        unregisterListener();
-                    });
-                });
+        $http.get('backend/layout').then(function (response) {
+            $rootScope.setLayout(response.data);
+        }, function (response) {
+            $rootScope.navbarErrorMessage = 'An error occurred getting layout';
+            if (response.data.message) {
+                $rootScope.navbarErrorMessage += ': ' + response.data.message;
+            }
+            var unregisterListener = $rootScope.$on('$stateChangeSuccess', function () {
+                $rootScope.navbarErrorMessage = '';
+                unregisterListener();
+            });
+        });
     }
 
     $rootScope.$on('$stateChangeSuccess', function () {
@@ -363,13 +462,4 @@ function AppRun($q, $rootScope, $state, $document, $http, $location, $timeout, l
         // tolerant of missing whole (.2) and missing decimal (2.)
         double: /^(0|[1-9][0-9]*)?(\.[0-9]*)?$/
     };
-
-//    ZeroClipboard.config({
-//        bubbleEvents: false,
-//        // cache busting is not required since ZeroClipboard.swf is revved during grunt build
-//        cacheBust: false
-//    });
-    // this is a workaround for "IE freezes when clicking a ZeroClipboard clipped element within a Bootstrap Modal"
-    // see https://github.com/zeroclipboard/zeroclipboard/blob/master/docs/instructions.md#workaround-a
-    $(document).on('focusin', '#global-zeroclipboard-html-bridge', false);
 }

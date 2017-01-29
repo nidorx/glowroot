@@ -73,7 +73,7 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
         };
 
         // Allwo override
-        if(!$scope.refresh){
+        if (!$scope.refresh) {
             $scope.refresh = function () {
                 $scope.applyLast();
                 $scope.range.chartRefresh++;
@@ -82,17 +82,15 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
     }
 
     function initResize(plot, $scope) {
-        $scope.$watchGroup(['containerWidth', 'windowHeight'], function () {
-            plot.resize();
-            plot.setupGrid();
-            plot.draw();
-        });
-
-        $scope.$on('forceResize', function () {
-            plot.resize();
-            plot.setupGrid();
-            plot.draw();
-        });
+        function resize() {
+            setTimeout(function () {
+                plot.resize();
+                plot.setupGrid();
+                plot.draw();
+            }, 0);
+        }
+        $scope.$on('resize', resize);
+        resize();
     }
 
     function updateRange($scope, from, to, zoomingOut, selection, selectionNearestLarger, tracePoints) {

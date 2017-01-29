@@ -13,181 +13,163 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<div ng-include src="'template/gt-loading-overlay.html'"></div>
-<div ng-include src="'template/gt-http-error-overlay.html'"></div>
-<div ng-show="loaded">
-  <div ng-hide="allGauges.length" style="font-size: 16px; margin-top: 20px;">
-    No gauges configured.
-    See <a href="config/gauge-list{{agentQueryString()}}">Gauge configuration</a>.
-  </div>
-  <div ng-show="allGauges.length">
-    <div style="margin: -13px 0 15px 30px;">
-      <div ng-controller="ChartRangeCtrl" ng-include="'template/gt-chart-range.html'"></div>
+<div ng-controller="JvmGaugeValuesCtrl">
+    <div ng-include src="'modules/GtApp/templates/GtHttpErrorOverlay.html'"></div>
+
+    <div style="margin: 20px 0 10px;">
+        <div class="pull-right">
+            <div class="btn-group" role="group">
+                <button type="button" class="btn btn-default" ng-click="zoomOut()" title="Zoom out">
+                    <span class="glyphicon glyphicon-zoom-out"></span>
+                </button>
+                <button type="button" class="btn btn-default" ng-click="refresh()" title="Refresh">
+                    <span class="glyphicon glyphicon-refresh"></span>
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-info"
+                    uib-popover-template="'modules/GtTransaction/templates/help/ChartHelp.html'"
+                    popover-placement="left"
+                    popover-append-to-body="true"
+                    popover-animation="false"
+                    popover-trigger="mouseenter"
+                    ng-hide="$state.is('page.transaction.detail.traces') || $state.is('page.error.detail.traces')"
+                    >
+                    <span class="glyphicon glyphicon-question-sign"></span>
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-info"
+                    uib-popover-template="'modules/GtTransaction/templates/help/ChartTracesHelp.html'"
+                    popover-placement="left"
+                    popover-append-to-body="true"
+                    popover-animation="false"
+                    popover-trigger="mouseenter"
+                    ng-show="$state.is('page.transaction.detail.traces') || $state.is('page.error.detail.traces')"
+                    >
+                    <span class="glyphicon glyphicon-question-sign"></span>
+                </button>
+            </div>
+        </div>
+        <div class="clearfix"></div>
     </div>
-    <!-- z-index 800 is needed to keep the buttons in front of the chart spinner overlay -->
-    <div class="clearfix" style="position: relative; z-index: 800;">
-      <div class="pull-right gt-gauge-chart-tools" style="margin-bottom: -8px; font-size: 22px;">
-        <!-- using anchor instead of button due to nicer focus ring behavior in chrome -->
-        <a role="button"
-           class="gt-chart-button"
-           href="#"
-           ng-click="zoomOut()">
-          <i title="Zoom out"
-             class="fa fa-search-minus"></i><!-- lack of space here is significant
-         --></a>
-        <!-- using anchor instead of button due to nicer focus ring behavior in chrome -->
-        <a role="button"
-           class="gt-chart-button"
-           href="#"
-           ng-click="refresh()">
-          <i title="Refresh"
-             class="fa fa-refresh"></i><!-- lack of space here is significant
-         --></a>
-        <!-- using anchor instead of button due to nicer focus ring behavior in chrome -->
-        <a role="button"
-           class="gt-chart-button"
-           href="#"
-           uib-popover-template="'template/help/chart.html'"
-           popover-placement="left"
-           popover-trigger="'outsideClick'">
-          <i title="Help"
-             class="fa fa-question-circle"></i><!-- lack of space here is significant
-         --></a>
-      </div>
-    </div>
+
     <div class="gt-chart-container">
-      <div gt-spinner
-           gt-show="showChartSpinner"
-           gt-no-delay="true"
-           class="gt-panel-overlay gt-chart-panel"
-           id="chartSpinner">
-      </div>
-      <div class="gt-chart-dimensions" id="chart"></div>
-      <div ng-show="chartNoData && !showChartSpinner"
-           class="gt-chart-panel"
-           style="display: table;">
-        <div style="display: table-cell; text-align: center; vertical-align: middle;">
-          <div ng-if="gaugeNames.length" class="gt-chart-no-data">No data</div>
-          <div ng-if="!gaugeNames.length" class="gt-chart-no-data">Select one or more gauges below</div>
+        <div class="gt-chart-dimensions" id="chart"></div>
+
+        <div ng-show="chartNoData && !showChartSpinner" class="chart-alert">
+            <div class="chart-alert-container">
+                <div class="alert alert-info chart-alert-message">
+                    <span class="pficon pficon-info"></span>
+                    <span ng-show="gaugeNames.length">
+                        No data
+                    </span>
+                    <span ng-hide="gaugeNames.length">
+                        <br/>
+                        Select one or more gauges below.
+                    </span>
+                </div>
+            </div>
         </div>
-      </div>
+
+        <div ng-hide="allGauges.length" class="chart-alert">
+            <div class="chart-alert-container">
+                <div class="alert alert-info chart-alert-message">
+                    <span class="pficon pficon-info"></span>
+                    <span>
+                        No gauges configured.
+                        <br/>
+                        See <a href="config/gauge-list{{agentQueryString()}}">Gauge configuration</a>.
+                    </span>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <div class="gt-everything-below-gauge-chart">
-      <div class="legend" id="chartLegend"
-           style="text-align: center; margin-top: 10px; width: 100%;">
-        <div class="gt-inline-block">
-          <div class="gt-inline-block" ng-repeat="seriesLabel in seriesLabels"
-               style="white-space: nowrap; margin: 0 6px;">
-            <div class="legendColorBox gt-inline-block"
-                 style="border: 1px solid rgb(204, 204, 204); padding: 1px;">
-              <div style="width: 4px; height: 0px; border: 5px solid rgb(237, 194, 64); overflow: hidden;"
-                   ng-style="{'border': '5px solid ' + seriesLabel.color}">
-              </div>
+    <div class="legend chart-lengend" id="chartLegend" ng-hide="chartNoData">
+        <div
+            class="chart-lengend-item"
+            ng-repeat="seriesLabel in seriesLabels"
+            >
+            <div class="chart-lengend-item-color-box">
+                <div
+                    class="chart-lengend-item-color-box-color"
+                    ng-style="{'border-color': ''+ seriesLabel.color}"
+                    >
+                </div>
             </div>
-            <div class="legendLabel gt-inline-block">{{seriesLabel.text}}</div>
-          </div>
+            <div class="chart-lengend-item-label gt-inline-block">
+                {{seriesLabel.text}}
+            </div>
         </div>
-      </div>
-      <br>
-
-      <table class="gt-gauge-table"
-             style="margin-top: 10px;">
-        <thead>
-        <tr>
-          <th style="padding-left: 20px; width: 70%;">
-            Gauge
-          </th>
-          <th style="width: 100px;">
-            Color
-          </th>
-          <th style="min-width: 120px;">
-            Scale
-          </th>
-        </tr>
-        </thead>
-        <tbody ng-if="!smallScreen()">
-        <tr>
-          <td style="padding: 8px 20px 5px 20px;">
-            <input type="text"
-                   class="form-control gt-inline-block"
-                   ng-model="page.gaugeFilter"
-                   placeholder="filter the gauge list">
-          </td>
-          <td></td>
-          <td></td>
-        </tr>
-        <tr ng-repeat="gauge in allGauges | filter:{display: page.gaugeFilter}">
-          <td style="padding-left: 0;">
-            <div class="checkbox gt-gauge-second-line-indent" style="margin-top: 0; margin-bottom: 0;">
-              <label ng-style="gaugeNameStyle(gauge.name)">
-                <input type="checkbox" ng-checked="gaugeNames.indexOf(gauge.name) !== -1"
-                       ng-click="clickGaugeName(gauge.name)"
-                       id="{{gauge.name}}">
-                {{gauge.display}}
-              </label>
-            </div>
-          </td>
-          <td>
-            <div ng-style="gaugeColorStyle(gauge.name)"></div>
-          </td>
-          <td>
-            <div ng-show="hasGaugeScale(gauge.name)"
-                 ng-style="gaugeScaleStyle(gauge.name)">
-              {{getGaugeScale(gauge.name)}}
-            </div>
-          </td>
-        </tr>
-        </tbody>
-        <tbody ng-if="smallScreen()">
-        <tr>
-          <td style="padding: 8px 20px 5px 20px;"
-              colspan="3">
-            <input type="text"
-                   class="form-control gt-inline-block"
-                   ng-model="page.gaugeFilter"
-                   placeholder="filter the gauge list"
-                   style="max-width: 358px;">
-          </td>
-        </tr>
-        <tr ng-repeat-start="gauge in allGauges | filter:{display: page.gaugeFilter}">
-          <td style="padding-left: 0;"
-              colspan="3">
-            <div class="checkbox gt-gauge-second-line-indent" style="margin-top: 0; margin-bottom: 0;">
-              <label ng-style="gaugeNameStyle(gauge.name)">
-                <input type="checkbox" ng-checked="gaugeNames.indexOf(gauge.name) !== -1"
-                       ng-click="clickGaugeName(gauge.name)"
-                       id="{{gauge.name}}">
-                {{gauge.display}}
-              </label>
-            </div>
-          </td>
-        </tr>
-        <tr ng-repeat-end
-            ng-if="hasGaugeScale(gauge.name)">
-          <td></td>
-          <td>
-            <div ng-style="gaugeColorStyle(gauge.name)">{{gaugeColorText(gauge.name)}}</div>
-          </td>
-          <td>
-            <div ng-show="hasGaugeScale(gauge.name)">
-              {{getGaugeScale(gauge.name)}}
-            </div>
-          </td>
-        </tr>
-        </tbody>
-      </table>
-      <div style="margin-top: 20px; padding-left: 20px;">
-        <button class="btn btn-default"
-                ng-click="selectAllGauges()">
-          select all {{!showingAllGauges() ? 'showing' : ''}}
-        </button>
-        <button class="btn btn-default"
-                ng-click="deselectAllGauges()"
-                style="margin-left: 5px;">
-          deselect all {{!showingAllGauges() ? 'showing' : ''}}
-        </button>
-      </div>
     </div>
-  </div>
+
+    <div ng-show="allGauges.length" style="margin-top: 50px;">
+        <div class="card-pf" >
+            <h2 class="card-pf-title">
+                <p>Select Gauges</p>
+            </h2>
+            <div class="card-pf-body ">
+                <div class="row">
+                    <table class="table table-striped table-bordered table-hover">
+                        <thead>
+                            <tr>
+                                <th>
+                                    <input
+                                        type="text"
+                                        class="form-control"
+                                        ng-model="page.gaugeFilter"
+                                        placeholder="filter the gauge list"
+                                        >
+                                </th>
+                                <th style="width: 40px;"></th>
+                                <th style="width: 90px;">
+                                    Scale
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr
+                                ng-repeat="gauge in allGauges| filter:{display: page.gaugeFilter}"
+                                ng-class="{active:gaugeNames.indexOf(gauge.name) >= 0}"
+                                >
+                                <td ng-click="clickGaugeName(gauge.name)">
+                                    {{gauge.display}}
+                                </td>
+                                <td
+                                    style="background-color: {{chartState.keyedColorPool.get(gauge.name)}}"
+                                    >
+                                </td>
+                                <td
+                                    ng-style="gaugeScaleStyle(gauge.name)"
+                                    style="text-align: right;"
+                                    >
+                                    {{getGaugeScale(gauge.name)}}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card-pf-footer">
+                <p>
+                    <button
+                        class="btn btn-default"
+                        ng-click="selectAllGauges()"
+                        >
+                        select all {{!showingAllGauges() ? 'showing' : ''}}
+                    </button>
+                    <button
+                        class="btn btn-default"
+                        ng-click="deselectAllGauges()"
+                        style="margin-left: 5px;"
+                        >
+                        deselect all {{!showingAllGauges() ? 'showing' : ''}}
+                    </button>
+                </p>
+                <div class="clearfix"></div>
+            </div>
+        </div>
+    </div>
 </div>

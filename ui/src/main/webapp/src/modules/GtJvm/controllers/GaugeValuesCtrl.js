@@ -25,8 +25,8 @@ JvmGaugeValuesCtrl.$inject = [
 ];
 
 function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, charts, keyedColorPools, queryStrings, httpErrors) {
-
-    $scope.$parent.heading = 'Gauges';
+    // Page header
+    $scope.page.title = 'JVM - Gauges';
 
     if ($scope.hideMainContent()) {
         // these are needed to prevent nested controller chart-range.js from throwing errors
@@ -40,7 +40,9 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
     // initialize page binding object
     $scope.page = {};
 
-    var DEFAULT_GAUGES = ['java.lang:type=Memory:HeapMemoryUsage.used'];
+    var DEFAULT_GAUGES = [
+        'java.lang:type=Memory:HeapMemoryUsage.used'
+    ];
 
     var chartState = charts.createState();
 
@@ -64,7 +66,15 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
     };
 
     function refreshData(autoRefresh) {
-        charts.refreshData('backend/jvm/gauges', chartState, $scope, autoRefresh, addToQuery, onRefreshData);
+        var query = {
+            agentRollupId: $scope.agentRollupId,
+            transactionType: $scope.model.transactionType,
+            transactionName: $scope.model.transactionName,
+            from: $scope.range.chartFrom,
+            to: $scope.range.chartTo,
+            autoRefresh: autoRefresh
+        };
+        charts.refreshData('backend/jvm/gauges', chartState, $scope, null, addToQuery, onRefreshData, query);
     }
 
     function watchListener(autoRefresh) {
@@ -199,39 +209,42 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
     });
 
     if (!$scope.hideMainContent()) {
-        $http.get('backend/jvm/all-gauges?agent-rollup-id=' + encodeURIComponent($scope.agentRollupId))
-                .then(function (response) {
-                    $scope.loaded = true;
-                    $scope.allGauges = response.data;
-                    createShortDataSeriesNames(response.data);
-                    allGaugeNames = [];
-                    gaugeShortDisplayMap = {};
-                    gaugeUnits = {};
-                    gaugeGrouping = {};
-                    angular.forEach(response.data, function (gauge) {
-                        allGaugeNames.push(gauge.name);
-                        gaugeShortDisplayMap[gauge.name] = gauge.shortDisplay;
-                        if (gauge.unit) {
-                            gaugeUnits[gauge.name] = ' ' + gauge.unit;
-                        } else {
-                            gaugeUnits[gauge.name] = '';
-                        }
-                        if (gauge.grouping) {
-                            gaugeGrouping[gauge.name] = gauge.grouping;
-                        } else {
-                            gaugeGrouping[gauge.name] = gauge.name;
-                        }
-                    });
-                    if (!$scope.gaugeNames.length) {
-                        angular.forEach(DEFAULT_GAUGES, function (defaultGauge) {
-                            if (allGaugeNames.indexOf(defaultGauge) !== -1) {
-                                $scope.gaugeNames.push(defaultGauge);
-                            }
-                        });
+        $http.get('backend/jvm/all-gauges', {
+            params: {
+                'agent-rollup-id': $scope.agentRollupId || ''
+            }
+        }).then(function (response) {
+            $scope.loaded = true;
+            $scope.allGauges = response.data;
+            createShortDataSeriesNames(response.data);
+            allGaugeNames = [];
+            gaugeShortDisplayMap = {};
+            gaugeUnits = {};
+            gaugeGrouping = {};
+            angular.forEach(response.data, function (gauge) {
+                allGaugeNames.push(gauge.name);
+                gaugeShortDisplayMap[gauge.name] = gauge.shortDisplay;
+                if (gauge.unit) {
+                    gaugeUnits[gauge.name] = ' ' + gauge.unit;
+                } else {
+                    gaugeUnits[gauge.name] = '';
+                }
+                if (gauge.grouping) {
+                    gaugeGrouping[gauge.name] = gauge.grouping;
+                } else {
+                    gaugeGrouping[gauge.name] = gauge.name;
+                }
+            });
+            if (!$scope.gaugeNames.length) {
+                angular.forEach(DEFAULT_GAUGES, function (defaultGauge) {
+                    if (allGaugeNames.indexOf(defaultGauge) !== -1) {
+                        $scope.gaugeNames.push(defaultGauge);
                     }
-                }, function (response) {
-                    httpErrors.handle(response, $scope);
                 });
+            }
+        }, function (response) {
+            httpErrors.handle(response, $scope);
+        });
     }
 
     // scale will bring max into 0..100 range
@@ -396,32 +409,6 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
         return k;
     }
 
-    $scope.gaugeNameStyle = function (gaugeName) {
-        if ($scope.gaugeNames.indexOf(gaugeName) === -1) {
-            return {
-                'font-weight': 'normal',
-                cursor: 'pointer'
-            };
-        } else {
-            return {
-                'font-weight': 'bold',
-                cursor: 'pointer'
-            };
-        }
-    };
-
-    $scope.gaugeColorStyle = function (gaugeName) {
-        var style = {
-            width: '60px',
-            height: '18px'
-        };
-        var color = chartState.keyedColorPool.get(gaugeName);
-        if (color) {
-            style['background-color'] = color;
-        }
-        return style;
-    };
-
     $scope.hasGaugeScale = function (gaugeName) {
         return gaugeScales[gaugeName] || emptyGaugeNames[gaugeName];
     };
@@ -554,6 +541,7 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
         }
     };
 
+    $scope.chartState = chartState;
     charts.init(chartState, $('#chart'), $scope);
     charts.plot([[]], chartOptions, chartState, $('#chart'), $scope);
     charts.initResize(chartState.plot, $scope);

@@ -21,61 +21,49 @@ angular
         .config(JvmRoutes);
 
 
-JvmRoutes.$inject = ['$provide', '$stateProvider', '$urlRouterProvider'];
+JvmRoutes.$inject = ['$stateProvider'];
 
-
-function JvmRoutes($provide, $stateProvider, $urlRouterProvider) {
+function JvmRoutes($stateProvider) {
 
     $stateProvider
             .state('page.jvm.gauges', {
-                url: '/gauges?agent-id&agent-rollup-id',
-                templateUrl: 'views/jvm/gauge-values.html',
-                controller: 'JvmGaugeValuesCtrl'
+                url: '/gauges?&last&from&to',
+                templateUrl: urlTemplate('GaugeValues', 'GtJvm')
             })
             .state('page.jvm.threadDump', {
-                url: '/thread-dump?agent-id&agent-rollup-id',
-                templateUrl: 'views/jvm/thread-dump.html',
-                controller: 'JvmThreadDumpCtrl'
-            })
-            .state('page.jvm.jstack', {
-                url: '/jstack?agent-id&agent-rollup-id',
-                templateUrl: 'views/jvm/jstack.html',
-                controller: 'JvmJstackCtrl'
+                url: '/thread-dump',
+                templateUrl: urlTemplate('ThreadDum', 'GtJvm')
             })
             .state('page.jvm.heapDump', {
-                url: '/heap-dump?agent-id&agent-rollup-id',
-                templateUrl: 'views/jvm/heap-dump.html',
-                controller: 'JvmHeapDumpCtrl'
+                url: '/heap-dump',
+                templateUrl: urlTemplate('HeapDump', 'GtJvm')
             })
             .state('page.jvm.heapHistogram', {
-                url: '/heap-histogram?agent-id&agent-rollup-id',
-                templateUrl: 'views/jvm/heap-histogram.html',
-                controller: 'JvmHeapHistogramCtrl'
-            })
-            .state('page.jvm.gc', {
-                url: '/gc?agent-id&agent-rollup-id',
-                templateUrl: 'views/jvm/gc.html',
-                controller: 'JvmGcCtrl'
+                url: '/heap-histogram',
+                templateUrl: urlTemplate('HeapHistogram', 'GtJvm')
             })
             .state('page.jvm.mbeanTree', {
-                url: '/mbean-tree?agent-id&agent-rollup-id',
-                templateUrl: 'views/jvm/mbean-tree.html',
-                controller: 'JvmMBeanTreeCtrl'
+                url: '/mbean-tree',
+                templateUrl: urlTemplate('MBeanTree', 'GtJvm')
             })
             .state('page.jvm.systemProperties', {
-                url: '/system-properties?agent-id&agent-rollup-id',
-                templateUrl: 'views/jvm/system-properties.html',
-                controller: 'JvmSystemPropertiesCtrl'
+                url: '/system-properties',
+                templateUrl: urlTemplate('SystemProperties', 'GtJvm')
             })
             .state('page.jvm.environment', {
-                url: '/environment?agent-id&agent-rollup-id',
-                templateUrl: 'views/jvm/environment.html',
-                controller: 'JvmEnvironmentCtrl'
+                url: '/environment',
+                templateUrl: urlTemplate('Environment', 'GtJvm')
+            })
+            .state('page.jvm.jstack', {
+                url: '/jstack',
+                templateUrl: urlTemplate('Jstack', 'GtJvm')
+            })
+            .state('page.jvm.gc', {
+                url: '/gc',
+                templateUrl: urlTemplate('Gc', 'GtJvm')
             })
             .state('page.jvm.capabilities', {
-                url: '/capabilities?agent-id&agent-rollup-id',
-                templateUrl: 'views/jvm/capabilities.html',
-                controller: 'JvmCapabilitiesCtrl'
+                url: '/capabilities',
+                templateUrl: urlTemplate('Capabilities', 'GtJvm')
             });
-
 }

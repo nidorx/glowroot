@@ -31,20 +31,20 @@
     <div class="list-group" ng-if="transactionSummaries.length">
         <a
             class="list-group-item"
-            href="#{{currentTabUrl()}}{{sidebarQueryString(null)}}"
+            ui-sref="{{::(xpto?xpto:xpto=buildStateParams({transactionName:''}))}}"
             ng-class="{active: !model.transactionName}"
             >
             <small class="pull-right">{{overallSummaryValue()}}</small>
             {{'All ' + model.transactionType + ' Transactions'}}
         </a>
         <a
-            ng-repeat="transactionSummary in transactionSummaries"
-            href="#{{currentTabUrl()}}{{sidebarQueryString(transactionSummary.transactionName)}}"
+            ng-repeat="summary in ::transactionSummaries"
+            ui-sref="{{::buildStateParams({transactionName:summary.transactionName})}}"
             class="list-group-item"
-            ng-class="{active: model.transactionName === transactionSummary.transactionName}"
+            ng-class="{active: model.transactionName === summary.transactionName}"
             >
-            <small class="pull-right">{{transactionSummaryValue(transactionSummary)}}</small>
-            {{transactionSummary.transactionName}}
+            <small class="pull-right">{{transactionSummaryValue(summary)}}</small>
+            {{summary.transactionName}}
         </a>
         <button
             class="list-group-item selectable-list-group-item"

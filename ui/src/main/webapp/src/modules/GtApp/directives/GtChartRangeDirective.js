@@ -92,31 +92,21 @@ function GtChartRangeDirective($location, queryStrings, charts, modals) {
                 }
             };
 
-            $scope.headerRangeQueryString = function (last) {
-                var query = $scope.buildQueryObject();
-                delete query['trace-chart-from'];
-                delete query['trace-chart-to'];
-                delete query.from;
-                delete query.to;
+            $scope.buildRangeParams = function (last) {
+                var params = $scope.buildStateParams({last:last});
+                var params = $scope.buildQueryObject();
+                delete params['traceChartFrom'];
+                delete params['traceChartTo'];
+                delete params.from;
+                delete params.to;
                 if (last === 4 * 60 * 60 * 1000) {
-                    delete query.last;
+                    delete params.last;
                 } else {
-                    query.last = last;
+                    params.last = last;
                 }
-                return queryStrings.encodeObject(query);
+                return params;
             };
 
-            $scope.updateLast = function (last, event) {
-                if (last === $scope.range.last && !event.ctrlKey) {
-                    // no change, force refresh
-                    $scope.range.chartRefresh++;
-                    // suppress normal link
-                    event.preventDefault();
-                    return false;
-                }
-                
-                //$state.go(route, $scope.buildStateParams());
-            };
 
             $scope.rangeSelections = [
                 30 * 60 * 1000, // 30 minutes

@@ -19,13 +19,13 @@
 
 
 angular
-        .module('GtTransaction')
+        .module('GtCommon')
         .factory('model', ModelFactory);
 
 
 /**
  * Allows Controllers to share the same Range object
- * 
+ *
  * @returns {ModelFactory.ModelRangeFactoryAnonym$0}
  */
 function ModelFactory() {

@@ -24,13 +24,10 @@ angular
 
 
 TransactionCtrl.$inject = [
-    '$scope', '$location', '$timeout', 'queryStrings', 'charts', 'model'
+    '$scope', '$location', '$timeout', 'queryStrings', 'charts'
 ];
 
-function TransactionCtrl($scope, $location, $timeout, queryStrings, charts, model) {
-    $scope.model = model;
-    $scope.range = model.range;
-
+function TransactionCtrl($scope, $location, $timeout, queryStrings, charts) {
     $scope.hideAgentRollupDropdown = function () {
         return $scope.layout.agentRollups.length === 1 || !$scope.layout.central;
     };
@@ -106,7 +103,7 @@ function TransactionCtrl($scope, $location, $timeout, queryStrings, charts, mode
     function onLocationChangeSuccess() {
         $scope.model.transactionType = $location.search()['transaction-type'];
         $scope.model.transactionName = $location.search()['transaction-name'];
-        
+
         if ($scope.$state.includes('page.transaction')) {
             // Transactions
             $scope.shortName = 'transaction';
@@ -166,62 +163,6 @@ function TransactionCtrl($scope, $location, $timeout, queryStrings, charts, mode
 
     $scope.tabQueryString = function () {
         return queryStrings.encodeObject($scope.buildQueryObject({}));
-    };
-
-    $scope.buildQueryObject = function (baseQuery, allowSeconds) {
-        var query = baseQuery || angular.copy($location.search());
-        if ($scope.layout.central) {
-            var agentRollup = $scope.layout.agentRollups[$scope.agentRollupId];
-            if (agentRollup) {
-                if (agentRollup.agent) {
-                    query['agent-id'] = $scope.agentRollupId;
-                } else {
-                    query['agent-rollup-id'] = $scope.agentRollupId;
-                }
-            }
-        }
-        query['transaction-type'] = $scope.model.transactionType;
-        query['transaction-name'] = $scope.model.transactionName;
-        if (!$scope.range.last) {
-            if (allowSeconds) {
-                query.from = $scope.range.chartFrom;
-                query.to = $scope.range.chartTo;
-            } else {
-                query.from = Math.floor($scope.range.chartFrom / 60000) * 60000;
-                query.to = Math.ceil($scope.range.chartTo / 60000) * 60000;
-            }
-            delete query.last;
-        } else if ($scope.range.last !== 4 * 60 * 60 * 1000) {
-            query.last = $scope.range.last;
-            delete query.from;
-            delete query.to;
-        }
-        if ($scope.summarySortOrder !== $scope.defaultSummarySortOrder) {
-            query['summary-sort-order'] = $scope.summarySortOrder;
-        } else {
-            delete query['summary-sort-order'];
-        }
-        return query;
-    };
-
-    /**
-     * Generate object used in $state.go and ui-sref
-     * 
-     * @param {type} baseQuery
-     * @param {type} allowSeconds
-     * @returns {unresolved}
-     */
-    $scope.buildStateParams = function (baseQuery, allowSeconds) {
-        var params = $scope.buildQueryObject(baseQuery, allowSeconds);
-        var out = {};
-        for (var a in params) {
-            if (params.hasOwnProperty(a)) {
-                out[a.replace(/-(.)/g, function ($0, $1) {
-                    return $1.toUpperCase();
-                })] = params[a];
-            }
-        }
-        return out;
     };
 
     $scope.currentTabUrl = function () {

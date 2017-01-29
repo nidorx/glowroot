@@ -109,7 +109,6 @@ function TransactionTabsCtrl($scope, $state, $location, $http, $timeout, querySt
                         filteredTraceTabCount = undefined;
                     }
                     $scope.traceCount = response.data;
-                    $scope.stateParams = $scope.buildStateParams();
 
                 }, function (response) {
                     concurrentUpdateCount--;

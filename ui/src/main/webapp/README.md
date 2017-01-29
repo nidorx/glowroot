@@ -64,3 +64,5 @@
 - [ ] Login
     - [ ] i18n
 
+## Removed
+ ZeroClipboard

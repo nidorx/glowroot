@@ -85,7 +85,7 @@ function AppConfig($stateProvider, $urlRouterProvider) {
             })
             .state('page.transaction', {
                 abstract: true,
-                url: '/transaction?agent-id&agent-rollup-id&transaction-type&transaction-name&last&from&to',
+                url: '/transaction?agent-id&agent-rollup-id&transaction-type&{transaction-name:nonURIEncoded}&last&from&to',
                 templateUrl: urlTemplate('Transaction', 'GtTransaction'),
                 resolve: {
                     mdl: resolveModule('GtTransaction'),
@@ -94,39 +94,42 @@ function AppConfig($stateProvider, $urlRouterProvider) {
             })
             .state('page.error', {
                 abstract: true,
-                url: '/error?agent-id&agent-rollup-id&transaction-type&transaction-name&last&from&to',
-                templateUrl: urlTemplate('GtTransaction', 'GtTransaction'),
+                url: '/error?agent-id&agent-rollup-id&transaction-type&{transaction-name:nonURIEncoded}&last&from&to',
+                templateUrl: urlTemplate('Transaction', 'GtTransaction'),
                 resolve: {
                     mdl: resolveModule('GtTransaction'),
                     waitForLayout: WaitForLayoutResolver(true)
                 }
             })
             .state('page.jvm', {
-                url: '/jvm',
-                templateUrl: urlTemplate('jvm', 'Jvm'),
+                url: '/jvm?agent-id&agent-rollup-id',
+                templateUrl: urlTemplate('Jvm', 'GtJvm'),
                 resolve: {
-                    waitForLayout: WaitForLayoutResolver(false)
+                    mdl: resolveModule('GtJvm'),
+                    waitForLayout: WaitForLayoutResolver(false),
                 }
             })
             .state('page.report', {
                 url: '/report',
-                templateUrl: urlTemplate('report', 'Report'),
+                templateUrl: urlTemplate('Report', 'GtReport'),
                 resolve: {
+                    mdl: resolveModule('GtReport'),
                     waitForLayout: WaitForLayoutResolver(false)
                 }
             })
             .state('page.config', {
                 url: '/config',
-                templateUrl: urlTemplate('config', 'Config'),
-                controller: 'ConfigCtrl',
+                templateUrl: urlTemplate('Config', 'GtConfig'),
                 resolve: {
+                    mdl: resolveModule('GtConfig'),
                     waitForLayout: WaitForLayoutResolver(false)
                 }
             })
             .state('page.admin', {
                 url: '/admin',
-                templateUrl: urlTemplate('admin', 'Admin'),
+                templateUrl: urlTemplate('Admin', 'GtAdmin'),
                 resolve: {
+                    mdl: resolveModule('GtAdmin'),
                     waitForLayout: WaitForLayoutResolver(false)
                 }
             })
