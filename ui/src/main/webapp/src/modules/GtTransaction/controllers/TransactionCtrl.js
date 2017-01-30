@@ -28,76 +28,9 @@ TransactionCtrl.$inject = [
 ];
 
 function TransactionCtrl($scope, $location, $timeout, queryStrings, charts) {
-    $scope.hideAgentRollupDropdown = function () {
-        return $scope.layout.agentRollups.length === 1 || !$scope.layout.central;
-    };
-
-    $scope.hideTransactionTypeDropdown = function () {
-        var agentRollup = $scope.layout.agentRollups[$scope.agentRollupId];
-        if (!agentRollup) {
-            // show empty dropdown
-            return false;
-        }
-        var transactionTypes = agentRollup.transactionTypes;
-        if (!transactionTypes) {
-            // show empty dropdown
-            return false;
-        }
-        if (transactionTypes.length === 1 && transactionTypes[0] === $scope.model.transactionType) {
-            return true;
-        }
-        return false;
-    };
 
     $scope.hideMainContent = function () {
         return ($scope.layout.central && !$scope.agentRollupId) || !$scope.model.transactionType;
-    };
-
-    $scope.headerQueryString = function (agentRollup, transactionType) {
-        var query = {};
-        if ($scope.layout.central) {
-            if (agentRollup.agent) {
-                query['agent-id'] = agentRollup.id;
-            } else {
-                query['agent-rollup-id'] = agentRollup.id;
-            }
-        }
-        if (transactionType) {
-            query['transaction-type'] = transactionType;
-        } else {
-            query['transaction-type'] = agentRollup.defaultDisplayedTransactionType;
-        }
-        if ($scope.range.last) {
-            if ($scope.range.last !== 4 * 60 * 60 * 1000) {
-                query.last = $scope.range.last;
-            }
-        } else {
-            query.from = $scope.range.chartFrom;
-            query.to = $scope.range.chartTo;
-        }
-        return queryStrings.encodeObject(query);
-    };
-
-    // TODO this is exact duplicate of same function in gauge-values.js
-    $scope.applyLast = function () {
-        if (!$scope.range.last) {
-            return;
-        }
-        var now = moment().startOf('second').valueOf();
-        var from = now - $scope.range.last;
-        var to = now + $scope.range.last / 10;
-        var dataPointIntervalMillis = charts.getDataPointIntervalMillis(from, to);
-        var revisedFrom = Math.floor(from / dataPointIntervalMillis) * dataPointIntervalMillis;
-        var revisedTo = Math.ceil(to / dataPointIntervalMillis) * dataPointIntervalMillis;
-        var revisedDataPointIntervalMillis = charts.getDataPointIntervalMillis(revisedFrom, revisedTo);
-        if (revisedDataPointIntervalMillis !== dataPointIntervalMillis) {
-            // expanded out to larger rollup threshold so need to re-adjust
-            // ok to use original from/to instead of revisedFrom/revisedTo
-            revisedFrom = Math.floor(from / revisedDataPointIntervalMillis) * revisedDataPointIntervalMillis;
-            revisedTo = Math.ceil(to / revisedDataPointIntervalMillis) * revisedDataPointIntervalMillis;
-        }
-        $scope.range.chartFrom = revisedFrom;
-        $scope.range.chartTo = revisedTo;
     };
 
     function onLocationChangeSuccess() {
@@ -127,21 +60,21 @@ function TransactionCtrl($scope, $location, $timeout, queryStrings, charts) {
         $scope.page.breadcrumb = null;
 
 
-        $scope.range.last = Number($location.search().last);
-        $scope.range.chartFrom = Number($location.search().from);
-        $scope.range.chartTo = Number($location.search().to);
+//        $scope.range.last = Number($location.search().last);
+//        $scope.range.chartFrom = Number($location.search().from);
+//        $scope.range.chartTo = Number($location.search().to);
 
 
         // both from and to must be supplied or neither will take effect
-        if (!isNaN($scope.range.chartFrom) && !isNaN($scope.range.chartTo)) {
-            $scope.range.last = 0;
-        } else if (!$scope.range.last) {
-            $scope.range.last = 4 * 60 * 60 * 1000;
-        }
+//        if (!isNaN($scope.range.chartFrom) && !isNaN($scope.range.chartTo)) {
+//            $scope.range.last = 0;
+//        } else if (!$scope.range.last) {
+//            $scope.range.last = 4 * 60 * 60 * 1000;
+//        }
         $scope.summarySortOrder = $location.search()['summary-sort-order'] || $scope.defaultSummarySortOrder;
 
         // always re-apply last in order to reflect the latest time
-        $scope.applyLast();
+//        charts.applyLast($scope.range.last, $scope.range);
     }
 
     // need to defer listener registration, otherwise captures initial location change sometimes

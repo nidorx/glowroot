@@ -21,16 +21,14 @@ angular
 
 
 JvmGaugeValuesCtrl.$inject = [
-    '$scope', '$location', '$filter', '$http', 'locationChanges', 'charts', 'keyedColorPools', 'queryStrings', 'httpErrors'
+    '$scope', '$location', '$filter', '$http', 'locationChanges', 'charts', 'httpErrors'
 ];
 
-function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, charts, keyedColorPools, queryStrings, httpErrors) {
+function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, charts, httpErrors) {
     // Page header
     $scope.page.title = 'JVM - Gauges';
 
     if ($scope.hideMainContent()) {
-        // these are needed to prevent nested controller chart-range.js from throwing errors
-        $scope.range = {};
         $scope.buildQueryObject = function () {
             return {};
         };
@@ -59,22 +57,15 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
     $scope.page.gaugeFilter = '';
     $scope.useGaugeViewThresholdMultiplier = true;
 
-    $scope.range = {};
-
-    $scope.currentTabUrl = function () {
-        return 'jvm/gauges';
-    };
-
     function refreshData(autoRefresh) {
         var query = {
             agentRollupId: $scope.agentRollupId,
-            transactionType: $scope.model.transactionType,
-            transactionName: $scope.model.transactionName,
-            from: $scope.range.chartFrom,
-            to: $scope.range.chartTo,
-            autoRefresh: autoRefresh
+            from: $scope.chartFrom,
+            to: $scope.chartTo,
+            autoRefresh: autoRefresh,
+            gaugeNames: $scope.gaugeNames
         };
-        charts.refreshData('backend/jvm/gauges', chartState, $scope, null, addToQuery, onRefreshData, query);
+        charts.refreshData('backend/jvm/gauges', chartState, $scope, null, null, onRefreshData, query);
     }
 
     function watchListener(autoRefresh) {
@@ -89,12 +80,17 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
         }
     }
 
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh', 'range.chartAutoRefresh'],
-            function (newValues, oldValues) {
-                if (newValues !== oldValues) {
-                    watchListener(newValues[3] !== oldValues[3]);
-                }
-            });
+    $scope.$watchGroup([
+        'chartFrom',
+        'chartTo',
+        'chartRefresh',
+        'chartAutoRefresh'
+    ], function (newValues, oldValues) {
+        console.log(newValues, oldValues);
+        if (newValues !== oldValues) {
+            watchListener(newValues[3] !== oldValues[3]);
+        }
+    });
 
     $scope.$watchCollection('gaugeNames', function (newValue, oldValue) {
         if (newValue !== oldValue || newValue.length) {
@@ -114,22 +110,18 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
         }
     });
 
-    $scope.smallScreen = function () {
-        // using innerWidth so it will match to screen media queries
-        return window.innerWidth < 768;
-    };
-
     $scope.buildQueryObject = function (baseQuery) {
         var query = baseQuery || angular.copy($location.search());
         delete query.from;
         delete query.to;
         delete query.last;
-        if (!$scope.range.last) {
-            query.from = $scope.range.chartFrom;
-            query.to = $scope.range.chartTo;
-        } else if ($scope.range.last !== 4 * 60 * 60 * 1000) {
-            query.last = $scope.range.last;
+        if (!$scope.last) {
+            query.from = $scope.chartFrom;
+            query.to = $scope.chartTo;
+        } else {
+            query.last = $scope.last;
         }
+
         if (angular.equals($scope.gaugeNames, DEFAULT_GAUGES)) {
             delete query['gauge-name'];
         } else {
@@ -138,33 +130,7 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
         return query;
     };
 
-    // TODO this is exact duplicate of same function in transaction.js
-    $scope.applyLast = function () {
-        if (!$scope.range.last) {
-            return;
-        }
-        var now = moment().startOf('second').valueOf();
-        var from = now - $scope.range.last;
-        var to = now + $scope.range.last / 10;
-        var dataPointIntervalMillis = charts.getDataPointIntervalMillis(from, to, true);
-        var revisedFrom = Math.floor(from / dataPointIntervalMillis) * dataPointIntervalMillis;
-        var revisedTo = Math.ceil(to / dataPointIntervalMillis) * dataPointIntervalMillis;
-        var revisedDataPointIntervalMillis = charts.getDataPointIntervalMillis(revisedFrom, revisedTo, true);
-        if (revisedDataPointIntervalMillis !== dataPointIntervalMillis) {
-            // expanded out to larger rollup threshold so need to re-adjust
-            // ok to use original from/to instead of revisedFrom/revisedTo
-            revisedFrom = Math.floor(from / revisedDataPointIntervalMillis) * revisedDataPointIntervalMillis;
-            revisedTo = Math.ceil(to / revisedDataPointIntervalMillis) * revisedDataPointIntervalMillis;
-        }
-        $scope.range.chartFrom = revisedFrom;
-        $scope.range.chartTo = revisedTo;
-    };
-
     var location;
-
-    function addToQuery(query) {
-        query.gaugeNames = $scope.gaugeNames;
-    }
 
     function onRefreshData(data) {
         updatePlotData(data.dataSeries);
@@ -174,7 +140,9 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
         }
     }
 
-    locationChanges.on($scope, function () {
+    locationChanges.on($scope, onLocationChanges);
+
+    function onLocationChanges() {
         var priorLocation = location;
         location = {};
         location.last = Number($location.search().last);
@@ -195,18 +163,20 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
                 }
             });
         }
+
         if (!angular.isArray(location.gaugeNames)) {
             location.gaugeNames = [location.gaugeNames];
         }
+
         if (!angular.equals(location, priorLocation)) {
             // only update scope if relevant change
             $scope.gaugeNames = angular.copy(location.gaugeNames);
-            $scope.range.last = location.last;
-            $scope.range.chartFrom = location.chartFrom;
-            $scope.range.chartTo = location.chartTo;
-            $scope.applyLast();
+            $scope.last = location.last;
+            $scope.chartFrom = location.chartFrom;
+            $scope.chartTo = location.chartTo;
+            charts.applyLast($scope);
         }
-    });
+    }
 
     if (!$scope.hideMainContent()) {
         $http.get('backend/jvm/all-gauges', {
@@ -409,10 +379,6 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
         return k;
     }
 
-    $scope.hasGaugeScale = function (gaugeName) {
-        return gaugeScales[gaugeName] || emptyGaugeNames[gaugeName];
-    };
-
     $scope.gaugeScaleStyle = function (gaugeName) {
         if (gaugeScales[gaugeName]) {
             return {};
@@ -512,9 +478,9 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
             content: function (label, xval, yval, flotItem) {
                 var rollupConfig0 = $scope.layout.rollupConfigs[0];
                 var dataPointIntervalMillis =
-                        charts.getDataPointIntervalMillis($scope.range.chartFrom, $scope.range.chartTo, true);
+                        charts.getDataPointIntervalMillis($scope.chartFrom, $scope.chartTo, true);
                 if (dataPointIntervalMillis === rollupConfig0.intervalMillis
-                        && $scope.range.chartTo - $scope.range.chartFrom < 4 * rollupConfig0.viewThresholdMillis) {
+                        && $scope.chartTo - $scope.chartFrom < 4 * rollupConfig0.viewThresholdMillis) {
                     var nonScaledValue = yvalMaps[label][xval];
                     var tooltip = '<table class="gt-chart-tooltip">';
                     tooltip += '<tr><td colspan="2" style="font-weight: 600;">' + gaugeShortDisplayMap[label];
@@ -542,8 +508,9 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
     };
 
     $scope.chartState = chartState;
-    charts.init(chartState, $('#chart'), $scope);
-    charts.plot([[]], chartOptions, chartState, $('#chart'), $scope);
+    var $chart = angular.element('#chart');
+    charts.init(chartState, $chart, $scope);
+    charts.plot([[]], chartOptions, chartState, $chart, $scope);
     charts.initResize(chartState.plot, $scope);
     charts.startAutoRefresh($scope, 60000);
 }

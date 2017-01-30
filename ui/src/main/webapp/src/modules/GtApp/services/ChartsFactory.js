@@ -45,7 +45,22 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
 
     function init(chartState, $chart, $scope) {
 
+        // All chart vars
+        if (!$scope.last || Number.isNaN($scope.last)) {
+            if ((!$scope.chartFrom || Number.isNaN($scope.chartFrom)) || !$scope.chartTo || Number.isNaN($scope.chartTo)) {
+                $scope.last = 4 * 60 * 60 * 1000;
+            }
+        }
+        //$scope.chartFrom = undefined;
+        //$scope.chartTo = undefined;
+        $scope.chartNoData = false;
+        $scope.seriesLabels = null;
+        $scope.chartRefresh = 0;
         $scope.showChartSpinner = 0;
+        $scope.suppressChartSpinner = false;
+        $scope.useGaugeViewThresholdMultiplier = null;
+
+        applyLast($scope);
 
         $chart.bind('plotzoom', function (event, plot, args) {
             var zoomingOut = args.amount && args.amount < 1;
@@ -66,8 +81,8 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
         });
 
         $scope.zoomOut = function () {
-            var currMin = $scope.range.chartFrom;
-            var currMax = $scope.range.chartTo;
+            var currMin = $scope.chartFrom;
+            var currMax = $scope.chartTo;
             var currRange = currMax - currMin;
             updateRange($scope, currMin - currRange / 2, currMax + currRange / 2, true);
         };
@@ -75,8 +90,8 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
         // Allwo override
         if (!$scope.refresh) {
             $scope.refresh = function () {
-                $scope.applyLast();
-                $scope.range.chartRefresh++;
+                applyLast($scope);
+                $scope.chartRefresh++;
             };
         }
     }
@@ -87,7 +102,7 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
                 plot.resize();
                 plot.setupGrid();
                 plot.draw();
-            }, 0);
+            }, 10);
         }
         $scope.$on('resize', resize);
         resize();
@@ -95,11 +110,11 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
 
     function updateRange($scope, from, to, zoomingOut, selection, selectionNearestLarger, tracePoints) {
         // force chart refresh even if chartFrom/chartTo don't change (e.g. trying to zoom in beyond single interval)
-        $scope.range.chartRefresh++;
+        $scope.chartRefresh++;
 
-        if (zoomingOut && $scope.range.last) {
-            $scope.range.last = roundUpLast($scope.range.last * 2);
-            $scope.applyLast();
+        if (zoomingOut && $scope.last) {
+            $scope.last = roundUpLast($scope.last * 2);
+            applyLast($scope);
             return;
         }
 
@@ -135,40 +150,40 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
         var now = Date.now();
         // need to compare original 'to' in case it was revised below 'now'
         if ((revisedTo > now || to > now) && (!tracePoints || revisedTo - revisedFrom >= 60000)) {
-            if (!zoomingOut && !selection && $scope.range.last) {
-                if (tracePoints && $scope.range.last === 60000) {
-                    $scope.range.chartTo = Math.ceil(now / 60000) * 60000;
-                    $scope.range.chartFrom = $scope.range.chartTo - 60000;
-                    $scope.range.last = 0;
+            if (!zoomingOut && !selection && $scope.last) {
+                if (tracePoints && $scope.last === 60000) {
+                    $scope.chartTo = Math.ceil(now / 60000) * 60000;
+                    $scope.chartFrom = $scope.chartTo - 60000;
+                    $scope.last = 0;
                     return;
                 }
                 // double-click or scrollwheel zooming in, need special case here, otherwise might zoom in a bit too much
                 // due to shrinking the zoom to data point interval, which could result in strange 2 days --> 22 hours
                 // instead of the more obvious 2 days --> 1 day
-                $scope.range.last = roundUpLast($scope.range.last / 2);
-                $scope.applyLast();
+                $scope.last = roundUpLast($scope.last / 2);
+                applyLast($scope);
                 return;
             }
             if (tracePoints && revisedTo - revisedFrom === 120000) {
-                $scope.range.last = 60000;
-                $scope.applyLast();
+                $scope.last = 60000;
+                applyLast($scope);
                 return;
             }
             if (tracePoints && now < revisedFrom) {
                 // this can happen after zooming in on RHS of chart until 1 second total chart width, then zooming out on LHS
-                $scope.range.last = 60000;
-                $scope.applyLast();
+                $scope.last = 60000;
+                applyLast($scope);
                 return;
             }
             var last = roundUpLast(now - revisedFrom, selection);
             if (last > 0) {
-                $scope.range.last = last;
+                $scope.last = last;
             }
-            $scope.applyLast();
+            applyLast($scope);
         } else {
-            $scope.range.chartFrom = revisedFrom;
-            $scope.range.chartTo = revisedTo;
-            $scope.range.last = 0;
+            $scope.chartFrom = revisedFrom;
+            $scope.chartTo = revisedTo;
+            $scope.last = 0;
         }
     }
 
@@ -237,8 +252,8 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
                 timezone: 'browser',
                 twelveHourClock: true,
                 ticks: 5,
-                min: $scope.range.chartFrom,
-                max: $scope.range.chartTo,
+                min: $scope.chartFrom,
+                max: $scope.chartTo,
                 reserveSpace: false
             },
             yaxis: {
@@ -292,6 +307,7 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
             $scope.showChartSpinner++;
         }
         $scope.suppressChartSpinner = false;
+        console.log('query', query);
         $http.get(url + queryStrings.encodeObject(query)).then(function (response) {
             // clear http error, especially useful for auto refresh on live data to clear a sporadic error from earlier
             httpErrors.clear();
@@ -364,7 +380,8 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
         }
     }
 
-    function renderTooltipHtml(from, to, transactionCount, dataIndex, highlightSeriesIndex, plot, display,
+    function renderTooltipHtml(
+            from, to, transactionCount, dataIndex, highlightSeriesIndex, plot, display,
             headerSuffix, nonStacked, dateFormat, altBetweenText) {
         function smartFormat(millis) {
             var date = moment(millis);
@@ -444,7 +461,7 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
 
         function onVisible() {
             $scope.$apply(function () {
-                $scope.range.chartAutoRefresh++;
+                $scope.chartAutoRefresh++;
                 $scope.refresh();
             });
             document.removeEventListener('visibilitychange', onVisible);
@@ -452,14 +469,14 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
 
         function scheduleNextRefresh() {
             timer = $timeout(function () {
-                if ($scope.range.last) {
+                if ($scope.last) {
                     // document.hidden is not supported by IE9 but that's ok, the condition will just evaluate to false
                     // and auto refresh will continue even while hidden under IE9
                     if (document.hidden) {
                         document.addEventListener('visibilitychange', onVisible);
                     } else {
                         $scope.suppressChartSpinner = true;
-                        $scope.range.chartAutoRefresh++;
+                        $scope.chartAutoRefresh++;
                         $scope.refresh();
                     }
                 }
@@ -474,16 +491,45 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
         });
     }
 
+    /**
+     * always re-apply last in order to reflect the latest time
+     *
+     * @param {type} $scope
+     * @returns {undefined}
+     */
+    function applyLast($scope) {
+        if (!$scope.last) {
+            return;
+        }
+        var now = moment().startOf('second').valueOf();
+        var from = now - $scope.last;
+        var to = now + $scope.last / 10;
+        var dataPointIntervalMillis = getDataPointIntervalMillis(from, to);
+        var revisedFrom = Math.floor(from / dataPointIntervalMillis) * dataPointIntervalMillis;
+        var revisedTo = Math.ceil(to / dataPointIntervalMillis) * dataPointIntervalMillis;
+        var revisedDataPointIntervalMillis = getDataPointIntervalMillis(revisedFrom, revisedTo);
+        if (revisedDataPointIntervalMillis !== dataPointIntervalMillis) {
+            // expanded out to larger rollup threshold so need to re-adjust
+            // ok to use original from/to instead of revisedFrom/revisedTo
+            revisedFrom = Math.floor(from / revisedDataPointIntervalMillis) * revisedDataPointIntervalMillis;
+            revisedTo = Math.ceil(to / revisedDataPointIntervalMillis) * revisedDataPointIntervalMillis;
+        }
+
+        $scope.chartFrom = revisedFrom;
+        $scope.chartTo = revisedTo;
+    }
+
     return {
-        createState: createState,
         init: init,
-        initResize: initResize,
         plot: plot,
+        applyLast: applyLast,
+        initResize: initResize,
         refreshData: refreshData,
-        renderTooltipHtml: renderTooltipHtml,
         updateRange: updateRange,
+        createState: createState,
+        startAutoRefresh: startAutoRefresh,
+        renderTooltipHtml: renderTooltipHtml,
         getDataPointIntervalMillis: getDataPointIntervalMillis,
-        startAutoRefresh: startAutoRefresh
     };
 }
 

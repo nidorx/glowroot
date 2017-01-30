@@ -24,15 +24,40 @@ angular
 
 
 GtChartRangeDirective.$inject = [
-    '$location', 'queryStrings', 'charts', 'modals'
+    '$location', 'locationChanges', 'modals',
 ];
 
-function GtChartRangeDirective($location, queryStrings, charts, modals) {
+function GtChartRangeDirective($location, locationChanges, modals) {
     return {
         templateUrl: 'modules/GtApp/templates/GtChartRange.html',
         link: function ($scope) {
             $scope.range.chartRefresh = 0;
             $scope.range.chartAutoRefresh = 0;
+
+
+            $scope.rangeSelections = [
+                30 * 60 * 1000, // 30 minutes
+                60 * 60 * 1000, // 60 minutes
+                2 * 60 * 60 * 1000, // 2 hours
+                4 * 60 * 60 * 1000, // 4 hours
+                8 * 60 * 60 * 1000, // 8 hours
+                24 * 60 * 60 * 1000, // 24 hours
+                2 * 24 * 60 * 60 * 1000, // 2 days
+                7 * 24 * 60 * 60 * 1000, // 7 days
+                30 * 24 * 60 * 60 * 1000 // 30 days
+            ];
+
+            locationChanges.on($scope, function () {
+                $scope.last = Number($location.search().last);
+                if (!$scope.last || Number.isNaN($scope.last)) {
+                    $scope.chartFrom = Number($location.search().from);
+                    $scope.chartTo = Number($location.search().to);
+                    if ((!$scope.chartFrom || Number.isNaN($scope.chartFrom))
+                            || !$scope.chartTo || Number.isNaN($scope.chartTo)) {
+                        $scope.last = 4 * 60 * 60 * 1000;
+                    }
+                }
+            });
 
             function fancyDate(date) {
                 var today = new Date();
@@ -76,13 +101,13 @@ function GtChartRangeDirective($location, queryStrings, charts, modals) {
             };
 
             $scope.timeDisplay = function () {
-                if ($scope.range.last) {
-                    return $scope.lastDisplay($scope.range.last);
+                if ($scope.last) {
+                    return $scope.lastDisplay($scope.last);
                 }
                 // need floor/ceil when on trace point chart which allows second granularity
                 // this is so that time frame display matches sidebar time frame, which seems least confusing alternative
-                var from = Math.floor($scope.range.chartFrom / 60000) * 60000;
-                var to = Math.ceil($scope.range.chartTo / 60000) * 60000;
+                var from = Math.floor($scope.chartFrom / 60000) * 60000;
+                var to = Math.ceil($scope.chartTo / 60000) * 60000;
                 var fromDate = fancyDate(from);
                 var toDate = fancyDate(to);
                 if (fromDate === toDate) {
@@ -93,32 +118,14 @@ function GtChartRangeDirective($location, queryStrings, charts, modals) {
             };
 
             $scope.buildRangeParams = function (last) {
-                var params = $scope.buildStateParams({last:last});
-                var params = $scope.buildQueryObject();
-                delete params['traceChartFrom'];
-                delete params['traceChartTo'];
-                delete params.from;
-                delete params.to;
-                if (last === 4 * 60 * 60 * 1000) {
-                    delete params.last;
-                } else {
-                    params.last = last;
-                }
+                var params = $scope.buildStateParams({last: last});
+                params.traceChartFrom = null;
+                params.traceChartTo = null;
                 return params;
             };
 
 
-            $scope.rangeSelections = [
-                30 * 60 * 1000, // 30 minutes
-                60 * 60 * 1000, // 60 minutes
-                2 * 60 * 60 * 1000, // 2 hours
-                4 * 60 * 60 * 1000, // 4 hours
-                8 * 60 * 60 * 1000, // 8 hours
-                24 * 60 * 60 * 1000, // 24 hours
-                2 * 24 * 60 * 60 * 1000, // 2 days
-                7 * 24 * 60 * 60 * 1000, // 7 days
-                30 * 24 * 60 * 60 * 1000 // 30 days
-            ];
+
 
             $scope.openCustomRange = function () {
                 modals.display('#customDateRangeModal', true);
@@ -131,8 +138,8 @@ function GtChartRangeDirective($location, queryStrings, charts, modals) {
                     previous: 'fa fa-chevron-left',
                     next: 'fa fa-chevron-right'
                 };
-                var from = $scope.range.chartFrom;
-                var to = $scope.range.chartTo;
+                var from = $scope.chartFrom;
+                var to = $scope.chartTo;
                 $('#customDateRangeFromDate').datetimepicker({
                     icons: icons,
                     format: 'L'
@@ -166,6 +173,7 @@ function GtChartRangeDirective($location, queryStrings, charts, modals) {
                 var fromTime = $('#customDateRangeFromTime').data('DateTimePicker').date();
                 var toDate = $('#customDateRangeToDate').data('DateTimePicker').date();
                 var toTime = $('#customDateRangeToTime').data('DateTimePicker').date();
+
                 $scope.range.chartFrom = fromDate + timeComponent(fromTime);
                 $scope.range.chartTo = toDate + timeComponent(toTime);
                 $scope.range.last = 0;

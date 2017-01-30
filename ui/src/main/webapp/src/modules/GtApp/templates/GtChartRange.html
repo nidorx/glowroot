@@ -20,15 +20,11 @@
     </button>
     <ul class="dropdown-menu">
         <li
-            ng-repeat="last in rangeSelections"
-            ng-class="{selected:last === range.last}"
+            ng-repeat="selection in rangeSelections"
+            ng-class="{selected:selection === last}"
             >
-            <a
-                role="menuitem"
-                tabindex="-1"
-                ui-sref="{{::buildRangeParams(last)}}"
-                >
-                {{lastDisplay(last)}}
+            <a role="menuitem" tabindex="-1" ui-sref="{{buildRangeParams(selection)}}">
+                {{lastDisplay(selection)}}
             </a>
         </li>
         <li>

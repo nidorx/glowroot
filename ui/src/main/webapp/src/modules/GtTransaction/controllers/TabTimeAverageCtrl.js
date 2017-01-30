@@ -25,7 +25,7 @@ TransactionTabTimeAverageCtrl.$inject = ['$scope', '$location', 'charts', 'model
 
 function TransactionTabTimeAverageCtrl($scope, $location, charts, model) {
     $scope.model = model;
-    $scope.range = model.range;
+    //$scope.range = model.range;
 
 //    if ($scope.hideMainContent()) {
 //        return;
@@ -35,29 +35,30 @@ function TransactionTabTimeAverageCtrl($scope, $location, charts, model) {
     var chartState = charts.createState();
 
     function refreshData(autoRefresh) {
+        console.log('query', $scope.chartFrom);
         var query = {
             agentRollupId: $scope.agentRollupId,
             transactionType: $scope.model.transactionType,
             transactionName: $scope.model.transactionName,
-            from: $scope.range.chartFrom,
-            to: $scope.range.chartTo,
+            from: $scope.chartFrom,
+            to: $scope.chartTo,
             autoRefresh: autoRefresh
         };
         charts.refreshData('backend/transaction/average', chartState, $scope, null, null, onRefreshData, query);
     }
 
     $scope.$watchGroup([
-        'range.chartFrom',
-        'range.chartTo',
-        'range.chartRefresh',
-        'range.chartAutoRefresh'
+        'chartFrom',
+        'chartTo',
+        'chartRefresh',
+        'chartAutoRefresh'
     ], function (newValues, oldValues) {
         refreshData(newValues[3] !== oldValues[3]);
     });
 
     $scope.clickTopRadioButton = function (item) {
         if (item === 'average') {
-            $scope.range.chartRefresh++;
+            $scope.chartRefresh++;
         } else {
             $location.url('transaction/' + item + $scope.tabQueryString());
         }
@@ -65,7 +66,7 @@ function TransactionTabTimeAverageCtrl($scope, $location, charts, model) {
 
     $scope.clickActiveTopLink = function (event) {
         if (!event.ctrlKey) {
-            $scope.range.chartRefresh++;
+            $scope.chartRefresh++;
             // suppress normal link
             event.preventDefault();
             return false;
@@ -210,6 +211,7 @@ function TransactionTabTimeAverageCtrl($scope, $location, charts, model) {
     };
 
     charts.init(chartState, $('#chart'), $scope);
+    console.log('$scope', $scope.chartFrom);
     charts.plot([[]], chartOptions, chartState, $('#chart'), $scope);
     charts.initResize(chartState.plot, $scope);
     charts.startAutoRefresh($scope, 60000);

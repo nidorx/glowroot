@@ -308,19 +308,19 @@ function AppRun($rootScope, $state, $http, $location, $timeout, login, queryStri
                 }
             }
         }
-        if (!$rootScope.range.last) {
+        if (!params.last) {
             params.from = Math.floor($rootScope.range.chartFrom / 60000) * 60000;
             params.to = Math.ceil($rootScope.range.chartTo / 60000) * 60000;
-            delete params.last;
-        } else if ($rootScope.range.last !== 4 * 60 * 60 * 1000) {
-            params.last = $rootScope.range.last;
-            delete params.from;
-            delete params.to;
+            params.last = null;
+        } else {
+            params.from = null;
+            params.to = null;
         }
+
         if ($rootScope.summarySortOrder !== $rootScope.defaultSummarySortOrder) {
             params.summarySortOrder = $rootScope.summarySortOrder;
         } else {
-            delete params.summarySortOrder;
+            params.summarySortOrder = null;
         }
 
         // Output as name-param:value

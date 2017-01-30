@@ -27,7 +27,7 @@ function JvmRoutes($stateProvider) {
 
     $stateProvider
             .state('page.jvm.gauges', {
-                url: '/gauges?&last&from&to',
+                url: '/gauges?&last&from&to&gauge-name',
                 templateUrl: urlTemplate('GaugeValues', 'GtJvm')
             })
             .state('page.jvm.threadDump', {
