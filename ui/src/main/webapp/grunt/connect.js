@@ -32,8 +32,8 @@ module.exports = {
             livereload: '<%= connectLivereload %>',
             open: true,
             base: [
-                'dist', // build
-                'src' // fonte
+                '<%= distDir %>', // build
+                '<%= srcDir %>' // fonte
             ],
             middleware: function (connect, options, middlewares) {
                 // Faz redirect de arquivos SASS para o CSS compilado
@@ -61,7 +61,7 @@ module.exports = {
             hostname: 'localhost',
             open: true,
             keepalive: true,
-            base: ['dist'],
+            base: ['<%= distDir %>'],
             middleware: function (connect, options, middlewares) {
                 middlewares.push(function (req, res, next) {
                     // X-UA-Compatible must be set via header (as opposed to via meta tag)

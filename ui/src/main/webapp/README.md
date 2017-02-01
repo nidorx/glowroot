@@ -30,7 +30,7 @@
 
 - [ ] JVM
     - [ ] i18n
-    - [ ] Gauges
+    - [x] Gauges
     - [ ] Thread dump
         - [ ] Export
     - [ ] Heap histogram

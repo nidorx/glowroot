@@ -17,12 +17,12 @@
 /* global Glowroot, HandlebarsRendering, $ */
 
 angular
-        .module('GtTransaction')
+        .module('GtCommon')
         .factory('traceModal', TraceModalFactory);
 
-TraceModalFactory.$inject = ['$http', 'modals'];
+TraceModalFactory.$inject = ['$http', 'modals', '$uibModal'];
 
-function TraceModalFactory($http, modals) {
+function TraceModalFactory($http, modals, $uibModal) {
 
     function displayModal(agentRollupId, agentId, traceId, checkLiveTraces) {
 

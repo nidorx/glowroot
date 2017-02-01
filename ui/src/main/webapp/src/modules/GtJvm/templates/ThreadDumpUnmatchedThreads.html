@@ -1,0 +1,57 @@
+<div class="threads">
+    <div class="section-header">
+        <h2>
+            Unmatched Threads 
+            <button
+                class="btn btn-default pull-right"
+                ng-click="data._showUnmatchedThreads = true;"
+                ng-if="!data._showUnmatchedThreads"
+                >
+                <span class="glyphicon glyphicon-eye-open"></span>
+                Show
+            </button>
+            <button
+                class="btn btn-default pull-right"
+                ng-click="data._showUnmatchedThreads = false;"
+                ng-if="data._showUnmatchedThreads"
+                >
+                <span class="glyphicon glyphicon-eye-close"></span>
+                Hide
+            </button>
+            <p class="lead">
+                this may possibly include currently executing transactions that just started or just ended
+            </p>
+        </h2>
+    </div>
+    <div ng-if="data._showUnmatchedThreads">
+        <ul class="list-group list-view-pf list-view-pf-view">
+            <li ng-repeat="item in data.unmatchedThreads" class="list-group-item list-view-pf-expand-active">
+                <div class="list-group-item-header">
+                    <div class="list-view-pf-main-info">
+                        <div class="list-view-pf-body">
+                            <div class="list-view-pf-description">
+                                <div class="list-group-item-heading">
+                                    <div class="pull-right">
+                                        <span title="Java Thread State" class="badge">
+                                            {{item.state}}
+                                        </span>
+                                    </div>
+                                    #{{item.id}} - {{item.name}}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div
+                    class="list-group-item-container container-fluid"
+                    ng-if="item.stackTraceElements.length"
+                    >                            
+                    <pre class="entry-message"><code><div 
+                                    ng-repeat="element in item.stackTraceElements" 
+                                    ng-bind-html="element | gtTraceLine"></div></code></pre>
+                </div>
+                <br>
+            </li>
+        </ul>
+    </div>
+</div>

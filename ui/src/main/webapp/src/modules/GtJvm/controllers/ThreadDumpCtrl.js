@@ -20,9 +20,9 @@ angular
         .controller('JvmThreadDumpCtrl', JvmThreadDumpCtrl);
 
 
-JvmThreadDumpCtrl.$inject = ['$scope', '$http', '$location', '$q', 'locationChanges', 'traceModal', 'httpErrors'];
+JvmThreadDumpCtrl.$inject = ['$scope', '$http', '$location',  'locationChanges', 'traceModal', 'httpErrors'];
 
-function JvmThreadDumpCtrl($scope, $http, $location, $q, locationChanges, traceModal, httpErrors) {
+function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal, httpErrors) {
 
     $scope.$parent.heading = 'Thread dump';
 
@@ -32,29 +32,29 @@ function JvmThreadDumpCtrl($scope, $http, $location, $q, locationChanges, traceM
 
     var threadDumpHtml;
 
-    Handlebars.registerHelper('ifBlocked', function (state, options) {
-        if (state === 'BLOCKED') {
-            return options.fn(this);
-        } else {
-            return options.inverse(this);
-        }
-    });
-
-    Handlebars.registerHelper('ifWaiting', function (state, options) {
-        if (state === 'WAITING' || state === 'TIMED_WAITING') {
-            return options.fn(this);
-        } else {
-            return options.inverse(this);
-        }
-    });
-
-    Handlebars.registerHelper('agentIdQueryString', function () {
-        if ($scope.agentId) {
-            return 'agent-id=' + encodeURIComponent($scope.agentId) + '&';
-        } else {
-            return '';
-        }
-    });
+//    Handlebars.registerHelper('ifBlocked', function (state, options) {
+//        if (state === 'BLOCKED') {
+//            return options.fn(this);
+//        } else {
+//            return options.inverse(this);
+//        }
+//    });
+//
+//    Handlebars.registerHelper('ifWaiting', function (state, options) {
+//        if (state === 'WAITING' || state === 'TIMED_WAITING') {
+//            return options.fn(this);
+//        } else {
+//            return options.inverse(this);
+//        }
+//    });
+//
+//    Handlebars.registerHelper('agentIdQueryString', function () {
+//        if ($scope.agentId) {
+//            return 'agent-id=' + encodeURIComponent($scope.agentId) + '&';
+//        } else {
+//            return '';
+//        }
+//    });
 
     $scope.exportAsText = function () {
         var textWindow = window.open();
@@ -81,9 +81,10 @@ function JvmThreadDumpCtrl($scope, $http, $location, $q, locationChanges, traceM
                     if ($scope.agentNotConnected) {
                         return;
                     }
+                    $scope.data = response.data;
                     // $.trim() is needed because this template is sensitive to surrounding spaces
-                    threadDumpHtml = $.trim(JST['thread-dump'](response.data));
-                    $('#threadDump').html('<br>' + threadDumpHtml);
+//                    threadDumpHtml = $.trim(JST['thread-dump'](response.data));
+//                    $('#threadDump').html('<br>' + threadDumpHtml);
                     if (deferred) {
                         deferred.resolve('Refreshed');
                     }

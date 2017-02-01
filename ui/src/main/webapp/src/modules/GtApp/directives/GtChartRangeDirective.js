@@ -30,7 +30,20 @@ GtChartRangeDirective.$inject = [
 function GtChartRangeDirective($location, locationChanges, modals) {
     return {
         templateUrl: 'modules/GtApp/templates/GtChartRange.html',
-        link: function ($scope) {
+        link: function ($scope, $element) {
+
+            $scope.aux = {};
+            
+            $element.on('show.bs.dropdown', function () {
+                $scope.aux.isOpen = true;
+                $scope.$digest();
+            });
+            $element.on('hidden.bs.dropdown', function () {
+                $scope.aux.isOpen = false;
+                $scope.$digest();
+            });
+
+
             $scope.range.chartRefresh = 0;
             $scope.range.chartAutoRefresh = 0;
 

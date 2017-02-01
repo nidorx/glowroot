@@ -1,16 +1,18 @@
 /* global module */
-
-// Diretório de fontes
-var SRC_DIR = 'src';
-
-// Diretório de destino (build)
-var DEST_DIR = 'dist';
+'use strict';
 
 /**
- * Configuração do grunt para permitir o concat automático de depenencias
+ * Configuration of grunt-replace to allow automatic concat of dependencies
+ *
+ * <code>
+ *     <!-- concat:js[:distVendorJS] vendor/vendor.min.js -->
+ *     <script src="vendor/jquery/dist/jquery.min.js"></script>
+ *     <script src="vendor/bootstrap/dist/js/bootstrap.min.js"></script>
+ *     <!-- /concat -->
+ * </code>
  *
  * @param {type} grunt
- * @returns {nm$_concat-replace.module.exports.concat-replaceAnonym$0}
+ * @returns
  */
 module.exports = function (grunt) {
     return {
@@ -18,8 +20,10 @@ module.exports = function (grunt) {
             {
                 expand: true,
                 flatten: true,
-                src: ['src/index.html'],
-                dest: 'dist/'
+                src: [
+                    '<%= srcDir %>/index.html'
+                ],
+                dest: '<%= distDir %>'
             }
         ],
         options: {
@@ -28,11 +32,11 @@ module.exports = function (grunt) {
                     match: /<!--\s*concat:(\S*)\[\:(\S*)\]\s+(\S*)\s*-->((\n|\r|.)*?)<!--\s*\/concat\s*-->/gi,
                     replacement: function ($0, type, target, dest, value) {
 
-                        // Configuração para a tarefa concat para js
+                        // Config for concat task
                         var concatConfig = grunt.config.get('concat') || {};
                         concatConfig[target] = {
                             src: [],
-                            dest: DEST_DIR + '/' + dest
+                            dest: '<%= distDir %>/' + dest
                         };
 
                         var out;
@@ -44,7 +48,7 @@ module.exports = function (grunt) {
                                 if (!match) {
                                     break;
                                 }
-                                concatConfig[target].src.push(SRC_DIR + '/' + match[1]);
+                                concatConfig[target].src.push('<%= srcDir %>/' + match[1]);
                             }
                             out = '<script src="' + dest + '"></script>';
                         } else if (type === 'css') {
@@ -55,7 +59,7 @@ module.exports = function (grunt) {
                                 if (!match) {
                                     break;
                                 }
-                                concatConfig[target].src.push(SRC_DIR + '/' + match[1]);
+                                concatConfig[target].src.push('<%= srcDir %>/' + match[1]);
                             }
                             out = '<link rel="stylesheet" href="' + dest + '" />';
                         } else {

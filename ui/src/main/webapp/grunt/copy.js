@@ -6,18 +6,19 @@ module.exports = {
         failOnError: true,
         updateAndDelete: true
     },
-    distVendor: {
+    dist_vendor_fonts: {
         files: [
             {
-                cwd: 'src/vendor/bootstrap/dist/fonts/',
+                expand: true,
+                cwd: '<%= srcDir %>/vendor/bootstrap/dist/fonts/',
                 src: '*',
-                dest: 'dist/vendor/fonts/',
+                dest: '<%= distDir %>/vendor/fonts/',
                 filter: 'isFile'
             },
             {
-                cwd: 'src/vendor/patternfly/dist/fonts/',
+                cwd: '<%= srcDir %>/vendor/patternfly/dist/fonts/',
                 src: '*',
-                dest: 'dist/vendor/fonts/',
+                dest: '<%= distDir %>/vendor/fonts/',
                 filter: 'isFile'
             }
         ]

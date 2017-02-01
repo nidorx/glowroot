@@ -13,39 +13,91 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<div ng-include src="'template/gt-loading-overlay.html'"></div>
-<div ng-include src="'template/gt-http-error-overlay.html'"></div>
-<div ng-if="agentNotConnected" class="alert alert-danger">
-  This feature is only available when the agent is running and connected
-</div>
-<!-- ng-show explicitly needed here instead of ng-if because thread-dump.js binds directly to #threadDump -->
-<div ng-show="loaded && !agentNotConnected">
-  <div class="clearfix"
-       style="float: right;">
-    <button class="btn btn-default"
-            ng-click="exportAsText()">
-      Export as text
-    </button>
-  </div>
-  <div gt-button
-       gt-label="Refresh"
-       gt-click="refresh(deferred)"
-       style="margin-bottom: 20px;">
-  </div>
-  <div class="gt-thread-dump-flat-pre"
-       id="threadDump">
-  </div>
-</div>
-<!-- escape key doesn't close modal in some situations without tabindex="-1"
-     in particular, open trace modal, expand trace entries, then expand a concatenated span (one with ...)
-     then hit escape key and modal doesn't close (at least not in chrome) -->
-<div class="modal gt-full-screen-modal" id="traceModal" tabindex="-1">
-  <button type="button"
-          class="close"
-          data-dismiss="modal">
-    &times;
-  </button>
-  <div class="modal-dialog">
-    <div class="modal-body"></div>
-  </div>
+<div ng-controller="JvmThreadDumpCtrl" class="thread-dump-page">
+
+    <div ng-include src="'modules/GtApp/templates/GtHttpErrorOverlay.html'"></div>
+
+    <div ng-if="agentNotConnected" class="alert alert-danger">
+        This feature is only available when the agent is running and connected
+    </div>
+
+    <!-- ng-show explicitly needed here instead of ng-if because thread-dump.js binds directly to #threadDump -->
+    <div ng-show="loaded && !agentNotConnected">
+        <div class="clearfix"
+             style="float: right;">
+            <button class="btn btn-default"
+                    ng-click="exportAsText()">
+                Export as text
+            </button>
+        </div>
+        <div gt-button
+             gt-label="Refresh"
+             gt-click="refresh(deferred)"
+             style="margin-bottom: 20px;">
+        </div>
+        <div class="gt-thread-dump-flat-pre" id="threadDump">
+            <div ng-repeat="cycles in deadlockedCycles">
+                <strong><u>Found deadlock:</u></strong>
+                <p ng-repeat="item in cycles">
+                    "{{item.name}}"
+                    &nbsp;&nbsp;{{item.desc1}}
+                    &nbsp;&nbsp;{{item.desc2}}
+                </p>
+                <br>
+            </div>
+            <!--            
+            {{#if transactions}}
+                <strong><u>Matched threads</u></strong> 
+                (matched to currently executing transactions):
+                <br>
+                {{#each transactions}}
+                    {{#if transactionType}}
+                        <strong>{{headline}}</strong>
+                        {{#if traceId}} 
+                            <a href="jvm/thread-dump?{{#agentIdQueryString}}{{/agentIdQueryString}}modal-trace-id={{traceId}}&modal-check-live-traces=true" style="padding-left: 5px;">
+                                view trace
+                            </a>
+                        {{/if}}
+                        <strong>Transaction type: </strong>{{transactionType}}
+                        <strong>Transaction name:</strong> {{transactionName}}
+                        <strong>Duration:</strong> {{nanosToMillis totalDurationNanos}} milliseconds
+                        {{#ifNotNA totalCpuNanos}}
+                            <strong>CPU time:</strong> {{nanosToMillis totalCpuNanos}} milliseconds
+                        {{/ifNotNA}}
+                    {{/if}}
+                {{#each threads}}
+                    "{{name}}" #{{id}}
+                    &nbsp;&nbsp;&nbsp;java.lang.Thread.State: {{state}}
+                    {{#each stackTraceElements}}        
+                        {{.}}
+                    {{/each}}
+                {{/each}}
+                <br>
+                {{/each}}
+            {{/if}}
+            -->
+
+            <ng-include                 
+                ng-if="data.unmatchedThreads"
+                src="'modules/GtJvm/templates/ThreadDumpUnmatchedThreads.html'"
+                >                     
+            </ng-include>           
+            <ng-include 
+                ng-if="data.threadDumpingThread"
+                src="'modules/GtJvm/templates/ThreadDumpThreadDumpingThread.html'"
+                >                     
+            </ng-include>
+        </div>
+    </div>
+    <!-- escape key doesn't close modal in some situations without tabindex="-1"
+         in particular, open trace modal, expand trace entries, then expand a concatenated span (one with ...)
+         then hit escape key and modal doesn't close (at least not in chrome) -->
+    <div class="modal gt-full-screen-modal" id="traceModal" tabindex="-1">
+        <button type="button" class="close" data-dismiss="modal">
+            &times;
+        </button>
+        <div class="modal-dialog">
+            <div class="modal-body"></div>
+        </div>
+    </div>
 </div>

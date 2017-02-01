@@ -10,9 +10,10 @@ dist:
     - 'packModules'
     - 'replace:concat'
     - 'processhtml:dist'
-    - 'concat:distVendorJS'
-    - 'concat:distVendorCSS'
-    - 'sync:distVendor'
+    - 'htmlmin:dist'
+    - 'concat:dist_vendor_js'
+    - 'concat:dist_vendor_css'
+    - 'copy:dist_vendor_fonts'
 
 dist-server:
     - 'dist'

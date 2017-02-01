@@ -1,0 +1,52 @@
+<div class="threads">   
+    <div class="section-header">
+        <h2>
+            Thread dumping thread
+            <button
+                class="btn btn-default pull-right"
+                ng-click="data._showThreadDumpingThread = true;"
+                ng-if="!data._showThreadDumpingThread"
+                >
+                <span class="glyphicon glyphicon-eye-open"></span>
+                Show
+            </button>
+            <button
+                class="btn btn-default pull-right"
+                ng-click="data._showThreadDumpingThread = false;"
+                ng-if="data._showThreadDumpingThread"
+                >
+                <span class="glyphicon glyphicon-eye-close"></span>
+                Hide
+            </button>
+            <p class="lead">
+                producing this thread dump
+            </p>
+        </h2>
+    </div>
+    <div ng-if="data._showThreadDumpingThread">
+        <ul class="list-group list-view-pf list-view-pf-view">
+            <li class="list-group-item list-view-pf-expand-active">
+                <div class="list-group-item-header">
+                    <div class="list-view-pf-main-info">
+                        <div class="list-view-pf-body">
+                            <div class="list-view-pf-description">
+                                <div class="list-group-item-heading">                                 
+                                    #{{data.threadDumpingThread.id}} {{data.threadDumpingThread.name}}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div
+                    class="list-group-item-container container-fluid"
+                    ng-if="::data.threadDumpingThread.stackTraceElements.length"
+                    >                            
+                    <pre class="entry-message"><code><div 
+                                    ng-repeat="element in ::data.threadDumpingThread.stackTraceElements" 
+                                    ng-bind-html="element | gtTraceLine"></div></code></pre>
+                </div>
+                <br>
+            </li>
+        </ul>
+    </div>
+</div>

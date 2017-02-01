@@ -32,7 +32,7 @@ function JvmRoutes($stateProvider) {
             })
             .state('page.jvm.threadDump', {
                 url: '/thread-dump',
-                templateUrl: urlTemplate('ThreadDum', 'GtJvm')
+                templateUrl: urlTemplate('ThreadDump', 'GtJvm')
             })
             .state('page.jvm.heapDump', {
                 url: '/heap-dump',
