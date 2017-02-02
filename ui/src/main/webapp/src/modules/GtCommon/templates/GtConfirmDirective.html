@@ -1,0 +1,22 @@
+<div>
+    <div class="modal-header">
+        <button type="button" class="close" ng-click="cancel()" aria-hidden="true">
+            <span class="pficon pficon-close"></span>
+        </button>
+        <h4 class="modal-title">
+            {{gtConfirmHeader||'Confirm'}}
+        </h4>
+    </div>
+    <div class="modal-body">
+        <p ng-if="!gtConfirmTemplate">{{gtConfirm}}</p>
+        <ng-include ng-if="gtConfirmTemplate" src="{{gtConfirmTemplate}}"></ng-include>
+    </div>
+    <div class="modal-footer">
+        <button type="button" class="btn btn-default" ng-click="cancel()">
+            Cancel
+        </button>
+        <button type="button" class="btn btn-primary" ng-click="confirm()">
+            Confirm
+        </button>
+    </div>
+</div>

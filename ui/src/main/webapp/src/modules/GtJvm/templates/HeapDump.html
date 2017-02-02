@@ -13,104 +13,102 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<div ng-include src="'template/gt-loading-overlay.html'"></div>
-<div ng-include src="'template/gt-http-error-overlay.html'"></div>
-<div ng-if="agentNotConnected" class="alert alert-danger">
-  This feature is only available when the agent is running and connected
-</div>
-<!-- intentionally not using gt-form-with-primary-button to prevent accidental heap dumps -->
-<div ng-form
-     gt-form-autofocus-on-first-input
-     class="form-horizontal"
-     name="formCtrl"
-     ng-if="loaded && !agentNotConnected"
-     style="margin-top: 10px;">
-  <div class="form-group">
-    <label class="control-label col-lg-2" for="directory">
-      Directory
-    </label>
-    <!-- col-lg-9 instead of col-lg-10 in order to leave a bit of padding to the right -->
-    <div class="col-lg-9">
-      <input type="text"
-             class="form-control"
-             ng-model="page.directory"
-             id="directory"
-             name="directory">
-    </div>
-  </div>
-  <div class="form-group" style="margin-bottom: 5px;">
-    <div class="col-lg-offset-2 col-lg-9 help-block">
-      Use the jvm arg <code style="white-space: nowrap;">-XX:HeapDumpPath=&lt;directory&gt;</code>
-      to change the default heap dump location.
-    </div>
-  </div>
-  <div class="form-group gt-form-buttons">
-    <div class="col-lg-offset-2 col-lg-10">
-      <div gt-button-group>
-        <div gt-button
-             gt-btn-class="btn-danger"
-             gt-label="Heap dump"
-             gt-click="heapDump(deferred)"
-             gt-confirm-header="Perform heap dump?"
-             gt-confirm-body="Note: This may hang the JVM for a bit while the heap dump is generated."
-             class="gt-inline-block">
+<div ng-controller="JvmHeapDumpCtrl">
+
+
+    <div ng-include src="'modules/GtApp/templates/GtHttpErrorOverlay.html'"></div>
+
+    <div ng-if="::agentNotConnected" class="message-container no-chart">
+        <div class="message-container-container">
+            <div class="alert alert-info message-container-message">
+                <span class="pficon pficon-info"></span>
+                <span>
+                    This feature is only available when the agent is running and connected
+                </span>
+            </div>
         </div>
-        <div gt-button
-             gt-label="Check disk space"
-             gt-click="checkDiskSpace(deferred)"
-             gt-btn-class="btn-default"
-             class="gt-inline-block">
+    </div>
+
+
+    <!-- intentionally not using gt-form-with-primary-button to prevent accidental heap dumps -->
+    <div ng-form name="formCtrl" ng-if="loaded && !agentNotConnected">
+        <div class="form-group">
+            <label class="control-label" for="directory">
+                Directory
+            </label>
+            <input 
+                type="text"
+                class="form-control"
+                ng-model="page.directory"
+                id="directory"
+                name="directory">
+            <p class="help-block">
+                Use the jvm arg <code style="white-space: nowrap;">-XX:HeapDumpPath=&lt;directory&gt;</code>
+                to change the default heap dump location.
+            </p>
         </div>
-      </div>
+
+        <div class="text-right">           
+            <button 
+                ng-click="checkDiskSpace(deferred)"
+                class="btn btn-primary"
+                >
+                Check disk space
+            </button>
+            <button 
+                class="btn btn-danger"                
+                ng-click="heapDump(deferred)"
+                gt-confirm="Note: This may hang the JVM for a bit while the heap dump is generated."
+                gt-confirm-header="Perform heap dump?"
+                >
+                Heap dump
+            </button>
+        </div>
+        <!-- checking against undefined so it will still show when availableDiskSpaceBytes === 0 -->
+        <div ng-if="availableDiskSpaceBytes !== undefined" class="message-container no-chart">
+            <div class="message-container-container">
+                <div class="alert alert-info message-container-message">
+                    <span class="pficon pficon-info"></span>
+                    <span>
+                        <strong>Free disk space:</strong> {{availableDiskSpaceBytes| gtBytes}}
+                    </span>
+                </div>
+            </div>
+        </div>
+      
+        <div class="form-group gt-form-buttons" ng-show="heapDumpResponse">
+            <div class="col-lg-offset-2 col-lg-9">
+                <div class="well">
+                    <table class="gt-heap-dump-response">
+                        <tr>
+                            <td class="gt-nowrap">Heap dump</td>
+                            <!-- break-all is for long paths with no spaces or hyphens -->
+                            <td><strong style="word-break: break-all;">{{heapDumpResponse.filePath}}</strong></td>
+                        </tr>
+                        <tr>
+                            <td class="gt-nowrap">File size</td>
+                            <td><strong>{{heapDumpResponse.fileSizeBytes| gtBytes}}</strong></td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
     </div>
-  </div>
-  <!-- checking against undefined so it will still show when availableDiskSpaceBytes === 0 -->
-  <div class="form-group gt-form-buttons"
-       ng-show="availableDiskSpaceBytes !== undefined">
-    <div class="col-lg-offset-2 col-lg-9">
-      <div class="well">
-        <table class="gt-heap-dump-response">
-          <tr>
-            <td>Free disk space</td>
-            <td><strong>{{availableDiskSpaceBytes | gtBytes}}</strong></td>
-          </tr>
-        </table>
-      </div>
+    <div class="modal" id="confirmationModal" tabindex="-1">
+        <div class="modal-dialog"
+             style="max-width: 500px;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3></h3>
+                </div>
+                <div class="modal-body">
+                    <p></p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-default" id="confirmationModalButton">Yes</button>
+                    <button class="btn btn-primary" data-dismiss="modal">Cancel</button>
+                </div>
+            </div>
+        </div>
     </div>
-  </div>
-  <div class="form-group gt-form-buttons"
-       ng-show="heapDumpResponse">
-    <div class="col-lg-offset-2 col-lg-9">
-      <div class="well">
-        <table class="gt-heap-dump-response">
-          <tr>
-            <td class="gt-nowrap">Heap dump</td>
-            <!-- break-all is for long paths with no spaces or hyphens -->
-            <td><strong style="word-break: break-all;">{{heapDumpResponse.filePath}}</strong></td>
-          </tr>
-          <tr>
-            <td class="gt-nowrap">File size</td>
-            <td><strong>{{heapDumpResponse.fileSizeBytes | gtBytes}}</strong></td>
-          </tr>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>
-<div class="modal" id="confirmationModal" tabindex="-1">
-  <div class="modal-dialog"
-       style="max-width: 500px;">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3></h3>
-      </div>
-      <div class="modal-body">
-        <p></p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-default" id="confirmationModalButton">Yes</button>
-        <button class="btn btn-primary" data-dismiss="modal">Cancel</button>
-      </div>
-    </div>
-  </div>
 </div>

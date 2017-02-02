@@ -160,9 +160,9 @@
                     </h2>
                 </div>
                 <div class="row" ng-if="data._showEntries">
-                    <div ng-if="::entriesExpired" class="chart-alert">
-                        <div class="chart-alert-container">
-                            <div class="alert alert-info chart-alert-message">
+                    <div ng-if="::entriesExpired" class="message-container">
+                        <div class="message-container-container">
+                            <div class="alert alert-info message-container-message">
                                 <span class="pficon pficon-info"></span>
                                 <span>
                                     The trace entries have expired.
@@ -210,9 +210,9 @@
                         </h2>
                     </div>
                     <div class="row" ng-if="data._showMainProfiles">
-                        <div ng-if="::mainThreadProfileExpired" class="chart-alert">
-                            <div class="chart-alert-container">
-                                <div class="alert alert-info chart-alert-message">
+                        <div ng-if="::mainThreadProfileExpired" class="message-container">
+                            <div class="message-container-container">
+                                <div class="alert alert-info message-container-message">
                                     <span class="pficon pficon-info"></span>
                                     <span>
                                         This trace has expired.
@@ -258,9 +258,9 @@
                         </h2>
                     </div>
                     <div class="row" ng-if="data._showAuxProfiles">
-                        <div ng-if="::auxThreadProfileExpired" class="chart-alert">
-                            <div class="chart-alert-container">
-                                <div class="alert alert-info chart-alert-message">
+                        <div ng-if="::auxThreadProfileExpired" class="message-container">
+                            <div class="message-container-container">
+                                <div class="alert alert-info message-container-message">
                                     <span class="pficon pficon-info"></span>
                                     <span>
                                         This trace has expired.
@@ -288,9 +288,9 @@
 
             <!--Expired message START-->
             <div ng-if="::(data.entriesExistence === 'expired' || data.profileExistence === 'expired')">
-                <div class="chart-alert" style="position: relative; padding: 30px 0;">
-                    <div class="chart-alert-container">
-                        <div class="alert alert-info chart-alert-message">
+                <div class="message-container" style="position: relative; padding: 30px 0;">
+                    <div class="message-container-container">
+                        <div class="alert alert-info message-container-message">
                             <span class="pficon pficon-info"></span>
 
                             <span ng-if="::(data.entriesExistence === 'expired' && data.profileExistence === 'expired')">

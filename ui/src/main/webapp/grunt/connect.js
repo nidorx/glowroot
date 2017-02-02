@@ -36,8 +36,11 @@ module.exports = {
                 '<%= srcDir %>' // fonte
             ],
             middleware: function (connect, options, middlewares) {
-                // Faz redirect de arquivos SASS para o CSS compilado
+                
+                // proxy
                 middlewares.unshift(require('grunt-connect-proxy/lib/utils').proxyRequest);
+                
+                // Redirect SASS -> CSS
                 middlewares.unshift(rewriteModule.getMiddleware([
                     {
                         from: '^(.*).scss$',
@@ -63,6 +66,10 @@ module.exports = {
             keepalive: true,
             base: ['<%= distDir %>'],
             middleware: function (connect, options, middlewares) {
+                
+                // proxy
+                middlewares.unshift(require('grunt-connect-proxy/lib/utils').proxyRequest);
+                
                 middlewares.push(function (req, res, next) {
                     // X-UA-Compatible must be set via header (as opposed to via meta tag)
                     // see https://github.com/h5bp/html5-boilerplate/blob/master/doc/html.md#x-ua-compatible

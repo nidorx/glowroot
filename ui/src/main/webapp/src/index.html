@@ -35,16 +35,11 @@
         <link rel="shortcut icon" href="favicon.ico">
 
         <!-- concat:css[:distVendorCSS] vendor/styles/vendor.min.css -->
-        <link rel="stylesheet" href="vendor/bootstrap/dist/css/bootstrap.min.css"/>
+        <link rel="stylesheet" href="vendor/bootstrap/dist/css/bootstrap.min.css"/>        
         <link rel="stylesheet" href="vendor/angular-block-ui/dist/angular-block-ui.min.css"/>
-        <!--<link rel="stylesheet" href="vendor/bootstrap-select/dist/css/bootstrap-select.min.css"/>-->
-        <!--<link rel="stylesheet" href="vendor/bootstrap-touchspin/dist/jquery.bootstrap-touchspin.min.css"/>-->
         <link rel="stylesheet" href="vendor/patternfly/dist/css/patternfly.min.css"/>
         <link rel="stylesheet" href="vendor/patternfly/dist/css/patternfly-additions.min.css"/>
         <link rel="stylesheet" href="vendor/angular-patternfly/dist/styles/angular-patternfly.min.css"/>
-        <link rel="stylesheet" href="vendor/angular-ui-bootstrap/src/typeahead/typeahead.css">
-        <link rel="stylesheet" href="vendor/angular-ui-bootstrap/src/tooltip/tooltip.css">
-        <!--<link rel="stylesheet" href="vendor/angular-ui-select/dist/select.css">-->
         <link rel="stylesheet" href="vendor/d3-flame-graph/src/d3.flameGraph.css">
         <!-- /concat -->
 
@@ -62,6 +57,13 @@
         <![endif]-->
     </head>
     <body id="ng-app">
+<!--        <div id="loading-overlay">
+            <div class="glowroot-logo-container">
+                <h1 class="glowroot-logo">
+                    <span>Glowroot</span>
+                </h1>
+            </div>            
+        </div>-->
         <div ui-view></div>
         <!--[if lt IE 9]>
         <style>
@@ -94,60 +96,15 @@
         <script src="vendor/jquery/dist/jquery.min.js"></script>
         <script src="vendor/bootstrap/dist/js/bootstrap.min.js"></script>
         <script src="vendor/angular/angular.min.js"></script>
-        <!--<script src="vendor/angular-route/angular-route.min.js"></script>-->
         <script src="vendor/angular-sanitize/angular-sanitize.min.js"></script>
         <script src="vendor/angular-messages/angular-messages.min.js"></script>
         <script src="vendor/angular-ui-router/release/angular-ui-router.min.js"></script>
         <script src="vendor/angular-block-ui/dist/angular-block-ui.min.js"></script>
         <script src="vendor/angular-bootstrap/ui-bootstrap.min.js"></script>
         <script src="vendor/angular-bootstrap/ui-bootstrap-tpls.min.js"></script>
-        <!--<script src="vendor/bootstrap-select/dist/js/bootstrap-select.min.js"></script>-->
-        <!--<script src="vendor/bootstrap-touchspin/dist/jquery.bootstrap-touchspin.min.js"></script>-->
-        <!--<script src="vendor/patternfly/dist/js/patternfly.min.js"></script>-->
-        <!--<script src="vendor/angular-patternfly/dist/angular-patternfly.min.js"></script>-->
         <script src="vendor/oclazyload/dist/ocLazyLoad.min.js"></script>
-
-
-
-        <!--<script src="vendor/angular-ui-router/release/angular-ui-router.js"></script>-->
-        <!--<script src="vendor/handlebars/handlebars.runtime.js"></script>-->
-        <!-- bootstrap modal is much better than angular-ui-modal
-             in particular around dealing with vertical scrollbar to prevent background jitter -->
-        <!--<script src="vendor/bootstrap/js/modal.js"></script>-->
-        <!-- collapse is needed for the navbar on small screen (mobile) -->
-        <!--<script src="vendor/bootstrap/js/collapse.js"></script>-->
-        <!-- transition is needed for the navbar open/close effect on small screen (mobile) -->
-        <!--<script src="vendor/bootstrap/js/transition.js"></script>-->
-        <!-- dropdown is needed for bootstrap-select (used by transaction sidebar) -->
-        <!--<script src="vendor/bootstrap/js/dropdown.js"></script>-->
-        <!-- tooltip is used by copy to clipboard -->
-        <!--<script src="vendor/bootstrap/js/tooltip.js"></script>-->
-        <!-- buttons is used by button-group styled radio buttons (e.g. On/Off) -->
-        <!--<script src="vendor/angular-ui-bootstrap/src/buttons/buttons.js"></script>-->
-        <!-- dropdown is used by the trace search form (e.g. begins with / equals / ends with / contains) -->
-        <!--<script src="vendor/angular-ui-bootstrap/src/dropdown/dropdown.js"></script>-->
-        <!-- typeahead is used by instrumentation view -->
-        <!--<script src="vendor/angular-ui-bootstrap/src/typeahead/typeahead.js"></script>-->
-        <!-- position is needed by typeahead -->
-        <!--<script src="vendor/angular-ui-bootstrap/src/position/position.js"></script>-->
-        <!-- debounce is needed by typeahead -->
-        <!--<script src="vendor/angular-ui-bootstrap/src/debounce/debounce.js"></script>-->
-        <!-- modal is used for config unsaved changes confirmation -->
-        <!--<script src="vendor/angular-ui-bootstrap/src/modal/modal.js"></script>-->
-        <!-- popover is used for chart help -->
-        <!--<script src="vendor/angular-ui-bootstrap/src/popover/popover.js"></script>-->
-        <!-- tooltip is needed by popover -->
-        <!--<script src="vendor/angular-ui-bootstrap/src/tooltip/tooltip.js"></script>-->
-        <!-- stackedMap is needed by tooltip -->
-        <!--<script src="vendor/angular-ui-bootstrap/src/stackedMap/stackedMap.js"></script>-->
-        <!-- multiMap is needed by dropdown and modal -->
-        <!--<script src="vendor/angular-ui-bootstrap/src/multiMap/multiMap.js"></script>-->
-        <!--<script src="vendor/angular-ui-select/dist/select.js"></script>-->
-        <!-- angular-sanitize is needed by angular-ui-select -->
         <script src="vendor/moment/moment.js"></script>
         <script src="vendor/moment-timezone/builds/moment-timezone-with-data-2010-2020.js"></script>
-        <!--<script src="vendor/eonasdan-bootstrap-datetimepicker/src/js/bootstrap-datetimepicker.js"></script>-->
-        <!--<script src="vendor/bootstrap-select/js/bootstrap-select.js"></script>-->
         <script src="vendor/flot/src/jquery.flot.js"></script>
         <script src="vendor/flot/lib/jquery.colorhelpers.js"></script>
         <script src="vendor/flot/lib/jquery.mousewheel.js"></script>
@@ -156,8 +113,6 @@
         <script src="vendor/flot/src/plugins/jquery.flot.time.js"></script>
         <script src="vendor/flot/src/plugins/jquery.flot.stack.js"></script>
         <script src="vendor/flot.tooltip/js/jquery.flot.tooltip.js"></script>
-        <!--<script src="vendor/sequeljs/web/js/parser/SqlParser.js"></script>-->
-        <!--<script src="vendor/sequeljs/web/js/parser/SqlPrettyPrinter.js"></script>-->
         <script src="vendor/sql-formatter/dist/sql-formatter.min.js"></script>
         <!-- /concat -->
 

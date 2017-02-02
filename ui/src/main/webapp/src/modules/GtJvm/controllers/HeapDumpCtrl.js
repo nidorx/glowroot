@@ -24,7 +24,11 @@ JvmHeapDumpCtrl.$inject = ['$scope', '$http', 'httpErrors'];
 
 function JvmHeapDumpCtrl($scope, $http, httpErrors) {
 
-    $scope.$parent.heading = 'Heap dump';
+    // Page header
+    $scope.page.title = 'JVM - Heap dump';
+    $scope.page.subTitle = 'Generate a snapshot of the memory of a Java process.';
+    $scope.page.helpPopoverTemplate = 'modules/GtJvm/templates/help/HeapDumpPageHelp.html';
+    $scope.page.breadcrumb = null;
 
     if ($scope.hideMainContent()) {
         return;
@@ -39,20 +43,23 @@ function JvmHeapDumpCtrl($scope, $http, httpErrors) {
         };
         $scope.availableDiskSpaceBytes = undefined;
         $scope.heapDumpResponse = false;
-        $http.post('backend/jvm/available-disk-space?agent-id=' + encodeURIComponent($scope.agentId), postData)
-                .then(function (response) {
-                    var data = response.data;
-                    if (data.error) {
-                        deferred.reject(data.error);
-                    } else if (data.directoryDoesNotExist) {
-                        deferred.reject('Directory does not exist');
-                    } else {
-                        $scope.availableDiskSpaceBytes = data;
-                        deferred.resolve('See disk space below');
-                    }
-                }, function (response) {
-                    httpErrors.handle(response, $scope, deferred);
-                });
+        $http.post('backend/jvm/available-disk-space', postData, {
+            params: {
+//                'agent-id': $scope.agentId
+            }
+        }).then(function (response) {
+            var data = response.data;
+            if (data.error) {
+                deferred.reject(data.error);
+            } else if (data.directoryDoesNotExist) {
+                deferred.reject('Directory does not exist');
+            } else {
+                $scope.availableDiskSpaceBytes = data;
+                deferred.resolve('See disk space below');
+            }
+        }, function (response) {
+            httpErrors.handle(response, $scope, deferred);
+        });
     };
 
     $scope.heapDump = function (deferred) {
@@ -61,20 +68,23 @@ function JvmHeapDumpCtrl($scope, $http, httpErrors) {
         };
         $scope.availableDiskSpaceBytes = undefined;
         $scope.heapDumpResponse = false;
-        $http.post('backend/jvm/heap-dump?agent-id=' + encodeURIComponent($scope.agentId), postData)
-                .then(function (response) {
-                    var data = response.data;
-                    if (data.error) {
-                        deferred.reject(data.error);
-                    } else if (data.directoryDoesNotExist) {
-                        deferred.reject('Directory does not exist');
-                    } else {
-                        deferred.resolve('Heap dump created');
-                        $scope.heapDumpResponse = data;
-                    }
-                }, function (response) {
-                    httpErrors.handle(response, $scope, deferred);
-                });
+        $http.post('backend/jvm/heap-dump', postData, {
+            params: {
+                'agent-id': $scope.agentId
+            }
+        }).then(function (response) {
+            var data = response.data;
+            if (data.error) {
+                deferred.reject(data.error);
+            } else if (data.directoryDoesNotExist) {
+                deferred.reject('Directory does not exist');
+            } else {
+                deferred.resolve('Heap dump created');
+                $scope.heapDumpResponse = data;
+            }
+        }, function (response) {
+            httpErrors.handle(response, $scope, deferred);
+        });
     };
 
     $http.get('backend/jvm/heap-dump-default-dir?agent-id=' + encodeURIComponent($scope.agentId))

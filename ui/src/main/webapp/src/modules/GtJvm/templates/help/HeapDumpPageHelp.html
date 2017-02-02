@@ -1,0 +1,28 @@
+<div>
+    <strong>Heap Dump</strong>
+    <p>
+        The snapshot contains information about the Java objects and classes in the heap at the 
+        moment the snapshot is triggered.
+    </p>
+    <p>
+        Typically, a full garbage collection is triggered before the heap dump is written, so the dump contains 
+        information about the remaining objects in the heap.
+    </p>
+    <p>
+        Typical information in a heap dump, depending on the heap dump type, includes:
+    </p>
+    <dl>
+        <dt>All Objects</dt>
+        <dd>Class, fields, primitive values, and references.</dd>
+        <dt>All Classes</dt>
+        <dd>Class loader, name, super class, and static fields.</dd>
+        <dt>Garbage collection roots</dt>
+        <dd>Objects defined to be reachable by the JVM.</dd>
+        <dt>Thread Stacks and Local Variables</dt>
+        <dd>Call-stacks of threads at the moment of the snapshot, and information about local objects on a frame by frame basis.</dd>
+    </dl>
+    <p>
+        A heap dump does not contain allocation information, therefore you cannot work out
+        what created the objects or where the objects were created.
+    </p>
+</div>
