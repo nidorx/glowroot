@@ -20,15 +20,19 @@ angular
         .controller('JvmThreadDumpCtrl', JvmThreadDumpCtrl);
 
 
-JvmThreadDumpCtrl.$inject = ['$scope', '$http', '$location',  'locationChanges', 'traceModal', 'httpErrors'];
+JvmThreadDumpCtrl.$inject = ['$scope', '$http', '$location', 'locationChanges', 'traceModal', 'httpErrors'];
 
 function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal, httpErrors) {
-
-    $scope.$parent.heading = 'Thread dump';
 
     if ($scope.hideMainContent()) {
         return;
     }
+
+    // Page header
+    $scope.page.title = 'JVM - Thread Dump';
+    $scope.page.subTitle = 'Snapshot of the state of all threads that are part of the process.';
+    $scope.page.helpPopoverTemplate = 'modules/GtJvm/templates/help/ThreadDumpPageHelp.html';
+    $scope.page.breadcrumb = null;
 
     var threadDumpHtml;
 
@@ -74,23 +78,48 @@ function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal
     });
 
     $scope.refresh = function (deferred) {
-        $http.get('backend/jvm/thread-dump?agent-id=' + encodeURIComponent($scope.agentId))
-                .then(function (response) {
-                    $scope.loaded = true;
-                    $scope.agentNotConnected = response.data.agentNotConnected;
-                    if ($scope.agentNotConnected) {
-                        return;
-                    }
-                    $scope.data = response.data;
-                    // $.trim() is needed because this template is sensitive to surrounding spaces
+        $http.get('backend/jvm/thread-dump', {
+            params: {
+                'agent-id': $scope.agentId
+            }
+        }).then(function (response) {
+            $scope.loaded = true;
+            $scope.agentNotConnected = response.data.agentNotConnected;
+            if ($scope.agentNotConnected) {
+                return;
+            }
+            $scope.data = response.data;
+            // $.trim() is needed because this template is sensitive to surrounding spaces
 //                    threadDumpHtml = $.trim(JST['thread-dump'](response.data));
 //                    $('#threadDump').html('<br>' + threadDumpHtml);
-                    if (deferred) {
-                        deferred.resolve('Refreshed');
-                    }
-                }, function (response) {
-                    httpErrors.handle(response, $scope, deferred);
+
+            if ($scope.data.deadlockedCycles) {
+                $scope.data.deadlocks = $scope.data.deadlockedCycles.map(function (cycles) {
+                    return {
+                        cycles: cycles,
+                        threads: cycles.map(function (cycle) {
+                            var thread;
+                            for (var a = 0, l = $scope.data.unmatchedThreads.length; a < l; a++) {
+                                if ($scope.data.unmatchedThreads[a].name === cycle.name) {
+                                    thread = $scope.data.unmatchedThreads[a];
+                                    break;
+                                }
+                            }
+                            return {
+                                name: cycle.name,
+                                thread: thread
+                            };
+                        })
+                    };
                 });
+            }
+            console.log('$scope.data', $scope.data);
+            if (deferred) {
+                deferred.resolve('Refreshed');
+            }
+        }, function (response) {
+            httpErrors.handle(response, $scope, deferred);
+        });
     };
 
     $scope.refresh();

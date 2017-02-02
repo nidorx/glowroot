@@ -13,7 +13,21 @@
         </ol>
 
         <header class="page-header {{page.titleClass}}">
-            <h1>{{page.title}}</h1>
+            <h1>
+                <div class="pull-right" ng-if="page.helpPopoverTemplate">
+                    <a
+                        uib-popover-template="page.helpPopoverTemplate"
+                        popover-placement="left"
+                        popover-trigger="mouseenter"
+                        popover-append-to-body="true"
+                        popover-animation="false"
+                        style="cursor: help"
+                        >
+                        <span class="glyphicon glyphicon-question-sign"></span>
+                    </a>
+                </div>
+                {{page.title}}
+            </h1>
             <p class="lead" ng-if="page.subTitle">{{page.subTitle}}</p>
         </header>
 

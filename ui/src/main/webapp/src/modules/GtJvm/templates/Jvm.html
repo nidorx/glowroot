@@ -19,12 +19,25 @@
             <form class="toolbar-pf-actions">
                 <div class="toolbar-pf-action-right">
                     <div class="form-group toolbar-pf-view-selector">
-                        
+
                         <gt-chart-range
                             ng-if="$state.is('page.jvm.gauges')"
                             >
                         </gt-chart-range>
 
+                        <span ng-if="$state.is('page.jvm.threadDump')">
+                            <button
+                                class="btn btn-default"
+                                ng-click="exportAsText()">
+                                Export as text
+                            </button>
+
+                            <button
+                                class="btn btn-primary"
+                                ng-click="refresh(deferred)">
+                                Refresh
+                            </button>
+                        </span>
                         <button class="btn btn-primary" ng-click="_expanded = !_expanded;forceResize()">
                             <span
                                 class="glyphicon glyphicon-resize-full"
@@ -38,14 +51,16 @@
     </div>
     <div class="row">
         <div class="col-md-3" ng-hide="_expanded">
-            <div class="list-group ng-scope">
+            <div class="list-group jvm-nav">
                 <a
                     class="list-group-item"
                     ui-sref="page.jvm.gauges(stateParams)"
                     ng-class="{active: $state.is('page.jvm.gauges')}"
                     ng-if="::(agentPermissions.jvm.gauges || (layout.central && !agentRollupId))"
                     >
-                    Gauges
+                    <h4 class="list-group-item-heading">
+                        Gauges
+                    </h4>
                 </a>
                 <a
                     class="list-group-item"
@@ -53,7 +68,12 @@
                     ng-class="{active: $state.is('page.jvm.threadDump')}"
                     ng-if="::(agentPermissions.jvm.threadDump && !layout.offlineViewer)"
                     >
-                    Thread dump
+                    <h4 class="list-group-item-heading">
+                        Thread dump
+                    </h4>
+                    <p class="list-group-item-text">
+                        Snapshot of the state of all threads that are part of the Java process.
+                    </p>
                 </a>
                 <a
                     class="list-group-item"
@@ -61,7 +81,12 @@
                     ng-class="{active: $state.is('page.jvm.heapDump')}"
                     ng-if="::(agentPermissions.jvm.heapDump && !layout.offlineViewer)"
                     >
-                    Heap dump
+                    <h4 class="list-group-item-heading">
+                        Heap dump
+                    </h4>
+                    <p class="list-group-item-text">
+                        Generate a snapshot of the memory of a Java process.
+                    </p>
                 </a>
                 <a
                     class="list-group-item"
@@ -69,7 +94,15 @@
                     ng-class="{active: $state.is('page.jvm.heapHistogram')}"
                     ng-if="::(agentPermissions.jvm.heapHistogram && !layout.offlineViewer)"
                     >
-                    Heap histogram
+                    <h4 class="list-group-item-heading">
+                        Heap histogram
+                    </h4>
+                    <p class="list-group-item-text">
+                        Prints a histogram of the heap.
+                    </p>
+                    <p class="list-group-item-text">
+                        Number of objects, memory size in bytes, and fully qualified class names.
+                    </p>
                 </a>
                 <a
                     class="list-group-item"
@@ -77,7 +110,13 @@
                     ng-class="{active: $state.is('page.jvm.mbeanTree')}"
                     ng-if="::(agentPermissions.jvm.mbeanTree && !layout.offlineViewer)"
                     >
-                    MBean tree
+                    <h4 class="list-group-item-heading">
+                        MBean tree
+                    </h4>
+                    <p class="list-group-item-text">
+                        View managed beans details
+                    </p>
+
                 </a>
                 <a
                     class="list-group-item"
@@ -85,7 +124,9 @@
                     ng-class="{active: $state.is('page.jvm.systemProperties')}"
                     ng-if="::(agentPermissions.jvm.systemProperties && !layout.offlineViewer)"
                     >
-                    System properties
+                    <h4 class="list-group-item-heading">
+                        System properties
+                    </h4>
                 </a>
                 <a
                     class="list-group-item"
@@ -93,7 +134,9 @@
                     ng-class="{active: $state.is('page.jvm.environment')}"
                     ng-if="::(agentPermissions.jvm.environment)"
                     >
-                    Environment
+                    <h4 class="list-group-item-heading">
+                        Environment
+                    </h4>
                 </a>
             </div>
         </div>

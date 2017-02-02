@@ -1,4 +1,4 @@
-<div class="threads">   
+<div class="threads">
     <div class="section-header">
         <h2>
             Thread dumping thread
@@ -19,7 +19,7 @@
                 Hide
             </button>
             <p class="lead">
-                producing this thread dump
+                Producing this thread dump
             </p>
         </h2>
     </div>
@@ -30,7 +30,7 @@
                     <div class="list-view-pf-main-info">
                         <div class="list-view-pf-body">
                             <div class="list-view-pf-description">
-                                <div class="list-group-item-heading">                                 
+                                <div class="list-group-item-heading">
                                     #{{data.threadDumpingThread.id}} {{data.threadDumpingThread.name}}
                                 </div>
                             </div>
@@ -40,9 +40,9 @@
                 <div
                     class="list-group-item-container container-fluid"
                     ng-if="::data.threadDumpingThread.stackTraceElements.length"
-                    >                            
-                    <pre class="entry-message"><code><div 
-                                    ng-repeat="element in ::data.threadDumpingThread.stackTraceElements" 
+                    >
+                    <pre class="entry-message"><code><div
+                                    ng-repeat="element in ::data.threadDumpingThread.stackTraceElements track by $index"
                                     ng-bind-html="element | gtTraceLine"></div></code></pre>
                 </div>
                 <br>

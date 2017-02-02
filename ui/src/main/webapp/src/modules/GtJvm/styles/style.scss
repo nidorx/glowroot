@@ -1,5 +1,11 @@
 
 
+.list-group.jvm-nav{
+    > .list-group-item:first-child:not(:hover):not(.active){
+        border-top-color: transparent;
+    }
+}
+
 .thread-dump-page{
 
     .list-view-pf{
@@ -52,7 +58,7 @@
         .list-group{
             margin-top: 10px;
         }
-        
+
         .list-group-item-header{
             cursor: default;
         }

@@ -24,38 +24,48 @@ GtTraceLineFilter.$inject = ['$sce'];
 
 /**
  * Add colors to java trace lines
- * 
+ *
  * @param {type} $sce
  * @returns {Function}
  */
 function GtTraceLineFilter($sce) {
     var STYLE = {
-        CLASS: 'style="color:#FF4444;font-weight: bold;"',
+        CLASS: 'style="color:#2222ff;font-weight: bold;"',
         METHOD: 'style="color:#000;font-weight: bold;"',
-        LINE: 'style="color:#4463B5;font-weight: bold;"'
+        LINE_NUMBER: 'style="color:#2222ff;font-weight: bold;"',
+        TEXT: 'style="color:olive;"'
     };
+
+    var REG_NATIVE_METHOD = /\.([a-z$_][a-z0-9$_]*)\.([a-z$_][a-z0-9$_]*)\(Native Method\)\s*$/i;
+    var REG_JAVA_CLASS = /\.([a-z$_][a-z0-9$_]*)\.([a-z$_][a-z0-9$_]*)\(([a-z$_][a-z0-9$_]*).java\:(\d+)\)\s*$/i;
+
     return function (input) {
         if (!input) {
             return '';
         }
-        
-        if(input.indexOf('Native Method') >= 0){
-            return $sce.trustAsHtml(input.replace(/\.([a-z$_][a-z0-9$_]*)\.([a-z$_][a-z0-9$_]*)\(Native Method\)\s*$/i, function ($0, $1, $2) {
+
+        var out = '<string ' + STYLE.TEXT + '>'
+        if (input.indexOf('Native Method') >= 0) {
+            out += input.replace(REG_NATIVE_METHOD, function ($0, $1, $2) {
                 return [
-                    '.<span '+STYLE.CLASS+'>' + $1 + '</span>',
-                    '.<span '+STYLE.METHOD+'>' + $2 + '</span>',
+                    '.<span>' + $1 + '</span>',
+                    '.<span ' + STYLE.METHOD + '>' + $2 + '</span>',
                     '(Native Method)'
                 ].join('');
-            }));            
+            });
+        } else {
+            out += input.replace(REG_JAVA_CLASS, function ($0, $1, $2, $3, $4) {
+                return [
+                    '.' + $1 + '',
+                    '.<span ' + STYLE.METHOD + '>' + $2 + '</span>',
+                    '(<span ' + STYLE.CLASS + '>' + $3 + '</span>.java',
+                    ':<span ' + STYLE.LINE_NUMBER + '>' + $4 + '</span>)'
+                ].join('');
+            });
         }
-        return $sce.trustAsHtml(input.replace(/\.([a-z$_][a-z0-9$_]*)\.([a-z$_][a-z0-9$_]*)\(([a-z$_][a-z0-9$_]*).java\:(\d+)\)\s*$/i, function ($0, $1, $2, $3, $4) {
-            return [
-                '.<span '+STYLE.CLASS+'>' + $1 + '</span>',
-                '.<span '+STYLE.METHOD+'>' + $2 + '</span>',
-                '(<span '+STYLE.CLASS+'>' + $3 + '</span>.java',
-                ':<span '+STYLE.LINE+'>' + $4 + '</span>)'
-            ].join('');
-        }));
+        out += '</span>';
+
+        return $sce.trustAsHtml(out);
     };
 }
 

@@ -1,31 +1,39 @@
-<div class="threads">
+<div class="threads" ng-repeat="deadlock in data.deadlocks track by $index">
     <div class="section-header">
+
         <h2>
-            Unmatched Threads
+            Deadlock found
             <button
                 class="btn btn-default pull-right"
-                ng-click="data._showUnmatchedThreads = true;"
-                ng-if="!data._showUnmatchedThreads"
+                ng-click="deadlock._showDeadlockedCycles = true;"
+                ng-if="!deadlock._showDeadlockedCycles"
                 >
                 <span class="glyphicon glyphicon-eye-open"></span>
                 Show
             </button>
             <button
                 class="btn btn-default pull-right"
-                ng-click="data._showUnmatchedThreads = false;"
-                ng-if="data._showUnmatchedThreads"
+                ng-click="deadlock._showDeadlockedCycles = false;"
+                ng-if="deadlock._showDeadlockedCycles"
                 >
                 <span class="glyphicon glyphicon-eye-close"></span>
                 Hide
             </button>
             <p class="lead">
-                This may possibly include currently executing transactions that just started or just ended
+                <span ng-repeat="thread in deadlock.threads track by $index">
+                    {{$index > 0?', ':''}} {{thread.name}}
+                </span>
             </p>
         </h2>
     </div>
-    <div ng-if="data._showUnmatchedThreads">
+    <div ng-if="deadlock._showDeadlockedCycles">
+        <pre
+            class="entry-message"
+            ><code><div
+                    ng-repeat="cycle in deadlock.cycles"
+                    >"{{cycle.name}}"&nbsp;&nbsp;{{cycle.desc1}}&nbsp;&nbsp;{{cycle.desc2}}</div></code></pre>
         <ul class="list-group list-view-pf list-view-pf-view">
-            <li ng-repeat="item in data.unmatchedThreads" class="list-group-item list-view-pf-expand-active">
+            <li ng-repeat="item in deadlock.threads" class="list-group-item list-view-pf-expand-active">
                 <div class="list-group-item-header">
                     <div class="list-view-pf-main-info">
                         <div class="list-view-pf-body">
@@ -33,10 +41,10 @@
                                 <div class="list-group-item-heading">
                                     <div class="pull-right">
                                         <span title="Java Thread State" class="badge">
-                                            {{item.state}}
+                                            {{item.thread.state}}
                                         </span>
                                     </div>
-                                    #{{item.id}} - {{item.name}}
+                                    #{{item.thread.id}} - {{item.thread.name}}
                                 </div>
                             </div>
                         </div>
@@ -44,10 +52,10 @@
                 </div>
                 <div
                     class="list-group-item-container container-fluid"
-                    ng-if="item.stackTraceElements.length"
+                    ng-if="item.thread.stackTraceElements.length"
                     >
                     <pre class="entry-message"><code><div
-                                    ng-repeat="element in item.stackTraceElements"
+                                    ng-repeat="element in item.thread.stackTraceElements track by $index"
                                     ng-bind-html="element | gtTraceLine"></div></code></pre>
                 </div>
                 <br>

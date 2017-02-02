@@ -256,61 +256,6 @@ h2 {
     margin: 0;
 }
 
-.tc-prettyprint{
-    position: relative;
-    font-size: 12px;
-    font-weight: normal;
-    line-height: 14px;
-    margin: 15px 0;
-}
-
-.tc-prettyprint .title{
-    position: absolute;
-    top: 0;
-    left: 0;
-    padding: 1px 5px;
-    font-weight: normal;
-    background-color: #f5f5f5;
-    border: 1px solid #ddd;
-    color: #9da0a4;
-    border-radius: 0 0 4px 0;
-    font-size: 9px;
-    line-height: 9px;
-}
-
-.tc-prettyprint pre {
-    white-space: pre-wrap;
-    white-space: pre-wrap;
-    white-space: -moz-pre-wrap;
-    white-space: -o-pre-wrap;
-    word-wrap: break-word;
-    margin: 0;
-    background-color: #fafafa;
-    width: 100%;
-    border: 1px solid #ddd;
-    border-radius: 0;
-    padding: 12px 5px 5px;
-}
-
-.tc-prettyprint pre code{
-    display: block;
-    font-family: monospace;
-    font-size: 12px;
-    border: 0;
-}
-
-.tc-prettyprint pre code .key {
-    color: brown;
-}
-
-.tc-prettyprint pre code .value {
-    color: navy;
-}
-
-.tc-prettyprint pre code .string {
-    color: olive;
-}
-
 .header-pre-cards-pf{
     border-bottom: 0;
     margin-bottom: 0;
@@ -397,6 +342,11 @@ h2 {
 .list-group > .list-group-item:hover {
     background-color: #def3ff;
     border-color: #7dc3e8;
+    color: #555;
+    
+    .list-group-item-text{
+        color: #555;
+    }
     /*margin-top: -1px;*/
     /*padding-top: 11px;*/
     /*box-shadow: 0 0px 35px rgba(50,50,93,.1), 0 5px 15px rgba(0,0,0,.07);*/
@@ -614,5 +564,19 @@ table.sql-explorer-history >tbody>tr:first-child>td{
         -moz-user-select: none;
         -ms-user-select: none;
         user-select: none;
+    }
+}
+
+
+pre {
+    margin: 0;
+    background-color: #fafafa;
+
+    code{
+        display: block;
+        font-family: monospace;
+        font-size: 12px;
+        border: 0;
+        white-space: nowrap;
     }
 }

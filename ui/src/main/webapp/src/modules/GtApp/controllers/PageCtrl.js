@@ -33,6 +33,7 @@ function PageCtrl($scope, $rootScope) {
     $rootScope.page = {
         title: 'Título da pagina',
         subTitle: '',
+        helpPopoverTemplate: '',
         titleClass: '',
         breadcrumb: []
     };

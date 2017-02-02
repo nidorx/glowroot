@@ -23,37 +23,22 @@
 
     <!-- ng-show explicitly needed here instead of ng-if because thread-dump.js binds directly to #threadDump -->
     <div ng-show="loaded && !agentNotConnected">
-        <div class="clearfix"
-             style="float: right;">
-            <button class="btn btn-default"
-                    ng-click="exportAsText()">
-                Export as text
-            </button>
-        </div>
-        <div gt-button
-             gt-label="Refresh"
-             gt-click="refresh(deferred)"
-             style="margin-bottom: 20px;">
-        </div>
-        <div class="gt-thread-dump-flat-pre" id="threadDump">
-            <div ng-repeat="cycles in deadlockedCycles">
-                <strong><u>Found deadlock:</u></strong>
-                <p ng-repeat="item in cycles">
-                    "{{item.name}}"
-                    &nbsp;&nbsp;{{item.desc1}}
-                    &nbsp;&nbsp;{{item.desc2}}
-                </p>
-                <br>
-            </div>
-            <!--            
+
+        <div id="threadDump">
+            <ng-include
+                ng-if="data.deadlocks"
+                src="'modules/GtJvm/templates/ThreadDumpDeadlockedCycles.html'"
+                >
+            </ng-include>
+            <!--
             {{#if transactions}}
-                <strong><u>Matched threads</u></strong> 
+                <strong><u>Matched threads</u></strong>
                 (matched to currently executing transactions):
                 <br>
                 {{#each transactions}}
                     {{#if transactionType}}
                         <strong>{{headline}}</strong>
-                        {{#if traceId}} 
+                        {{#if traceId}}
                             <a href="jvm/thread-dump?{{#agentIdQueryString}}{{/agentIdQueryString}}modal-trace-id={{traceId}}&modal-check-live-traces=true" style="padding-left: 5px;">
                                 view trace
                             </a>
@@ -68,7 +53,7 @@
                 {{#each threads}}
                     "{{name}}" #{{id}}
                     &nbsp;&nbsp;&nbsp;java.lang.Thread.State: {{state}}
-                    {{#each stackTraceElements}}        
+                    {{#each stackTraceElements}}
                         {{.}}
                     {{/each}}
                 {{/each}}
@@ -77,15 +62,15 @@
             {{/if}}
             -->
 
-            <ng-include                 
+            <ng-include
                 ng-if="data.unmatchedThreads"
                 src="'modules/GtJvm/templates/ThreadDumpUnmatchedThreads.html'"
-                >                     
-            </ng-include>           
-            <ng-include 
+                >
+            </ng-include>
+            <ng-include
                 ng-if="data.threadDumpingThread"
                 src="'modules/GtJvm/templates/ThreadDumpThreadDumpingThread.html'"
-                >                     
+                >
             </ng-include>
         </div>
     </div>
