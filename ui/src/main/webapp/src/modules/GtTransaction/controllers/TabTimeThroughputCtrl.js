@@ -39,29 +39,26 @@ function TransactionTabTimeThroughputCtrl($scope, $location, $filter, charts, mo
             agentRollupId: $scope.agentRollupId,
             transactionType: $scope.model.transactionType,
             transactionName: $scope.model.transactionName,
-            from: $scope.range.chartFrom,
-            to: $scope.range.chartTo,
+            from: $scope.chart.from,
+            to: $scope.chart.to,
             autoRefresh: autoRefresh
         };
         charts.refreshData('backend/transaction/throughput', chartState, $scope, null, null, onRefreshData, query);
     }
 
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh', 'range.chartAutoRefresh'],
-            function (newValues, oldValues) {
-                refreshData(newValues[3] !== oldValues[3]);
-            });
+    $scope.$watchGroup([
+        'chart.from',
+        'chart.to',
+        'chart.refresh',
+        'chart.autoRefresh'
+    ], function (newValues, oldValues) {
+        refreshData(newValues[3] !== oldValues[3]);
+    });
 
-    $scope.clickTopRadioButton = function (item) {
-        if (item === 'throughput') {
-            $scope.range.chartRefresh++;
-        } else {
-            $location.url('transaction/' + item + $scope.tabQueryString());
-        }
-    };
 
     $scope.clickActiveTopLink = function (event) {
         if (!event.ctrlKey) {
-            $scope.range.chartRefresh++;
+            $scope.chart.refresh++;
             // suppress normal link
             event.preventDefault();
             return false;

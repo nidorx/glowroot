@@ -57,17 +57,21 @@ function TransactionTabTracesCtrl($scope, $location, $http, $q, locationChanges,
         {text: '5,000', value: 5000}
     ];
 
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh', 'range.chartAutoRefresh'],
-            function (newValues, oldValues) {
-                appliedFilter.from = $scope.range.chartFrom;
-                appliedFilter.to = $scope.range.chartTo;
-                updateLocation();
-                if ($scope.suppressChartRefresh) {
-                    $scope.suppressChartRefresh = false;
-                    return;
-                }
-                refreshChart(newValues[3] !== oldValues[3]);
-            });
+    $scope.$watchGroup([
+        'chart.from',
+        'chart.to',
+        'chart.refresh',
+        'chart.autoRefresh'
+    ], function (newValues, oldValues) {
+        appliedFilter.from = $scope.chart.from;
+        appliedFilter.to = $scope.chart.to;
+        updateLocation();
+        if ($scope.suppressChartRefresh) {
+            $scope.suppressChartRefresh = false;
+            return;
+        }
+        refreshChart(newValues[3] !== oldValues[3]);
+    });
 
     function refreshChart(autoRefresh, deferred) {
         if ((!$scope.agentRollupId && $scope.layout.central) || !$scope.model.transactionType) {
@@ -84,11 +88,11 @@ function TransactionTabTracesCtrl($scope, $location, $http, $q, locationChanges,
         if (autoRefresh) {
             query.autoRefresh = true;
         }
-        var showChartSpinner = !$scope.suppressChartSpinner;
+        var showChartSpinner = !$scope.chart.suppressSpinner;
         if (showChartSpinner) {
             $scope.requestsCount++;
         }
-        $scope.suppressChartSpinner = false;
+        $scope.chart.suppressSpinner = false;
         $http.get('backend/' + $scope.traceKind + '/points' + queryStrings.encodeObject(query))
                 .then(function (response) {
                     var data = response.data;
@@ -125,7 +129,7 @@ function TransactionTabTracesCtrl($scope, $location, $http, $q, locationChanges,
                         return;
                     }
                     var traceCount = data.normalPoints.length + data.errorPoints.length + data.partialPoints.length;
-                    $scope.chartNoData = traceCount === 0;
+                    $scope.chart.noData = traceCount === 0;
                     $scope.showExpiredMessage = data.expired;
                     $scope.chartLimitExceeded = data.limitExceeded;
                     $scope.chartLimit = limit;
@@ -170,7 +174,7 @@ function TransactionTabTracesCtrl($scope, $location, $http, $q, locationChanges,
     $scope.refresh = function () {
         $scope.applyLast();
         angular.extend(appliedFilter, $scope.filter);
-        $scope.range.chartRefresh++;
+        $scope.chart.refresh++;
     };
 
     $scope.clearCriteria = function () {
@@ -194,16 +198,16 @@ function TransactionTabTracesCtrl($scope, $location, $http, $q, locationChanges,
             var to = plot.getAxes().xaxis.options.max;
             charts.updateRange($scope, from, to, zoomingOut, false, false, true);
             if (zoomingOut) {
-                updateFilter($scope.range.chartFrom, $scope.range.chartTo);
+                updateFilter($scope.chart.from, $scope.range.to);
             } else {
                 // only update from/to
-                appliedFilter.from = $scope.range.chartFrom;
-                appliedFilter.to = $scope.range.chartTo;
+                appliedFilter.from = $scope.chart.from;
+                appliedFilter.to = $scope.chart.to;
             }
-            if (zoomingOut || $scope.chartLimitExceeded || $scope.range.chartTo >= Date.now()) {
+            if (zoomingOut || $scope.chartLimitExceeded || $scope.chart.to >= Date.now()) {
                 // adjust interval and redraw chart, this is important for rapid scroll zooming
-                plot.getAxes().xaxis.options.min = $scope.range.chartFrom;
-                plot.getAxes().xaxis.options.max = $scope.range.chartTo;
+                plot.getAxes().xaxis.options.min = $scope.chart.from;
+                plot.getAxes().xaxis.options.max = $scope.chart.to;
                 plot.setupGrid();
                 plot.draw();
                 updateLocation();
@@ -211,8 +215,8 @@ function TransactionTabTracesCtrl($scope, $location, $http, $q, locationChanges,
                 // no need to fetch new data
                 $scope.suppressChartRefresh = true;
                 // adjust interval
-                plot.getAxes().xaxis.options.min = $scope.range.chartFrom;
-                plot.getAxes().xaxis.options.max = $scope.range.chartTo;
+                plot.getAxes().xaxis.options.min = $scope.chart.from;
+                plot.getAxes().xaxis.options.max = $scope.chart.to;
                 var data = getFilteredData();
                 plot.setData(data);
                 plot.setupGrid();
@@ -252,15 +256,15 @@ function TransactionTabTracesCtrl($scope, $location, $http, $q, locationChanges,
     });
 
     $scope.zoomOut = function () {
-        var currMin = $scope.range.chartFrom;
-        var currMax = $scope.range.chartTo;
+        var currMin = $scope.chart.from;
+        var currMax = $scope.chart.to;
         var currRange = currMax - currMin;
         var range = {
             from: currMin - currRange / 2,
             to: currMax + currRange / 2
         };
         charts.updateRange($scope, range.from, range.to, true, false, false, true);
-        updateFilter($scope.range.chartFrom, $scope.range.chartTo);
+        updateFilter($scope.chart.from, $scope.chart.to);
     };
 
     function updateFilter(from, to) {
@@ -285,7 +289,7 @@ function TransactionTabTracesCtrl($scope, $location, $http, $q, locationChanges,
                 }
             }
         }
-        $scope.chartNoData = nodata;
+        $scope.chart.noData = nodata;
         return data;
     }
 
@@ -363,8 +367,8 @@ function TransactionTabTracesCtrl($scope, $location, $http, $q, locationChanges,
         var priorAppliedFilter = appliedFilter;
         appliedFilter = {};
         appliedFilter.transactionType = $scope.model.transactionType;
-        appliedFilter.from = $scope.range.chartFrom;
-        appliedFilter.to = $scope.range.chartTo;
+        appliedFilter.from = $scope.chart.from;
+        appliedFilter.to = $scope.chart.to;
         appliedFilter.headlineComparator = $location.search()['headline-comparator'] || 'begins';
         appliedFilter.headline = $location.search().headline || '';
         appliedFilter.errorMessageComparator = $location.search()['error-message-comparator'] || 'begins';
@@ -378,7 +382,7 @@ function TransactionTabTracesCtrl($scope, $location, $http, $q, locationChanges,
 
         if (priorAppliedFilter !== undefined && !angular.equals(appliedFilter, priorAppliedFilter)) {
             // e.g. back or forward button was used to navigate
-            $scope.range.chartRefresh++;
+            $scope.chart.refresh++;
         }
 
         $scope.filter = angular.copy(appliedFilter);

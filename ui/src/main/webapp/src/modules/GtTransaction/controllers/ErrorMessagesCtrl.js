@@ -37,16 +37,20 @@ function ErrorMessagesCtrl($scope, $http, $location, locationChanges, charts, qu
 
     var chartState = charts.createState();
 
-    $scope.showChartSpinner = 0;
+    $scope.chart.showSpinner = 0;
 
     var errorMessageLimit = 25;
     var dataSeriesExtra;
 
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh', 'range.chartAutoRefresh'],
-            function (newValues, oldValues) {
-                $location.search('filter', $scope.filter || null);
-                refreshData(newValues[3] !== oldValues[3]);
-            });
+    $scope.$watchGroup([
+        'chart.from',
+        'chart.to',
+        'chart.refresh',
+        'chart.autoRefresh'
+    ], function (newValues, oldValues) {
+        $location.search('filter', $scope.filter || null);
+        refreshData(newValues[3] !== oldValues[3]);
+    });
 
     function refreshData(autoRefresh, deferred) {
         if (($scope.layout.central && !$scope.agentRollupId) || !$scope.model.transactionType) {
@@ -62,8 +66,8 @@ function ErrorMessagesCtrl($scope, $http, $location, locationChanges, charts, qu
             agentRollupId: $scope.agentRollupId,
             transactionType: $scope.model.transactionType,
             transactionName: $scope.model.transactionName,
-            from: $scope.range.chartFrom,
-            to: $scope.range.chartTo,
+            from: $scope.chart.from,
+            to: $scope.chart.to,
             include: parseResult.includes,
             exclude: parseResult.excludes,
             errorMessageLimit: errorMessageLimit
@@ -71,24 +75,24 @@ function ErrorMessagesCtrl($scope, $http, $location, locationChanges, charts, qu
         if (autoRefresh) {
             query.autoRefresh = true;
         }
-        var showChartSpinner = !$scope.suppressChartSpinner;
+        var showChartSpinner = !$scope.chart.suppressSpinner;
         if (showChartSpinner) {
-            $scope.showChartSpinner++;
+            $scope.chart.showSpinner++;
         }
-        $scope.suppressChartSpinner = false;
+        $scope.chart.suppressSpinner = false;
         $http.get('backend/error/messages' + queryStrings.encodeObject(query))
                 .then(function (response) {
                     // clear http error, especially useful for auto refresh on live data to clear a sporadic error from earlier
                     httpErrors.clear();
                     if (showChartSpinner) {
-                        $scope.showChartSpinner--;
+                        $scope.chart.showSpinner--;
                     }
-                    if ($scope.showChartSpinner) {
+                    if ($scope.chart.showSpinner) {
                         // ignore this response, another response has been stacked
                         return;
                     }
                     var data = response.data;
-                    $scope.chartNoData = !data.dataSeries.data.length;
+                    $scope.chart.noData = !data.dataSeries.data.length;
                     // reset axis in case user changed the date and then zoomed in/out to trigger this refresh
                     chartState.plot.getAxes().xaxis.options.min = query.from;
                     chartState.plot.getAxes().xaxis.options.max = query.to;
@@ -109,7 +113,7 @@ function ErrorMessagesCtrl($scope, $http, $location, locationChanges, charts, qu
                     }
                 }, function (response) {
                     if (showChartSpinner) {
-                        $scope.showChartSpinner--;
+                        $scope.chart.showSpinner--;
                     }
                     httpErrors.handle(response, $scope, deferred);
                 });
@@ -137,7 +141,7 @@ function ErrorMessagesCtrl($scope, $http, $location, locationChanges, charts, qu
     $scope.refresh = function () {
         $scope.applyLast();
         appliedFilter = $scope.filter;
-        $scope.range.chartRefresh++;
+        $scope.chart.refresh++;
     };
 
     locationChanges.on($scope, function () {
@@ -146,7 +150,7 @@ function ErrorMessagesCtrl($scope, $http, $location, locationChanges, charts, qu
 
         if (priorAppliedFilter !== undefined && appliedFilter !== priorAppliedFilter) {
             // e.g. back or forward button was used to navigate
-            $scope.range.chartRefresh++;
+            $scope.chart.refresh++;
         }
         $scope.filter = appliedFilter;
     });

@@ -45,20 +45,25 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
 
     function init(chartState, $chart, $scope) {
 
+        if(!$scope.chart){
+            $scope.chart = {};
+        }
+
         // All chart vars
-        if (!$scope.last || Number.isNaN($scope.last)) {
-            if ((!$scope.chartFrom || Number.isNaN($scope.chartFrom)) || !$scope.chartTo || Number.isNaN($scope.chartTo)) {
-                $scope.last = 4 * 60 * 60 * 1000;
+        if (!$scope.chart.last || Number.isNaN($scope.chart.last)) {
+            if ((!$scope.chart.from || Number.isNaN($scope.chart.from)) || !$scope.chart.to || Number.isNaN($scope.chart.to)) {
+                $scope.chart.last = 4 * 60 * 60 * 1000;
             }
         }
-        //$scope.chartFrom = undefined;
-        //$scope.chartTo = undefined;
-        $scope.chartNoData = false;
-        $scope.seriesLabels = null;
-        $scope.chartRefresh = 0;
-        $scope.showChartSpinner = 0;
-        $scope.suppressChartSpinner = false;
-        $scope.useGaugeViewThresholdMultiplier = null;
+        //$scope.chart.from = undefined;
+        //$scope.chart.to = undefined;
+        $scope.chart.noData = false;
+        $scope.chart.seriesLabels = null;
+        $scope.chart.refresh = 0;
+        $scope.chart.autoRefresh = 0;
+        $scope.chart.showSpinner = 0;
+        $scope.chart.suppressSpinner = false;
+        $scope.chart.useGaugeViewThresholdMultiplier = null;
 
         applyLast($scope);
 
@@ -81,8 +86,8 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
         });
 
         $scope.zoomOut = function () {
-            var currMin = $scope.chartFrom;
-            var currMax = $scope.chartTo;
+            var currMin = $scope.chart.from;
+            var currMax = $scope.chart.to;
             var currRange = currMax - currMin;
             updateRange($scope, currMin - currRange / 2, currMax + currRange / 2, true);
         };
@@ -91,7 +96,7 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
         if (!$scope.refresh) {
             $scope.refresh = function () {
                 applyLast($scope);
-                $scope.chartRefresh++;
+                $scope.chart.refresh++;
             };
         }
     }
@@ -109,24 +114,24 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
     }
 
     function updateRange($scope, from, to, zoomingOut, selection, selectionNearestLarger, tracePoints) {
-        // force chart refresh even if chartFrom/chartTo don't change (e.g. trying to zoom in beyond single interval)
-        $scope.chartRefresh++;
+        // force chart refresh even if chart.from/chart.to don't change (e.g. trying to zoom in beyond single interval)
+        $scope.chart.refresh++;
 
-        if (zoomingOut && $scope.last) {
-            $scope.last = roundUpLast($scope.last * 2);
+        if (zoomingOut && $scope.chart.last) {
+            $scope.chart.last = roundUpLast($scope.chart.last * 2);
             applyLast($scope);
             return;
         }
 
         var dataPointIntervalMillis =
-                getDataPointIntervalMillis(from, to, $scope.useGaugeViewThresholdMultiplier, tracePoints);
+                getDataPointIntervalMillis(from, to, $scope.chart.useGaugeViewThresholdMultiplier, tracePoints);
         var revisedFrom;
         var revisedTo;
         if (zoomingOut || selectionNearestLarger) {
             revisedFrom = Math.floor(from / dataPointIntervalMillis) * dataPointIntervalMillis;
             revisedTo = Math.ceil(to / dataPointIntervalMillis) * dataPointIntervalMillis;
             var revisedDataPointIntervalMillis =
-                    getDataPointIntervalMillis(revisedFrom, revisedTo, $scope.useGaugeViewThresholdMultiplier, tracePoints);
+                    getDataPointIntervalMillis(revisedFrom, revisedTo, $scope.chart.useGaugeViewThresholdMultiplier, tracePoints);
             if (revisedDataPointIntervalMillis !== dataPointIntervalMillis) {
                 // expanded out to larger rollup threshold so need to re-adjust
                 // ok to use original from/to instead of revisedFrom/revisedTo
@@ -150,40 +155,40 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
         var now = Date.now();
         // need to compare original 'to' in case it was revised below 'now'
         if ((revisedTo > now || to > now) && (!tracePoints || revisedTo - revisedFrom >= 60000)) {
-            if (!zoomingOut && !selection && $scope.last) {
-                if (tracePoints && $scope.last === 60000) {
-                    $scope.chartTo = Math.ceil(now / 60000) * 60000;
-                    $scope.chartFrom = $scope.chartTo - 60000;
-                    $scope.last = 0;
+            if (!zoomingOut && !selection && $scope.chart.last) {
+                if (tracePoints && $scope.chart.last === 60000) {
+                    $scope.chart.to = Math.ceil(now / 60000) * 60000;
+                    $scope.chart.from = $scope.chart.to - 60000;
+                    $scope.chart.last = 0;
                     return;
                 }
                 // double-click or scrollwheel zooming in, need special case here, otherwise might zoom in a bit too much
                 // due to shrinking the zoom to data point interval, which could result in strange 2 days --> 22 hours
                 // instead of the more obvious 2 days --> 1 day
-                $scope.last = roundUpLast($scope.last / 2);
+                $scope.chart.last = roundUpLast($scope.chart.last / 2);
                 applyLast($scope);
                 return;
             }
             if (tracePoints && revisedTo - revisedFrom === 120000) {
-                $scope.last = 60000;
+                $scope.chart.last = 60000;
                 applyLast($scope);
                 return;
             }
             if (tracePoints && now < revisedFrom) {
                 // this can happen after zooming in on RHS of chart until 1 second total chart width, then zooming out on LHS
-                $scope.last = 60000;
+                $scope.chart.last = 60000;
                 applyLast($scope);
                 return;
             }
             var last = roundUpLast(now - revisedFrom, selection);
             if (last > 0) {
-                $scope.last = last;
+                $scope.chart.last = last;
             }
             applyLast($scope);
         } else {
-            $scope.chartFrom = revisedFrom;
-            $scope.chartTo = revisedTo;
-            $scope.last = 0;
+            $scope.chart.from = revisedFrom;
+            $scope.chart.to = revisedTo;
+            $scope.chart.last = 0;
         }
     }
 
@@ -252,8 +257,8 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
                 timezone: 'browser',
                 twelveHourClock: true,
                 ticks: 5,
-                min: $scope.chartFrom,
-                max: $scope.chartTo,
+                min: $scope.chart.from,
+                max: $scope.chart.to,
                 reserveSpace: false
             },
             yaxis: {
@@ -302,33 +307,32 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
         if (addToQuery) {
             addToQuery(query);
         }
-        var showChartSpinner = !$scope.suppressChartSpinner;
+        var showChartSpinner = !$scope.chart.suppressSpinner;
         if (showChartSpinner) {
-            $scope.showChartSpinner++;
+            $scope.chart.showSpinner++;
         }
-        $scope.suppressChartSpinner = false;
-        console.log('query', query);
+        $scope.chart.suppressSpinner = false;
         $http.get(url + queryStrings.encodeObject(query)).then(function (response) {
             // clear http error, especially useful for auto refresh on live data to clear a sporadic error from earlier
             httpErrors.clear();
             if (showChartSpinner) {
-                $scope.showChartSpinner--;
+                $scope.chart.showSpinner--;
             }
-            if ($scope.showChartSpinner) {
+            if ($scope.chart.showSpinner) {
                 // ignore this response, another response has been stacked
                 return;
             }
             var data = response.data;
-            $scope.chartNoData = !data.dataSeries.length;
+            $scope.chart.noData = !data.dataSeries.length;
             // allow callback to modify data if desired
             onRefreshData(data);
             // reset axis in case user changed the date and then zoomed in/out to trigger this refresh
             chartState.plot.getAxes().xaxis.options.min = query.from;
             chartState.plot.getAxes().xaxis.options.max = query.to;
             // data point interval calculation must match server-side calculation, so based on query.from/query.to
-            // instead of chartFrom/chartTo
+            // instead of chart.from/chart.to
             chartState.dataPointIntervalMillis =
-                    getDataPointIntervalMillis(query.from, query.to, $scope.useGaugeViewThresholdMultiplier);
+                    getDataPointIntervalMillis(query.from, query.to, $scope.chart.useGaugeViewThresholdMultiplier);
             var plotData = [];
             var labels = [];
             angular.forEach(data.dataSeries, function (dataSeries) {
@@ -358,7 +362,7 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
             updateLegend(chartState, $scope);
         }, function (response) {
             if (showChartSpinner) {
-                $scope.showChartSpinner--;
+                $scope.chart.showSpinner--;
             }
             httpErrors.handle(response, $scope);
         });
@@ -366,14 +370,14 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
 
     function updateLegend(chartState, $scope) {
         var plotData = chartState.plot.getData();
-        $scope.seriesLabels = [];
+        $scope.chart.seriesLabels = [];
         if (plotData.length === 1 && plotData[0].label === undefined) {
             // special case for when user de-selects all gauges and chart displays 'Select one or more gauges below'
             return;
         }
         var seriesIndex;
         for (seriesIndex = 0; seriesIndex < plotData.length; seriesIndex++) {
-            $scope.seriesLabels.push({
+            $scope.chart.seriesLabels.push({
                 color: plotData[seriesIndex].color,
                 text: plotData[seriesIndex].label
             });
@@ -461,7 +465,7 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
 
         function onVisible() {
             $scope.$apply(function () {
-                $scope.chartAutoRefresh++;
+                $scope.chart.autoRefresh++;
                 $scope.refresh();
             });
             document.removeEventListener('visibilitychange', onVisible);
@@ -469,14 +473,14 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
 
         function scheduleNextRefresh() {
             timer = $timeout(function () {
-                if ($scope.last) {
+                if ($scope.chart.last) {
                     // document.hidden is not supported by IE9 but that's ok, the condition will just evaluate to false
                     // and auto refresh will continue even while hidden under IE9
                     if (document.hidden) {
                         document.addEventListener('visibilitychange', onVisible);
                     } else {
-                        $scope.suppressChartSpinner = true;
-                        $scope.chartAutoRefresh++;
+                        $scope.chart.suppressSpinner = true;
+                        $scope.chart.autoRefresh++;
                         $scope.refresh();
                     }
                 }
@@ -498,12 +502,12 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
      * @returns {undefined}
      */
     function applyLast($scope) {
-        if (!$scope.last) {
+        if (!$scope.chart.last) {
             return;
         }
         var now = moment().startOf('second').valueOf();
-        var from = now - $scope.last;
-        var to = now + $scope.last / 10;
+        var from = now - $scope.chart.last;
+        var to = now + $scope.chart.last / 10;
         var dataPointIntervalMillis = getDataPointIntervalMillis(from, to);
         var revisedFrom = Math.floor(from / dataPointIntervalMillis) * dataPointIntervalMillis;
         var revisedTo = Math.ceil(to / dataPointIntervalMillis) * dataPointIntervalMillis;
@@ -515,8 +519,8 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
             revisedTo = Math.ceil(to / revisedDataPointIntervalMillis) * revisedDataPointIntervalMillis;
         }
 
-        $scope.chartFrom = revisedFrom;
-        $scope.chartTo = revisedTo;
+        $scope.chart.from = revisedFrom;
+        $scope.chart.to = revisedTo;
     }
 
     return {

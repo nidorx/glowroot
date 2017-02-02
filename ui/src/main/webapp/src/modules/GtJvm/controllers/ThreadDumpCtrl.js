@@ -113,7 +113,6 @@ function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal
                     };
                 });
             }
-            console.log('$scope.data', $scope.data);
             if (deferred) {
                 deferred.resolve('Refreshed');
             }

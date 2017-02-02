@@ -101,9 +101,13 @@ AppRun.$inject = [
 function AppRun($rootScope, $state, $http, $location, $timeout, login, queryStrings, model) {
 
     // Common vars
+    // Shared vars
     $rootScope.$state = $state;
     $rootScope.model = model;
     $rootScope.range = model.range;
+    $rootScope.chart = {};
+    $rootScope.chart.last = null;
+    $rootScope.agentId = '';
 
     /*========================================================================================
      * Eventos de rotas
@@ -130,7 +134,7 @@ function AppRun($rootScope, $state, $http, $location, $timeout, login, queryStri
 
     /// OLD
 
-    $rootScope.agentId = '';
+
 
     $rootScope.$on('$locationChangeSuccess', function () {
         $rootScope.agentId = $location.search()['agent-id'] || '';
@@ -260,13 +264,13 @@ function AppRun($rootScope, $state, $http, $location, $timeout, login, queryStri
         }
         query['transaction-type'] = $rootScope.model.transactionType;
         query['transaction-name'] = $rootScope.model.transactionName;
-        if (!$rootScope.range.last) {
-            query.from = Math.floor($rootScope.range.chartFrom / 60000) * 60000;
-            query.to = Math.ceil($rootScope.range.chartTo / 60000) * 60000;
+        if (!$rootScope.chart.last) {
+            query.from = Math.floor($rootScope.chart.from / 60000) * 60000;
+            query.to = Math.ceil($rootScope.chart.to / 60000) * 60000;
             delete query.last;
         }
-//        else if ($rootScope.range.last !== 4 * 60 * 60 * 1000) {
-//            query.last = $rootScope.range.last;
+//        else if ($rootScope.chart.last !== 4 * 60 * 60 * 1000) {
+//            query.last = $rootScope.last;
 //            delete query.from;
 //            delete query.to;
 //        }
@@ -309,8 +313,8 @@ function AppRun($rootScope, $state, $http, $location, $timeout, login, queryStri
             }
         }
         if (!params.last) {
-            params.from = Math.floor($rootScope.range.chartFrom / 60000) * 60000;
-            params.to = Math.ceil($rootScope.range.chartTo / 60000) * 60000;
+            params.from = Math.floor($rootScope.chart.from / 60000) * 60000;
+            params.to = Math.ceil($rootScope.chart.to / 60000) * 60000;
             params.last = null;
         } else {
             params.from = null;
@@ -341,7 +345,6 @@ function AppRun($rootScope, $state, $http, $location, $timeout, login, queryStri
 
     $rootScope.buildUiSref = function (baseQuery) {
         var out = $state.current.name + '(' + JSON.stringify($rootScope.buildStateParams(baseQuery)) + ')';
-        console.log('out', out);
         return out;
     };
 

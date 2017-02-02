@@ -43,34 +43,31 @@ function TransactionTabTimePercentilesCtrl($scope, $location, $filter, $timeout,
             agentRollupId: $scope.agentRollupId,
             transactionType: $scope.model.transactionType,
             transactionName: $scope.model.transactionName,
-            from: $scope.range.chartFrom,
-            to: $scope.range.chartTo,
+            from: $scope.chart.from,
+            to: $scope.chart.to,
             autoRefresh: autoRefresh
         };
         charts.refreshData('backend/transaction/percentiles', chartState, $scope, null, addToQuery, onRefreshData, query);
     }
 
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh', 'range.chartAutoRefresh'],
-            function (newValues, oldValues) {
-                if (angular.equals(appliedPercentiles, $scope.layout.agentRollups[$scope.agentRollupId].defaultDisplayedPercentiles)) {
-                    $location.search('percentile', null);
-                } else {
-                    $location.search('percentile', appliedPercentiles);
-                }
-                refreshData(newValues[3] !== oldValues[3]);
-            });
-
-    $scope.clickTopRadioButton = function (item) {
-        if (item === 'percentiles') {
-            $scope.range.chartRefresh++;
+    $scope.$watchGroup([
+        'chart.from',
+        'chart.to',
+        'chart.refresh',
+        'chart.autoRefresh'
+    ], function (newValues, oldValues) {
+        if (angular.equals(appliedPercentiles, $scope.layout.agentRollups[$scope.agentRollupId].defaultDisplayedPercentiles)) {
+            $location.search('percentile', null);
         } else {
-            $location.url('transaction/' + item + $scope.tabQueryString());
+            $location.search('percentile', appliedPercentiles);
         }
-    };
+        refreshData(newValues[3] !== oldValues[3]);
+    });
+
 
     $scope.clickActiveTopLink = function (event) {
         if (!event.ctrlKey) {
-            $scope.range.chartRefresh++;
+            $scope.chart.refresh++;
             // suppress normal link
             event.preventDefault();
             return false;
@@ -95,7 +92,7 @@ function TransactionTabTimePercentilesCtrl($scope, $location, $filter, $timeout,
         });
         sortNumbers(appliedPercentiles);
         $('#customPercentilesModal').modal('hide');
-        $scope.range.chartRefresh++;
+        $scope.chart.refresh++;
     };
 
     locationChanges.on($scope, function () {
@@ -116,7 +113,7 @@ function TransactionTabTimePercentilesCtrl($scope, $location, $filter, $timeout,
         }
 
         if (priorAppliedPercentiles !== undefined && !angular.equals(appliedPercentiles, priorAppliedPercentiles)) {
-            $scope.range.chartRefresh++;
+            $scope.chart.refresh++;
         }
         $scope.percentiles = appliedPercentiles;
     });

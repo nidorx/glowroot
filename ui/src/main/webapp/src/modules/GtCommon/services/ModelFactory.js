@@ -30,13 +30,16 @@ angular
  */
 function ModelFactory() {
     return {
-        transactionType:null,
-        transactionName:null,
+        transactionType: null,
+        transactionName: null,
         range: {
             last: null,
-            chartFrom: null,
-            chartTo: null,
-            chartRefresh: null
+            chart: {
+                from: null,
+                to: null,
+                autoRefresh: 0,
+                refresh: null
+            }
         }
     };
 }

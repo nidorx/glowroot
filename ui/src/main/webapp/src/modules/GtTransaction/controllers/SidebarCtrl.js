@@ -66,10 +66,10 @@ function TransactionSidebarCtrl($scope, $location, $http, $timeout,
     };
 
     $scope.$watchGroup([
-        'range.chartFrom',
-        'range.chartTo',
-        'range.chartRefresh',
-        'range.chartAutoRefresh',
+        'chart.from',
+        'chart.to',
+        'chart.refresh',
+        'chart.autoRefresh',
         'summarySortOrder'
     ], function (newValues, oldValues) {
         if (newValues !== oldValues) {
@@ -95,7 +95,7 @@ function TransactionSidebarCtrl($scope, $location, $http, $timeout,
                 activeElement.blur();
             }
         }
-        if ($scope.range.last && !initialStateChangeSuccess) {
+        if ($scope.chart.last && !initialStateChangeSuccess) {
             // refresh on tab change
             $timeout(function () {
                 // slight delay to de-prioritize summaries data request
@@ -115,8 +115,8 @@ function TransactionSidebarCtrl($scope, $location, $http, $timeout,
             agentRollupId: $scope.agentRollupId,
             transactionType: $scope.model.transactionType,
             // need floor/ceil when on trace point chart which allows second granularity
-            from: Math.floor($scope.range.chartFrom / 60000) * 60000,
-            to: Math.ceil($scope.range.chartTo / 60000) * 60000,
+            from: Math.floor($scope.chart.from / 60000) * 60000,
+            to: Math.ceil($scope.chart.to / 60000) * 60000,
             sortOrder: $scope.summarySortOrder,
             limit: $scope.summaryLimit
         };

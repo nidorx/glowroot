@@ -22,10 +22,10 @@ angular
 
 
 TransactionTabsCtrl.$inject = [
-    '$scope', '$state', '$location', '$http', '$timeout', 'queryStrings', 'httpErrors', 'model'
+    '$scope', '$state', '$location', '$http', '$timeout', 'httpErrors', 'model'
 ];
 
-function TransactionTabsCtrl($scope, $state, $location, $http, $timeout, queryStrings, httpErrors, model) {
+function TransactionTabsCtrl($scope, $state, $location, $http, $timeout, httpErrors, model) {
     $scope.model = model;
     $scope.range = model.range;
 
@@ -33,10 +33,10 @@ function TransactionTabsCtrl($scope, $state, $location, $http, $timeout, querySt
     var concurrentUpdateCount = 0;
 
     $scope.$watchGroup([
-        'range.chartFrom',
-        'range.chartTo',
-        'range.chartRefresh',
-        'range.chartAutoRefresh',
+        'chart.from',
+        'chart.to',
+        'chart.refresh',
+        'chart.autoRefresh',
         'transactionName'
     ], function (newValues, oldValues) {
         if (newValues !== oldValues) {
@@ -71,7 +71,7 @@ function TransactionTabsCtrl($scope, $state, $location, $http, $timeout, querySt
                 activeElement.blur();
             }
         }
-        if ($scope.range.last && !initialStateChangeSuccess) {
+        if ($scope.chart.last && !initialStateChangeSuccess) {
             $timeout(function () {
                 // slight delay to de-prioritize summaries data request
                 updateTabBarData();
@@ -88,32 +88,31 @@ function TransactionTabsCtrl($scope, $state, $location, $http, $timeout, querySt
             $scope.traceCount = 0;
             return;
         }
-        var query = {
-            agentRollupId: $scope.agentRollupId,
-            transactionType: $scope.model.transactionType,
-            transactionName: $scope.model.transactionName,
-            from: $scope.range.chartFrom,
-            to: $scope.range.chartTo
-        };
-        if (autoRefresh) {
-            query.autoRefresh = true;
-        }
-        concurrentUpdateCount++;
-        $http.get('backend/' + $scope.shortName + '/trace-count' + queryStrings.encodeObject(query))
-                .then(function (response) {
-                    concurrentUpdateCount--;
-                    if (concurrentUpdateCount) {
-                        return;
-                    }
-                    if ($state.is('page.transaction.detail.traces') || $state.is('page.error.detail.traces')) {
-                        filteredTraceTabCount = undefined;
-                    }
-                    $scope.traceCount = response.data;
 
-                }, function (response) {
-                    concurrentUpdateCount--;
-                    httpErrors.handle(response, $scope);
-                });
+        concurrentUpdateCount++;
+        $http.get('backend/' + $scope.shortName + '/trace-count', {
+            params: {
+                'agent-rollup-id': $scope.agentRollupId,
+                'transaction-type': $scope.model.transactionType,
+                'transaction-name': $scope.model.transactionName,
+                from: $scope.chart.from,
+                to: $scope.chart.to,
+                'auto-refresh': autoRefresh ? true : undefined
+            }
+        }).then(function (response) {
+            concurrentUpdateCount--;
+            if (concurrentUpdateCount) {
+                return;
+            }
+            if ($state.is('page.transaction.detail.traces') || $state.is('page.error.detail.traces')) {
+                filteredTraceTabCount = undefined;
+            }
+            $scope.traceCount = response.data;
+
+        }, function (response) {
+            concurrentUpdateCount--;
+            httpErrors.handle(response, $scope);
+        });
     }
 
     $timeout(function () {

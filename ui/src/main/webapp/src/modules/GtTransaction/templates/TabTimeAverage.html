@@ -22,7 +22,7 @@
         <div class="gt-chart-container">
             <div class="gt-chart-dimensions" id="chart"></div>
 
-            <div ng-show="chartNoData && !showChartSpinner" class="chart-alert">
+            <div ng-show="chart.noData && !chart.showSpinner" class="chart-alert">
                 <div class="chart-alert-container">
                     <div class="alert alert-info chart-alert-message">
                         <span class="pficon pficon-info"></span>
@@ -34,10 +34,10 @@
             </div>
         </div>
 
-        <div class="legend chart-lengend" id="chartLegend" ng-hide="chartNoData">
+        <div class="legend chart-lengend" id="chartLegend" ng-hide="chart.noData">
             <div
                 class="chart-lengend-item"
-                ng-repeat="seriesLabel in seriesLabels"
+                ng-repeat="seriesLabel in chart.seriesLabels"
                 >
                 <div class="chart-lengend-item-color-box">
                     <div

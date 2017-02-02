@@ -35,38 +35,30 @@ function TransactionTabTimeAverageCtrl($scope, $location, charts, model) {
     var chartState = charts.createState();
 
     function refreshData(autoRefresh) {
-        console.log('query', $scope.chartFrom);
         var query = {
             agentRollupId: $scope.agentRollupId,
             transactionType: $scope.model.transactionType,
             transactionName: $scope.model.transactionName,
-            from: $scope.chartFrom,
-            to: $scope.chartTo,
+            from: $scope.chart.from,
+            to: $scope.chart.to,
             autoRefresh: autoRefresh
         };
         charts.refreshData('backend/transaction/average', chartState, $scope, null, null, onRefreshData, query);
     }
 
     $scope.$watchGroup([
-        'chartFrom',
-        'chartTo',
-        'chartRefresh',
-        'chartAutoRefresh'
+        'chart.from',
+        'chart.to',
+        'chart.refresh',
+        'chart.autoRefresh'
     ], function (newValues, oldValues) {
         refreshData(newValues[3] !== oldValues[3]);
     });
 
-    $scope.clickTopRadioButton = function (item) {
-        if (item === 'average') {
-            $scope.chartRefresh++;
-        } else {
-            $location.url('transaction/' + item + $scope.tabQueryString());
-        }
-    };
 
     $scope.clickActiveTopLink = function (event) {
         if (!event.ctrlKey) {
-            $scope.chartRefresh++;
+            $scope.chart.refresh++;
             // suppress normal link
             event.preventDefault();
             return false;
@@ -211,7 +203,6 @@ function TransactionTabTimeAverageCtrl($scope, $location, charts, model) {
     };
 
     charts.init(chartState, $('#chart'), $scope);
-    console.log('$scope', $scope.chartFrom);
     charts.plot([[]], chartOptions, chartState, $('#chart'), $scope);
     charts.initResize(chartState.plot, $scope);
     charts.startAutoRefresh($scope, 60000);

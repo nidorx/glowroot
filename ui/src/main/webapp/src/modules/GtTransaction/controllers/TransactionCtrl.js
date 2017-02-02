@@ -29,9 +29,27 @@ TransactionCtrl.$inject = [
 
 function TransactionCtrl($scope, $location, $timeout, queryStrings, charts) {
 
+
     $scope.hideMainContent = function () {
         return ($scope.layout.central && !$scope.agentRollupId) || !$scope.model.transactionType;
     };
+
+    // need to defer listener registration, otherwise captures initial location change sometimes
+    $timeout(function () {
+        $scope.$on('$locationChangeSuccess', onLocationChangeSuccess);
+    });
+    onLocationChangeSuccess();
+
+    $scope.$watchGroup([
+        'chart.last',
+        'chart.from',
+        'chart.to',
+        'summarySortOrder'
+    ], function (newValues, oldValues) {
+        if (newValues !== oldValues) {
+            $location.search($scope.buildQueryObject());
+        }
+    });
 
     function onLocationChangeSuccess() {
         $scope.model.transactionType = $location.search()['transaction-type'];
@@ -60,45 +78,20 @@ function TransactionCtrl($scope, $location, $timeout, queryStrings, charts) {
         $scope.page.breadcrumb = null;
 
 
-//        $scope.range.last = Number($location.search().last);
-//        $scope.range.chartFrom = Number($location.search().from);
-//        $scope.range.chartTo = Number($location.search().to);
+        $scope.chart.last = Number($location.search().last);
+        $scope.chart.from = Number($location.search().from);
+        $scope.chart.to = Number($location.search().to);
 
 
         // both from and to must be supplied or neither will take effect
-//        if (!isNaN($scope.range.chartFrom) && !isNaN($scope.range.chartTo)) {
-//            $scope.range.last = 0;
-//        } else if (!$scope.range.last) {
-//            $scope.range.last = 4 * 60 * 60 * 1000;
-//        }
+        if (!isNaN($scope.chart.from) && !isNaN($scope.chart.to)) {
+            $scope.chart.last = 0;
+        } else if (!$scope.chart.last) {
+            $scope.chart.last = 4 * 60 * 60 * 1000;
+        }
         $scope.summarySortOrder = $location.search()['summary-sort-order'] || $scope.defaultSummarySortOrder;
 
         // always re-apply last in order to reflect the latest time
-//        charts.applyLast($scope.range.last, $scope.range);
+        charts.applyLast($scope);
     }
-
-    // need to defer listener registration, otherwise captures initial location change sometimes
-    $timeout(function () {
-        $scope.$on('$locationChangeSuccess', onLocationChangeSuccess);
-    });
-    onLocationChangeSuccess();
-
-    $scope.$watchGroup([
-        'range.last',
-        'range.chartFrom',
-        'range.chartTo',
-        'summarySortOrder'
-    ], function (newValues, oldValues) {
-        if (newValues !== oldValues) {
-            $location.search($scope.buildQueryObject());
-        }
-    });
-
-    $scope.tabQueryString = function () {
-        return queryStrings.encodeObject($scope.buildQueryObject({}));
-    };
-
-    $scope.currentTabUrl = function () {
-        return $location.path().substring(1);
-    };
 }

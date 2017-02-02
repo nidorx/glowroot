@@ -14,13 +14,13 @@
   limitations under the License.
 -->
 <div class="dropdown btn-group">
-    <button 
+    <button
         type="button"
-        class="btn btn-default dropdown-toggle" 
-        data-toggle="dropdown" 
-        aria-haspopup="true" 
+        class="btn btn-default dropdown-toggle"
+        data-toggle="dropdown"
+        aria-haspopup="true"
         aria-expanded="false"
-        
+
         >
         {{timeDisplay()}}
         <span class="caret"></span>
@@ -28,8 +28,8 @@
     <ul class="dropdown-menu" ng-if="aux.isOpen">
         <li
             ng-repeat="selection in rangeSelections"
-            ng-class="{selected:selection === last}"
-            
+            ng-class="{selected:selection === chart.last}"
+
             >
             <a role="menuitem" tabindex="-1" ui-sref="{{buildRangeParams(selection)}}">
                 {{lastDisplay(selection)}}

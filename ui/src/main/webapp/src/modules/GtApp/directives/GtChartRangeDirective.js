@@ -33,7 +33,7 @@ function GtChartRangeDirective($location, locationChanges, modals) {
         link: function ($scope, $element) {
 
             $scope.aux = {};
-            
+
             $element.on('show.bs.dropdown', function () {
                 $scope.aux.isOpen = true;
                 $scope.$digest();
@@ -44,8 +44,8 @@ function GtChartRangeDirective($location, locationChanges, modals) {
             });
 
 
-            $scope.range.chartRefresh = 0;
-            $scope.range.chartAutoRefresh = 0;
+            $scope.chart.refresh = 0;
+            $scope.chart.autoRefresh = 0;
 
 
             $scope.rangeSelections = [
@@ -61,13 +61,13 @@ function GtChartRangeDirective($location, locationChanges, modals) {
             ];
 
             locationChanges.on($scope, function () {
-                $scope.last = Number($location.search().last);
-                if (!$scope.last || Number.isNaN($scope.last)) {
-                    $scope.chartFrom = Number($location.search().from);
-                    $scope.chartTo = Number($location.search().to);
-                    if ((!$scope.chartFrom || Number.isNaN($scope.chartFrom))
-                            || !$scope.chartTo || Number.isNaN($scope.chartTo)) {
-                        $scope.last = 4 * 60 * 60 * 1000;
+                $scope.chart.last = Number($location.search().last);
+                if (!$scope.chart.last || Number.isNaN($scope.chart.last)) {
+                    $scope.chart.from = Number($location.search().from);
+                    $scope.chart.to = Number($location.search().to);
+                    if ((!$scope.chart.from || Number.isNaN($scope.chart.from))
+                            || !$scope.chart.to || Number.isNaN($scope.chart.to)) {
+                        $scope.chart.last = 4 * 60 * 60 * 1000;
                     }
                 }
             });
@@ -114,13 +114,13 @@ function GtChartRangeDirective($location, locationChanges, modals) {
             };
 
             $scope.timeDisplay = function () {
-                if ($scope.last) {
-                    return $scope.lastDisplay($scope.last);
+                if ($scope.chart.last) {
+                    return $scope.lastDisplay($scope.chart.last);
                 }
                 // need floor/ceil when on trace point chart which allows second granularity
                 // this is so that time frame display matches sidebar time frame, which seems least confusing alternative
-                var from = Math.floor($scope.chartFrom / 60000) * 60000;
-                var to = Math.ceil($scope.chartTo / 60000) * 60000;
+                var from = Math.floor($scope.chart.from / 60000) * 60000;
+                var to = Math.ceil($scope.chart.to / 60000) * 60000;
                 var fromDate = fancyDate(from);
                 var toDate = fancyDate(to);
                 if (fromDate === toDate) {
@@ -151,8 +151,8 @@ function GtChartRangeDirective($location, locationChanges, modals) {
                     previous: 'fa fa-chevron-left',
                     next: 'fa fa-chevron-right'
                 };
-                var from = $scope.chartFrom;
-                var to = $scope.chartTo;
+                var from = $scope.chart.from;
+                var to = $scope.chart.to;
                 $('#customDateRangeFromDate').datetimepicker({
                     icons: icons,
                     format: 'L'
@@ -187,10 +187,10 @@ function GtChartRangeDirective($location, locationChanges, modals) {
                 var toDate = $('#customDateRangeToDate').data('DateTimePicker').date();
                 var toTime = $('#customDateRangeToTime').data('DateTimePicker').date();
 
-                $scope.range.chartFrom = fromDate + timeComponent(fromTime);
-                $scope.range.chartTo = toDate + timeComponent(toTime);
-                $scope.range.last = 0;
-                $scope.range.chartRefresh++;
+                $scope.chart.from = fromDate + timeComponent(fromTime);
+                $scope.chart.to = toDate + timeComponent(toTime);
+                $scope.chart.last = 0;
+                $scope.chart.refresh++;
                 $('#customDateRangeModal').modal('hide');
             };
         }

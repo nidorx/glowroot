@@ -36,7 +36,7 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
     }
 
     // initialize page binding object
-    $scope.page = {};
+    $scope.aux = {};
 
     var DEFAULT_GAUGES = [
         'java.lang:type=Memory:HeapMemoryUsage.used'
@@ -54,14 +54,14 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
     var gaugeUnits = {};
     var gaugeGrouping = {};
 
-    $scope.page.gaugeFilter = '';
-    $scope.useGaugeViewThresholdMultiplier = true;
+    $scope.aux.gaugeFilter = '';
+    $scope.chart.useGaugeViewThresholdMultiplier = true;
 
     function refreshData(autoRefresh) {
         var query = {
             agentRollupId: $scope.agentRollupId,
-            from: $scope.chartFrom,
-            to: $scope.chartTo,
+            from: $scope.chart.from,
+            to: $scope.chart.to,
             autoRefresh: autoRefresh,
             gaugeNames: $scope.gaugeNames
         };
@@ -76,17 +76,16 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
             // ideally wouldn't need to refreshData here, but this seems a rare condition (to de-select all gauges)
             // and need some way to clear the last gauge from the chart, and this is easy
             refreshData(autoRefresh);
-            $scope.chartNoData = true;
+            $scope.chart.noData = true;
         }
     }
 
     $scope.$watchGroup([
-        'chartFrom',
-        'chartTo',
-        'chartRefresh',
-        'chartAutoRefresh'
+        'chart.from',
+        'chart.to',
+        'chart.refresh',
+        'chart.autoRefresh'
     ], function (newValues, oldValues) {
-        console.log(newValues, oldValues);
         if (newValues !== oldValues) {
             watchListener(newValues[3] !== oldValues[3]);
         }
@@ -98,7 +97,7 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
         }
     });
 
-    $scope.$watch('seriesLabels', function (newValues, oldValues) {
+    $scope.$watch('chart.seriesLabels', function (newValues, oldValues) {
         if (newValues !== oldValues) {
             var i;
             for (i = 0; i < newValues.length; i++) {
@@ -115,11 +114,11 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
         delete query.from;
         delete query.to;
         delete query.last;
-        if (!$scope.last) {
-            query.from = $scope.chartFrom;
-            query.to = $scope.chartTo;
+        if (!$scope.chart.last) {
+            query.from = $scope.chart.from;
+            query.to = $scope.chart.to;
         } else {
-            query.last = $scope.last;
+            query.last = $scope.chart.last;
         }
 
         if (angular.equals($scope.gaugeNames, DEFAULT_GAUGES)) {
@@ -144,17 +143,22 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
 
     function onLocationChanges() {
         var priorLocation = location;
-        location = {};
-        location.last = Number($location.search().last);
-        location.chartFrom = Number($location.search().from);
-        location.chartTo = Number($location.search().to);
+        location = {
+            last: Number($location.search().last),
+            chart: {
+                from: Number($location.search().from),
+                to: Number($location.search().to)
+            },
+            gaugeNames: $location.search()['gauge-name']
+        };
+
         // both from and to must be supplied or neither will take effect
-        if (location.chartFrom && location.chartTo) {
+        if (location.chart.from && location.chart.to) {
             location.last = 0;
         } else if (!location.last) {
             location.last = 4 * 60 * 60 * 1000;
         }
-        location.gaugeNames = $location.search()['gauge-name'];
+
         if (!location.gaugeNames) {
             location.gaugeNames = [];
             angular.forEach(DEFAULT_GAUGES, function (defaultGauge) {
@@ -171,9 +175,9 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
         if (!angular.equals(location, priorLocation)) {
             // only update scope if relevant change
             $scope.gaugeNames = angular.copy(location.gaugeNames);
-            $scope.last = location.last;
-            $scope.chartFrom = location.chartFrom;
-            $scope.chartTo = location.chartTo;
+            $scope.chart.last = location.last;
+            $scope.chart.from = location.chart.from;
+            $scope.chart.to = location.chart.to;
             charts.applyLast($scope);
         }
     }
@@ -340,7 +344,7 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
                 nodata = points.length === 0;
             }
         }
-        $scope.chartNoData = nodata;
+        $scope.chart.noData = nodata;
     }
 
     function createShortDataSeriesNames(gauges) {
@@ -429,12 +433,12 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
         if (!$scope.allGauges) {
             return true;
         }
-        var gauges = $filter('filter')($scope.allGauges, {display: $scope.page.gaugeFilter});
+        var gauges = $filter('filter')($scope.allGauges, {display: $scope.aux.gaugeFilter});
         return gauges.length === $scope.allGauges.length;
     };
 
     $scope.selectAllGauges = function () {
-        var gauges = $filter('filter')($scope.allGauges, {display: $scope.page.gaugeFilter});
+        var gauges = $filter('filter')($scope.allGauges, {display: $scope.aux.gaugeFilter});
         angular.forEach(gauges, function (gauge) {
             var index = $scope.gaugeNames.indexOf(gauge.name);
             if (index === -1) {
@@ -444,7 +448,7 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
     };
 
     $scope.deselectAllGauges = function () {
-        var gauges = $filter('filter')($scope.allGauges, {display: $scope.page.gaugeFilter});
+        var gauges = $filter('filter')($scope.allGauges, {display: $scope.aux.gaugeFilter});
         angular.forEach(gauges, function (gauge) {
             var index = $scope.gaugeNames.indexOf(gauge.name);
             if (index !== -1) {
@@ -478,9 +482,9 @@ function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, 
             content: function (label, xval, yval, flotItem) {
                 var rollupConfig0 = $scope.layout.rollupConfigs[0];
                 var dataPointIntervalMillis =
-                        charts.getDataPointIntervalMillis($scope.chartFrom, $scope.chartTo, true);
+                        charts.getDataPointIntervalMillis($scope.chart.from, $scope.chart.to, true);
                 if (dataPointIntervalMillis === rollupConfig0.intervalMillis
-                        && $scope.chartTo - $scope.chartFrom < 4 * rollupConfig0.viewThresholdMillis) {
+                        && $scope.chart.to - $scope.chart.from < 4 * rollupConfig0.viewThresholdMillis) {
                     var nonScaledValue = yvalMaps[label][xval];
                     var tooltip = '<table class="gt-chart-tooltip">';
                     tooltip += '<tr><td colspan="2" style="font-weight: 600;">' + gaugeShortDisplayMap[label];

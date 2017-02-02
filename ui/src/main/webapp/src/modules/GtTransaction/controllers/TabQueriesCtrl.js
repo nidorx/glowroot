@@ -39,7 +39,11 @@ function TransactionTabQueriesCtrl($scope, $http, $location, $timeout, locationC
     $scope.showSpinner = 0;
     $scope.showModalSpinner = 0;
 
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh'], function () {
+    $scope.$watchGroup([
+        'chart.from',
+        'chart.to',
+        'chart.refresh'
+    ], function () {
         refreshData();
     });
 
@@ -294,8 +298,8 @@ function TransactionTabQueriesCtrl($scope, $http, $location, $timeout, locationC
             agentRollupId: $scope.agentRollupId,
             transactionType: $scope.model.transactionType,
             transactionName: $scope.model.transactionName,
-            from: $scope.range.chartFrom,
-            to: $scope.range.chartTo
+            from: $scope.chart.from,
+            to: $scope.chart.to
         };
         $scope.showSpinner++;
         $http.get('backend/transaction/queries' + queryStrings.encodeObject(query))

@@ -40,7 +40,12 @@ function TransactionTabProfileCtrl($scope, $http, $location, locationChanges, qu
     $scope.showProfile = false;
     $scope.showSpinner = 0;
 
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh', 'auxiliary'], function () {
+    $scope.$watchGroup([
+        'chart.from',
+        'chart.to',
+        'chart.refresh',
+        'auxiliary'
+    ], function () {
         $location.search('filter', $scope.filter || null);
         $location.search('auxiliary', $scope.auxiliary ? 'true' : null);
         refreshData();
@@ -56,7 +61,7 @@ function TransactionTabProfileCtrl($scope, $http, $location, locationChanges, qu
 
     $scope.clickTopRadioButton = function (auxiliary) {
         if (($scope.auxiliary && auxiliary) || (!$scope.auxiliary && !auxiliary)) {
-            $scope.range.chartRefresh++;
+            $scope.chart.refresh++;
         } else {
             $scope.auxiliary = auxiliary;
         }
@@ -67,7 +72,7 @@ function TransactionTabProfileCtrl($scope, $http, $location, locationChanges, qu
             return;
         }
         if (($scope.auxiliary && auxiliary) || (!$scope.auxiliary && !auxiliary)) {
-            $scope.range.chartRefresh++;
+            $scope.chart.refresh++;
             // suppress normal link
             event.preventDefault();
             return false;
@@ -89,7 +94,7 @@ function TransactionTabProfileCtrl($scope, $http, $location, locationChanges, qu
     $scope.refresh = function () {
         $scope.applyLast();
         appliedFilter = $scope.filter;
-        $scope.range.chartRefresh++;
+        $scope.chart.refresh++;
     };
 
     locationChanges.on($scope, function () {
@@ -98,7 +103,7 @@ function TransactionTabProfileCtrl($scope, $http, $location, locationChanges, qu
 
         if (priorAppliedFilter !== undefined && appliedFilter !== priorAppliedFilter) {
             // e.g. back or forward button was used to navigate
-            $scope.range.chartRefresh++;
+            $scope.chart.refresh++;
         }
         $scope.filter = appliedFilter;
         $scope.truncateBranchPercentage = $location.search()['truncate-branch-percentage'] || 0.1;
@@ -128,8 +133,8 @@ function TransactionTabProfileCtrl($scope, $http, $location, locationChanges, qu
             agentRollupId: $scope.agentRollupId,
             transactionType: $scope.model.transactionType,
             transactionName: $scope.model.transactionName,
-            from: $scope.range.chartFrom,
-            to: $scope.range.chartTo,
+            from: $scope.chart.from,
+            to: $scope.chart.to,
             auxiliary: $scope.auxiliary,
             include: parseResult.includes,
             exclude: parseResult.excludes,

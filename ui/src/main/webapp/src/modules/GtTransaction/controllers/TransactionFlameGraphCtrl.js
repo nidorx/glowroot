@@ -31,7 +31,7 @@ function TransactionFlameGraphCtrl($scope, $location, $http, httpErrors, querySt
     $scope.model.transactionName = $location.search()['transaction-name'];
     $scope.from = Number($location.search().from);
     $scope.to = Number($location.search().to);
-    $scope.last = Number($location.search().last);
+    $scope.chart.last = Number($location.search().last);
     $scope.auxiliary = $location.search().auxiliary || false;
     $scope.filter = $location.search().filter;
     // larger truncate-branch-percentage compared to tree view
@@ -40,14 +40,14 @@ function TransactionFlameGraphCtrl($scope, $location, $http, httpErrors, querySt
     // plus it's pretty confusing visually (and very tall vertically) with very fine grained leafs
     $scope.truncateBranchPercentage = $location.search()['truncate-branch-percentage'] || 1.0;
 
-    if (!$scope.last && (isNaN($scope.from) || isNaN($scope.to))) {
-        $scope.last = 4 * 60 * 60 * 1000;
+    if (!$scope.chart.last && (isNaN($scope.from) || isNaN($scope.to))) {
+        $scope.chart.last = 4 * 60 * 60 * 1000;
     }
 
-    if ($scope.last) {
+    if ($scope.chart.last) {
         var now = moment().startOf('second').valueOf();
-        $scope.from = now - $scope.last;
-        $scope.to = now + $scope.last / 10;
+        $scope.from = now - $scope.chart.last;
+        $scope.to = now + $scope.chart.last / 10;
     }
 
     var parseResult = gtParseIncludesExcludes($scope.filter);
@@ -72,7 +72,7 @@ function TransactionFlameGraphCtrl($scope, $location, $http, httpErrors, querySt
                     $scope.loaded = true;
                     var data = response.data;
                     if (data.rootNodes.length === 0) {
-                        $scope.chartNoData = true;
+                        $scope.chart.noData = true;
                     } else {
                         var chartData;
                         var height = data.height;

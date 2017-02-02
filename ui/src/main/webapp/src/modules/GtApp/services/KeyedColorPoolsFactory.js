@@ -21,7 +21,15 @@ angular
         .factory('keyedColorPools', KeyedColorPoolsFactory);
 
 function KeyedColorPoolsFactory() {
-    var fixedPool = ['#10ABE1', '#edc240', '#8fc6ef', '#cb4b4b', '#4da74d', '#9440ed'];
+    var fixedPool = [
+        '#10ABE1',
+        '#edc240',
+        '#8fc6ef',
+        '#cb4b4b',
+        '#4da74d',
+        '#9440ed'
+    ];
+
     var dynamicPool = fixedPool.slice(0);
     var variation = 1;
 
@@ -104,6 +112,7 @@ function KeyedColorPoolsFactory() {
                 return color;
             },
             get: function (key) {
+                console.log('key', key, colors[key]);
                 return colors[key];
             },
             remove: function (key) {
