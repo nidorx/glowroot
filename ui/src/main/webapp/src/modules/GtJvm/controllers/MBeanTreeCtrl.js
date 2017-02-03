@@ -186,7 +186,7 @@ function JvmMBeanTreeCtrl($scope, $location, $http, httpErrors, queryStrings) {
                     $parent.html(JST['mbean-node-expanded'](node));
                 }, function (response) {
                     spinner.stop();
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     });
 

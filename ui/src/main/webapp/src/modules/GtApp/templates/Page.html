@@ -32,11 +32,68 @@
             <p class="lead" ng-if="page.subTitle">{{page.subTitle}}</p>
         </header>
 
-        <!--Exibe mensagens de notificações gerais-->
-        <tc-notitication></tc-notitication>
 
-        <!--conteúdo da página-->
-        <div ui-view></div>
+        <!--Toobar START-->
+        <div class="row toolbar-pf toolbar-notification" ng-class="{active:error}">
+            <div class="col-sm-12">
+                <form class="toolbar-pf-actions">
+                    <div class="toolbar-pf-action-right">
+                        <div class="form-group toolbar-pf-view-selector">
+                            <div ui-view="toolbar" style="display: inline-block;">
+                                <!--page content-->
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="col-sm-12 toolbar-notification-container">
+                <div class="toolbar-notification-content">
+                    <div class="section-header">
+                        <h2 class="title">
+                            <div class="pull-right">
+                                <button
+                                    class="btn btn-danger"
+                                    ng-click="error._showStacktrace = true;"
+                                    ng-if="error.stackTrace && !error._showStacktrace"
+                                    >
+                                    <span class="glyphicon glyphicon-eye-open"></span>
+                                    Show stack trace
+                                </button>
+                                <button
+                                    class="btn btn-danger"
+                                    ng-click="error._showStacktrace = false;"
+                                    ng-if="error.stackTrace && error._showStacktrace"
+                                    >
+                                    <span class="glyphicon glyphicon-eye-close"></span>
+                                    Hide stack trace
+                                </button>
+                                <button
+                                    class="btn btn-default"
+                                    ng-click="error = null;"
+                                    >
+                                    <span class="glyphicon glyphicon-remove-circle"></span>
+                                    Close
+                                </button>
+                            </div>
+
+                            <span class="pficon pficon-error-circle-o"></span>
+                            {{error.headline}}
+                            <p class="lead" ng-if="error.message">
+                                {{error.message}}
+                            </p>
+                        </h2>
+                    </div>
+                    <div
+                        ng-if="error._showStacktrace"
+                        ng-bind-html="error.stackTrace | gtTraceLine"
+                        >
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!--Toobar END-->
+
+        <div ui-view="page"><!--page content--></div>
 
         <div class="row" id="footer">
             <!--<tc-debug model="layout"></tc-debug>-->

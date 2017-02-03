@@ -38,34 +38,48 @@ function GtTraceLineFilter($sce) {
 
     var REG_NATIVE_METHOD = /\.([a-z$_][a-z0-9$_]*)\.([a-z$_][a-z0-9$_]*)\(Native Method\)\s*$/i;
     var REG_JAVA_CLASS = /\.([a-z$_][a-z0-9$_]*)\.([a-z$_][a-z0-9$_]*)\(([a-z$_][a-z0-9$_]*).java\:(\d+)\)\s*$/i;
+    var REG_TRIM = /(^\s*)|(\s*$)/g;
 
     return function (input) {
         if (!input) {
             return '';
         }
 
-        var out = '<string ' + STYLE.TEXT + '>'
-        if (input.indexOf('Native Method') >= 0) {
-            out += input.replace(REG_NATIVE_METHOD, function ($0, $1, $2) {
-                return [
-                    '.<span>' + $1 + '</span>',
-                    '.<span ' + STYLE.METHOD + '>' + $2 + '</span>',
-                    '(Native Method)'
-                ].join('');
-            });
-        } else {
-            out += input.replace(REG_JAVA_CLASS, function ($0, $1, $2, $3, $4) {
-                return [
-                    '.' + $1 + '',
-                    '.<span ' + STYLE.METHOD + '>' + $2 + '</span>',
-                    '(<span ' + STYLE.CLASS + '>' + $3 + '</span>.java',
-                    ':<span ' + STYLE.LINE_NUMBER + '>' + $4 + '</span>)'
-                ].join('');
-            });
+        if (angular.isString(input)) {
+            input = input.split('\n');
         }
-        out += '</span>';
 
-        return $sce.trustAsHtml(out);
+        if (!angular.isArray(input)) {
+            throw 'Invalid stacktrace';
+        }
+
+        var lines = input.map(function (line) {
+            line = line.replace(REG_TRIM, '');
+            var out = '<div ' + STYLE.TEXT + '>';
+            if (line.indexOf('Native Method') >= 0) {
+                out += line.replace(REG_NATIVE_METHOD, function ($0, $1, $2) {
+                    return [
+                        '.<span>' + $1 + '</span>',
+                        '.<span ' + STYLE.METHOD + '>' + $2 + '</span>',
+                        '(Native Method)'
+                    ].join('');
+                });
+            } else {
+                out += line.replace(REG_JAVA_CLASS, function ($0, $1, $2, $3, $4) {
+                    return [
+                        '.' + $1 + '',
+                        '.<span ' + STYLE.METHOD + '>' + $2 + '</span>',
+                        '(<span ' + STYLE.CLASS + '>' + $3 + '</span>.java',
+                        ':<span ' + STYLE.LINE_NUMBER + '>' + $4 + '</span>)'
+                    ].join('');
+                });
+            }
+            out += '</div>';
+            return out;
+        });
+
+
+        return $sce.trustAsHtml('<pre class="entry-message"><code>' + lines.join('') + '</code></pre>');
     };
 }
 

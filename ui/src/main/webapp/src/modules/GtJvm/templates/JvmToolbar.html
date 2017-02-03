@@ -1,0 +1,25 @@
+<gt-chart-range
+    ng-if="$state.is('page.jvm.gauges')"
+    >
+</gt-chart-range>
+
+<span ng-if="$state.is('page.jvm.threadDump')">
+    <button
+        class="btn btn-primary"
+        ng-click="broadcast('threadDumpRrefresh')"
+        >
+        Refresh
+    </button>
+</span>
+
+<button
+    class="btn btn-primary"
+    gt-on-location-change="_expanded = false;broadcast('jvmExpandContent', _expanded)"
+    ng-click="_expanded = !_expanded;broadcast('jvmExpandContent', _expanded)"
+    >
+    <span
+        class="glyphicon glyphicon-resize-full"
+        ng-class="{'glyphicon-resize-full':!_expanded, 'glyphicon-resize-small':_expanded}"
+        >
+    </span>
+</button>

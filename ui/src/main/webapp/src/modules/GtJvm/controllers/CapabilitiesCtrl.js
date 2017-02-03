@@ -39,7 +39,7 @@ function JvmCapabilitiesCtrl($scope, $http, httpErrors) {
                 }
                 $scope.capabilities = response.data;
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }
 

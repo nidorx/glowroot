@@ -29,6 +29,12 @@ function JvmCtrl($scope, $location, queryStrings) {
     $scope.page.titleClass = 'header-pre-cards-pf';
     $scope.page.breadcrumb = null;
 
+    // @see JvmToolbar.html
+    $scope.$on('jvmExpandContent', function (even, expanded) {
+        $scope.isExpandend = expanded;
+        $scope.forceResize();
+    });
+
     $scope.hideAgentRollupDropdown = function () {
         if (!$scope.layout) {
             // this is ok, under grunt serve and layout hasn't loaded yet

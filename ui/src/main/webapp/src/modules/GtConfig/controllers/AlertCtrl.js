@@ -79,7 +79,7 @@ function ConfigAlertCtrl($scope, $location, $http, confirmIfHasChanges, httpErro
                 $scope.gaugeNames = [];
                 $scope.gauges = response.data;
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 
     if (version) {
@@ -88,7 +88,7 @@ function ConfigAlertCtrl($scope, $location, $http, confirmIfHasChanges, httpErro
                     onHalfLoad();
                     onNewData(response.data);
                 }, function (response) {
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     } else {
         onHalfLoad();

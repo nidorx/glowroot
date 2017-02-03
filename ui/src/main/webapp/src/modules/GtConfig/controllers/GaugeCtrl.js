@@ -84,7 +84,7 @@ function ConfigGaugeCtrl($scope, $location, $http, confirmIfHasChanges, httpErro
                     $scope.agentNotConnected = response.data.agentNotConnected;
                     onNewData(response.data);
                 }, function (response) {
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     } else {
         $http.get('backend/config/new-gauge-check-agent-connected?agent-id=' + encodeURIComponent($scope.agentId))
@@ -99,7 +99,7 @@ function ConfigGaugeCtrl($scope, $location, $http, confirmIfHasChanges, httpErro
                         mbeanAvailableAttributeNames: []
                     });
                 }, function (response) {
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     }
 
@@ -145,7 +145,7 @@ function ConfigGaugeCtrl($scope, $location, $http, confirmIfHasChanges, httpErro
                     return response.data;
                 }, function (response) {
                     $scope.showMBeanObjectNameSpinner--;
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     };
 
@@ -194,7 +194,7 @@ function ConfigGaugeCtrl($scope, $location, $http, confirmIfHasChanges, httpErro
                     });
                 }, function (response) {
                     $scope.mbeanAttributesLoading = false;
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     }
 

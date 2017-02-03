@@ -98,7 +98,7 @@ function TransactionFlameGraphCtrl($scope, $location, $http, httpErrors, querySt
                                 .call(flameGraph);
                     }
                 }, function (response) {
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     }
 }

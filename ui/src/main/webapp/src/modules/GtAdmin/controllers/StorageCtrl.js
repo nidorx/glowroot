@@ -89,7 +89,7 @@ function AdminStorageCtrl($scope, $http, $location, confirmIfHasChanges, httpErr
             .then(function (response) {
                 onNewData(response.data);
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 
     // not using gt-form-autofocus-on-first-input in order to handle special case #rollup-capped-database-size and

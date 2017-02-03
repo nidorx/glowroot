@@ -80,7 +80,7 @@ function AdminSmtpCtrl($scope, $http, modals, confirmIfHasChanges, httpErrors) {
             .then(function (response) {
                 onNewData(response.data);
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }
 

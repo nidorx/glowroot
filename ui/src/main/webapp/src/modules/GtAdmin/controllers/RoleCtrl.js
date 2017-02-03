@@ -404,7 +404,7 @@ function AdminRoleCtrl($scope, $location, $http, confirmIfHasChanges, httpErrors
                     $scope.loaded = true;
                     onNewData(response.data);
                 }, function (response) {
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     } else if ($scope.layout.central) {
         // can't just use $scope.layout.agentRollups here since that list is filtered by current user's permission
@@ -419,7 +419,7 @@ function AdminRoleCtrl($scope, $location, $http, confirmIfHasChanges, httpErrors
                         allAgentRollups: response.data
                     });
                 }, function (response) {
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     } else {
         $scope.loaded = true;

@@ -40,7 +40,7 @@ function AdminAgentCtrl($scope, $location, $http, confirmIfHasChanges, httpError
                 $scope.loaded = true;
                 onNewData(response.data);
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                 $scope.$emit('httpError', response);
             });
 
     $scope.hasChanges = function () {
@@ -76,7 +76,7 @@ function AdminAgentCtrl($scope, $location, $http, confirmIfHasChanges, httpError
                     $location.url('admin/agent-list').replace();
                 }, function (response) {
                     $scope.deleting = false;
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     };
 }

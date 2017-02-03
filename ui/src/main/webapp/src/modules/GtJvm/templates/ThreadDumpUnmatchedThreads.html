@@ -3,7 +3,7 @@
         <h2>
             Unmatched Threads
             <button
-                class="btn btn-default pull-right"
+                class="btn btn-default pull-right hidden-print"
                 ng-click="data._showUnmatchedThreads = true;"
                 ng-if="!data._showUnmatchedThreads"
                 >
@@ -11,7 +11,7 @@
                 Show
             </button>
             <button
-                class="btn btn-default pull-right"
+                class="btn btn-default pull-right hidden-print"
                 ng-click="data._showUnmatchedThreads = false;"
                 ng-if="data._showUnmatchedThreads"
                 >
@@ -45,10 +45,8 @@
                 <div
                     class="list-group-item-container container-fluid"
                     ng-if="item.stackTraceElements.length"
+                    ng-bind-html="item.stackTraceElements | gtTraceLine"
                     >
-                    <pre class="entry-message"><code><div
-                                    ng-repeat="element in item.stackTraceElements"
-                                    ng-bind-html="element | gtTraceLine"></div></code></pre>
                 </div>
                 <br>
             </li>

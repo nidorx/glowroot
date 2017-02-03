@@ -4,7 +4,7 @@
         <h2>
             Deadlock found
             <button
-                class="btn btn-default pull-right"
+                class="btn btn-default pull-right hidden-print"
                 ng-click="deadlock._showDeadlockedCycles = true;"
                 ng-if="!deadlock._showDeadlockedCycles"
                 >
@@ -12,7 +12,7 @@
                 Show
             </button>
             <button
-                class="btn btn-default pull-right"
+                class="btn btn-default pull-right hidden-print"
                 ng-click="deadlock._showDeadlockedCycles = false;"
                 ng-if="deadlock._showDeadlockedCycles"
                 >
@@ -53,10 +53,8 @@
                 <div
                     class="list-group-item-container container-fluid"
                     ng-if="item.thread.stackTraceElements.length"
+                    ng-bind-html="item.thread.stackTraceElements | gtTraceLine"
                     >
-                    <pre class="entry-message"><code><div
-                                    ng-repeat="element in item.thread.stackTraceElements track by $index"
-                                    ng-bind-html="element | gtTraceLine"></div></code></pre>
                 </div>
                 <br>
             </li>

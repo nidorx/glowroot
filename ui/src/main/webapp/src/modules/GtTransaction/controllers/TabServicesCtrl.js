@@ -131,7 +131,7 @@ function TransactionTabServicesCtrl($scope, $http, $location, locationChanges, m
                     }
                 }, function (response) {
                     $scope.showSpinner--;
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     }
 }

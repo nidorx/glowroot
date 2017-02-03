@@ -51,7 +51,7 @@ function ConfigPluginListCtrl($scope, $location, $http, queryStrings, httpErrors
                 });
                 $scope.pluginsWithNoConfig = pluginsWithNoConfig.join(', ');
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }
 

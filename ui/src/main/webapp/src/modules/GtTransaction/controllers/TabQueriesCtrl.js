@@ -334,7 +334,7 @@ function TransactionTabQueriesCtrl($scope, $http, $location, $timeout, locationC
                     }
                 }, function (response) {
                     $scope.showSpinner--;
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     }
 }

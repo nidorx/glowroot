@@ -119,7 +119,7 @@ function AdminLdapCtrl($scope, $http, confirmIfHasChanges, httpErrors) {
             .then(function (response) {
                 onNewData(response.data);
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }
 

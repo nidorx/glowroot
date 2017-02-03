@@ -67,7 +67,7 @@ function ConfigUserRecordingCtrl($scope, $http, $rootScope, $location, confirmIf
             .then(function (response) {
                 onNewData(response.data);
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }
 

@@ -14,7 +14,7 @@
   limitations under the License.
 -->
 <div ng-controller="JvmCtrl">
-    <div class="row toolbar-pf toolbar-notification">
+<!--    <div class="row toolbar-pf toolbar-notification" ng-class="{active:_show}">
         <div class="col-sm-12">
             <form class="toolbar-pf-actions">
                 <div class="toolbar-pf-action-right">
@@ -44,18 +44,48 @@
                                 ng-class="{'glyphicon-resize-full':!_expanded, 'glyphicon-resize-small':_expanded}"
                                 ></span>
                         </button>
+                        <button class="btn btn-primary" ng-click="_show = !_show;">
+                            go
+                        </button>
                     </div>
                 </div>
             </form>
         </div>
-<!--        <div class="col-sm-12 toolbar-notification-container">
+        <div class="col-sm-12 toolbar-notification-container" >
             <div class="toolbar-notification-content">
-                um dois tres
+                <div class="section-header">
+                    <h2 class="title">
+                        <span class="pficon pficon-error-circle-o"></span>
+                        Hey there is a problem!
+                        <button
+                            class="btn btn-danger pull-right"
+                            ng-click="deadlock._showDeadlockedCycles = true;"
+                            ng-if="!deadlock._showDeadlockedCycles"
+                            >
+                            <span class="glyphicon glyphicon-eye-open"></span>
+                            Show stack trace
+                        </button>
+                        <button
+                            class="btn btn-danger pull-right"
+                            ng-click="deadlock._showDeadlockedCycles = false;"
+                            ng-if="deadlock._showDeadlockedCycles"
+                            >
+                            <span class="glyphicon glyphicon-eye-close"></span>
+                            Hide stack trace
+                        </button>
+                        <p class="lead">
+                            missing agent-id query parameter
+                        </p>
+                    </h2>
+                </div>
+                <div ng-if="deadlock._showDeadlockedCycles">
+
+                </div>
             </div>
-        </div>-->
-    </div>
+        </div>
+    </div>-->
     <div class="row">
-        <div class="col-md-3" ng-hide="_expanded">
+        <div class="col-md-3" ng-hide="isExpandend">
             <div class="list-group jvm-nav">
                 <a
                     class="list-group-item"
@@ -145,7 +175,7 @@
                 </a>
             </div>
         </div>
-        <div class="col-md-{{_expanded ? '12':'9'}}">
+        <div class="col-md-{{isExpandend ? '12':'9'}}">
             <div ui-view ng-hide="hideMainContent()"></div>
         </div>
     </div>

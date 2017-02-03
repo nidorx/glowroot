@@ -49,7 +49,7 @@ function ConfigGaugeListCtrl($scope, $location, $http, queryStrings, httpErrors)
                 $scope.loaded = true;
                 $scope.gauges = response.data;
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }
 

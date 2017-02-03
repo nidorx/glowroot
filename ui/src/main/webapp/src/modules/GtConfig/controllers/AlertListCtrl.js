@@ -73,7 +73,7 @@ function ConfigAlertListCtrl($scope, $location, $http, $filter, queryStrings, ht
                 $scope.loaded = true;
                 $scope.alerts = response.data;
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }
 

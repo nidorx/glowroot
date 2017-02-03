@@ -119,7 +119,7 @@ function ConfigInstrumentationListCtrl($scope, $location, $http, $timeout, $q, l
                     refresh(deferred);
                 }, function (response) {
                     $scope.deletingAll = false;
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     };
 
@@ -192,7 +192,7 @@ function ConfigInstrumentationListCtrl($scope, $location, $http, $timeout, $q, l
                     refresh(deferred);
                 }, function (response) {
                     $scope.importing = false;
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     };
 

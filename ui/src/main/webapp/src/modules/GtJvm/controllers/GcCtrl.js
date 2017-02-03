@@ -47,7 +47,7 @@ function JvmGcCtrl($scope, $http, httpErrors) {
                     return;
                 }
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }
 

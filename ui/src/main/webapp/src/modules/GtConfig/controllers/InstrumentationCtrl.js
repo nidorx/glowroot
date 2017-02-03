@@ -88,7 +88,7 @@ function ConfigInstrumentationCtrl($scope, $location, $http, $rootScope, $timeou
                     $scope.agentNotConnected = response.data.agentNotConnected;
                     onNewData(response.data);
                 }, function (response) {
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     } else {
         $http.get('backend/config/new-instrumentation-check-agent-connected?agent-id=' + encodeURIComponent($scope.agentId))
@@ -126,7 +126,7 @@ function ConfigInstrumentationCtrl($scope, $location, $http, $rootScope, $timeou
                         }
                     });
                 }, function (response) {
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     }
 
@@ -162,7 +162,7 @@ function ConfigInstrumentationCtrl($scope, $location, $http, $rootScope, $timeou
                     return response.data;
                 }, function (response) {
                     $scope.showClassNameSpinner--;
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     };
 
@@ -202,7 +202,7 @@ function ConfigInstrumentationCtrl($scope, $location, $http, $rootScope, $timeou
                     return response.data;
                 }, function (response) {
                     $scope.showMethodNameSpinner--;
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     };
 
@@ -376,7 +376,7 @@ function ConfigInstrumentationCtrl($scope, $location, $http, $rootScope, $timeou
                         $scope.selectedMethodSignature = undefined;
                     }
                 }, function (response) {
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     }
 

@@ -24,7 +24,7 @@ JvmEnvironmentCtrl.$inject = ['$scope', '$http', 'httpErrors'];
 
 function JvmEnvironmentCtrl($scope, $http, httpErrors) {
 
-    $scope.$parent.heading = 'Environment';
+    $scope.page.title = 'JVM - Environment';
 
     if ($scope.hideMainContent()) {
         return;
@@ -55,7 +55,7 @@ function JvmEnvironmentCtrl($scope, $http, httpErrors) {
                 $scope.data = response.data;
                 $scope.uptime = Date.now() - response.data.process.startTime;
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }
 

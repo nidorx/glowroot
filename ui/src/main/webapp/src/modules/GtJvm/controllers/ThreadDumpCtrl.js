@@ -34,37 +34,12 @@ function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal
     $scope.page.helpPopoverTemplate = 'modules/GtJvm/templates/help/ThreadDumpPageHelp.html';
     $scope.page.breadcrumb = null;
 
-    var threadDumpHtml;
 
-//    Handlebars.registerHelper('ifBlocked', function (state, options) {
-//        if (state === 'BLOCKED') {
-//            return options.fn(this);
-//        } else {
-//            return options.inverse(this);
-//        }
-//    });
-//
-//    Handlebars.registerHelper('ifWaiting', function (state, options) {
-//        if (state === 'WAITING' || state === 'TIMED_WAITING') {
-//            return options.fn(this);
-//        } else {
-//            return options.inverse(this);
-//        }
-//    });
-//
-//    Handlebars.registerHelper('agentIdQueryString', function () {
-//        if ($scope.agentId) {
-//            return 'agent-id=' + encodeURIComponent($scope.agentId) + '&';
-//        } else {
-//            return '';
-//        }
-//    });
+    // @see JvmToolbar.html
+    $scope.$on('threadDumpRrefresh', function () {
+        $scope.refresh();
+    });
 
-    $scope.exportAsText = function () {
-        var textWindow = window.open();
-        var exportHtml = threadDumpHtml.replace(/ <a [^>]*>view trace<\/a>/g, '');
-        $(textWindow.document.body).html('<pre style="white-space: pre-wrap;">' + exportHtml + '</pre>');
-    };
 
     locationChanges.on($scope, function () {
         var modalTraceId = $location.search()['modal-trace-id'];
@@ -77,7 +52,7 @@ function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal
         }
     });
 
-    $scope.refresh = function (deferred) {
+    $scope.refresh = function () {
         $http.get('backend/jvm/thread-dump', {
             params: {
                 'agent-id': $scope.agentId
@@ -89,9 +64,6 @@ function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal
                 return;
             }
             $scope.data = response.data;
-            // $.trim() is needed because this template is sensitive to surrounding spaces
-//                    threadDumpHtml = $.trim(JST['thread-dump'](response.data));
-//                    $('#threadDump').html('<br>' + threadDumpHtml);
 
             if ($scope.data.deadlockedCycles) {
                 $scope.data.deadlocks = $scope.data.deadlockedCycles.map(function (cycles) {
@@ -113,11 +85,8 @@ function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal
                     };
                 });
             }
-            if (deferred) {
-                deferred.resolve('Refreshed');
-            }
         }, function (response) {
-            httpErrors.handle(response, $scope, deferred);
+            $scope.$emit('httpError', response);
         });
     };
 

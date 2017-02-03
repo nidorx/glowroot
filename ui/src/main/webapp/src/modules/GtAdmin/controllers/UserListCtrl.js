@@ -42,6 +42,6 @@ function AdminUserListCtrl($scope, $http, httpErrors) {
                     $scope.users.push(anonymousUser);
                 }
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }

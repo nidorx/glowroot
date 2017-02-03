@@ -37,6 +37,6 @@ function AdminAgentListCtrl($scope, $http, httpErrors) {
                 }
                 flatten(response.data, 0);
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }

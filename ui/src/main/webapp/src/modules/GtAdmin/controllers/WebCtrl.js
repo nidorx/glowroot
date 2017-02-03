@@ -100,7 +100,7 @@ function AdminWebCtrl($scope, $http, $rootScope, $location, $timeout, confirmIfH
             .then(function (response) {
                 onNewData(response.data);
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }
 

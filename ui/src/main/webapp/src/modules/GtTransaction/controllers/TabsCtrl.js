@@ -111,7 +111,7 @@ function TransactionTabsCtrl($scope, $state, $location, $http, $timeout, httpErr
 
         }, function (response) {
             concurrentUpdateCount--;
-            httpErrors.handle(response, $scope);
+            $scope.$emit('httpError', response);
         });
     }
 

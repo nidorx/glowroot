@@ -30,13 +30,52 @@ PageCtrl.$inject = ['$scope', '$rootScope'];
  * @returns {undefined}
  */
 function PageCtrl($scope, $rootScope) {
+
     $rootScope.page = {
         title: 'Título da pagina',
         subTitle: '',
         helpPopoverTemplate: '',
         titleClass: '',
+        printing: false,
         breadcrumb: []
     };
+
+
+
+    // Allow toolbar to emit events
+    $scope.broadcast = $rootScope.$broadcast.bind($rootScope);
+
+    $scope.error = null;
+
+    $rootScope.$on('txtError', function (event, headline, message) {
+        $scope.error = {
+            headline: message ? (headline ? headline : 'An error occurred') : 'An error occurred',
+            message: message ? message : headline
+        };
+    });
+
+    $rootScope.$on('httpError', function (event, response) {
+        $scope.error = getHttpErrorsObject(response);
+    });
+
+    function getHttpErrorsObject(response) {
+        if (response.status === 0 || response.status === -1) {
+            return {
+                headline: 'Unable to connect to server'
+            };
+        } else {
+            var data = response.data;
+            var message = data.message;
+            if (!message && !data.stackTrace) {
+                message = data;
+            }
+            return {
+                headline: 'An error occurred',
+                message: message,
+                stackTrace: data.stackTrace
+            };
+        }
+    }
 }
 
 

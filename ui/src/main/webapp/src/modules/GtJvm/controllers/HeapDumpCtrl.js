@@ -37,7 +37,7 @@ function JvmHeapDumpCtrl($scope, $http, httpErrors) {
     // initialize page binding object
     $scope.page = {};
 
-    $scope.checkDiskSpace = function (deferred) {
+    $scope.checkDiskSpace = function () {
         var postData = {
             directory: $scope.page.directory
         };
@@ -45,20 +45,23 @@ function JvmHeapDumpCtrl($scope, $http, httpErrors) {
         $scope.heapDumpResponse = false;
         $http.post('backend/jvm/available-disk-space', postData, {
             params: {
-//                'agent-id': $scope.agentId
+                'agent-id': $scope.agentId
             }
         }).then(function (response) {
             var data = response.data;
             if (data.error) {
-                deferred.reject(data.error);
+                // @todo: ??
+                if (window.console) {
+                    console.log(data.error);
+                }
             } else if (data.directoryDoesNotExist) {
-                deferred.reject('Directory does not exist');
+                $scope.$emit('txtError', 'Directory does not exist');
             } else {
                 $scope.availableDiskSpaceBytes = data;
-                deferred.resolve('See disk space below');
+                //deferred.resolve('See disk space below');
             }
         }, function (response) {
-            httpErrors.handle(response, $scope, deferred);
+            $scope.$emit('httpError', response);
         });
     };
 
@@ -75,28 +78,33 @@ function JvmHeapDumpCtrl($scope, $http, httpErrors) {
         }).then(function (response) {
             var data = response.data;
             if (data.error) {
-                deferred.reject(data.error);
+                // @todo: ??
+                if (window.console) {
+                    console.log(data.error);
+                }
             } else if (data.directoryDoesNotExist) {
-                deferred.reject('Directory does not exist');
+                $scope.$emit('txtError', 'Directory does not exist');
             } else {
-                deferred.resolve('Heap dump created');
                 $scope.heapDumpResponse = data;
             }
         }, function (response) {
-            httpErrors.handle(response, $scope, deferred);
+            $scope.$emit('httpError', response);
         });
     };
 
-    $http.get('backend/jvm/heap-dump-default-dir?agent-id=' + encodeURIComponent($scope.agentId))
-            .then(function (response) {
-                $scope.loaded = true;
-                $scope.agentNotConnected = response.data.agentNotConnected;
-                if ($scope.agentNotConnected) {
-                    return;
-                }
-                $scope.page.directory = response.data.directory;
-            }, function (response) {
-                httpErrors.handle(response, $scope);
-            });
+    $http.get('backend/jvm/heap-dump-default-dir', {
+        params: {
+            'agent-id': $scope.agentId
+        }
+    }).then(function (response) {
+        $scope.loaded = true;
+        $scope.agentNotConnected = response.data.agentNotConnected;
+        if ($scope.agentNotConnected) {
+            return;
+        }
+        $scope.page.directory = response.data.directory;
+    }, function (response) {
+        $scope.$emit('httpError', response);
+    });
 }
 

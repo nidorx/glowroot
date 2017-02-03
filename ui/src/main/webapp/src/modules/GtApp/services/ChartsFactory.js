@@ -364,7 +364,7 @@ function AppChartsFactory($http, $rootScope, $timeout, keyedColorPools, queryStr
             if (showChartSpinner) {
                 $scope.chart.showSpinner--;
             }
-            httpErrors.handle(response, $scope);
+            $scope.$emit('httpError', response);
         });
     }
 

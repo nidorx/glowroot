@@ -28,6 +28,6 @@ function AdminRoleListCtrl($scope, $http, httpErrors) {
                 $scope.loaded = true;
                 $scope.roles = response.data;
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }

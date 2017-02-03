@@ -152,7 +152,7 @@ function TransactionSidebarCtrl($scope, $location, $http, $timeout,
                         $scope.summariesLoadingMore--;
                     }
                     concurrentUpdateCount--;
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     }
 

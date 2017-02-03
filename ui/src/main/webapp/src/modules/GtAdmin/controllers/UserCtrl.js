@@ -84,7 +84,7 @@ function AdminUserCtrl($scope, $location, $http, $q, confirmIfHasChanges, httpEr
                     $scope.loaded = true;
                     onNewData(response.data);
                 }, function (response) {
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     } else {
         $http.get('backend/admin/all-role-names')
@@ -99,7 +99,7 @@ function AdminUserCtrl($scope, $location, $http, $q, confirmIfHasChanges, httpEr
                         ldapAvailable: response.data.ldapAvailable
                     });
                 }, function (response) {
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     }
 
@@ -202,7 +202,7 @@ function AdminUserCtrl($scope, $location, $http, $q, confirmIfHasChanges, httpEr
                     $location.url('admin/user-list').replace();
                 }, function (response) {
                     $scope.deleting = false;
-                    httpErrors.handle(response, $scope);
+                    $scope.$emit('httpError', response);
                 });
     };
 }

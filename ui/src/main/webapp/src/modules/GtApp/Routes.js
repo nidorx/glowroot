@@ -86,7 +86,11 @@ function AppConfig($stateProvider, $urlRouterProvider) {
             .state('page.transaction', {
                 abstract: true,
                 url: '/transaction?agent-id&agent-rollup-id&transaction-type&{transaction-name:nonURIEncoded}&last&from&to',
-                templateUrl: urlTemplate('Transaction', 'GtTransaction'),
+                views: {
+                    page: {
+                        templateUrl: urlTemplate('Transaction', 'GtTransaction'),
+                    }
+                },
                 resolve: {
                     mdl: resolveModule('GtTransaction'),
                     waitForLayout: WaitForLayoutResolver(true)
@@ -95,7 +99,11 @@ function AppConfig($stateProvider, $urlRouterProvider) {
             .state('page.error', {
                 abstract: true,
                 url: '/error?agent-id&agent-rollup-id&transaction-type&{transaction-name:nonURIEncoded}&last&from&to',
-                templateUrl: urlTemplate('Transaction', 'GtTransaction'),
+                views: {
+                    page: {
+                        templateUrl: urlTemplate('Transaction', 'GtTransaction'),
+                    }
+                },
                 resolve: {
                     mdl: resolveModule('GtTransaction'),
                     waitForLayout: WaitForLayoutResolver(true)
@@ -103,7 +111,14 @@ function AppConfig($stateProvider, $urlRouterProvider) {
             })
             .state('page.jvm', {
                 url: '/jvm?agent-id&agent-rollup-id',
-                templateUrl: urlTemplate('Jvm', 'GtJvm'),
+                views: {
+                    page: {
+                        templateUrl: urlTemplate('Jvm', 'GtJvm')
+                    },
+                    toolbar: {
+                        templateUrl: urlTemplate('JvmToolbar', 'GtJvm')
+                    }
+                },
                 resolve: {
                     mdl: resolveModule('GtJvm'),
                     waitForLayout: WaitForLayoutResolver(false),

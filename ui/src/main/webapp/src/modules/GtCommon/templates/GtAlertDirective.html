@@ -1,0 +1,13 @@
+<div class="alert {{className}}" ng-if="ref.visible">
+    <button
+        type="button"
+        class="close"
+        ng-click="ref.visible = false;"
+        aria-hidden="true"
+        ng-if="dismissable"
+        >
+        <span class="pficon pficon-close"></span>
+    </button>
+    <span class="pficon {{icon}}"></span>
+    <ng-transclude></ng-transclude>
+</div>

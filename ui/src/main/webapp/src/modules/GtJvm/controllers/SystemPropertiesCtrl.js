@@ -20,11 +20,11 @@ angular
         .controller('JvmSystemPropertiesCtrl', JvmSystemPropertiesCtrl);
 
 
-JvmSystemPropertiesCtrl.$inject = ['$scope', '$http', 'httpErrors'];
+JvmSystemPropertiesCtrl.$inject = ['$scope', '$http'];
 
-function JvmSystemPropertiesCtrl($scope, $http, httpErrors) {
+function JvmSystemPropertiesCtrl($scope, $http) {
 
-    $scope.$parent.heading = 'System properties';
+    $scope.page.title = 'JVM - System properties';
 
     if ($scope.hideMainContent()) {
         return;
@@ -45,7 +45,7 @@ function JvmSystemPropertiesCtrl($scope, $http, httpErrors) {
                 }
                 $scope.properties = data.properties;
             }, function (response) {
-                httpErrors.handle(response, $scope);
+                $scope.$emit('httpError', response);
             });
 }
 
