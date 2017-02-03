@@ -149,6 +149,15 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
         appliedSortAsc = $scope.sortAsc;
     }
 
+    // @see JvmToolbar.html
+    $scope.$on('jvmRrefresh', function () {
+        $scope.refresh();
+    });
+    
+    $scope.$on('jvmHeapHistogramLimit', function (event, limit) {        
+        $scope.page.filterLimit = limit;
+    });
+
     $scope.refresh = function (deferred) {
         $http.post('backend/jvm/heap-histogram?agent-id=' + encodeURIComponent($scope.agentId))
                 .then(function (response) {

@@ -32,15 +32,13 @@ PageCtrl.$inject = ['$scope', '$rootScope'];
 function PageCtrl($scope, $rootScope) {
 
     $rootScope.page = {
-        title: 'Título da pagina',
+        title: '',
         subTitle: '',
         helpPopoverTemplate: '',
         titleClass: '',
         printing: false,
         breadcrumb: []
     };
-
-
 
     // Allow toolbar to emit events
     $scope.broadcast = $rootScope.$broadcast.bind($rootScope);

@@ -20,48 +20,20 @@ angular
         .controller('JvmMBeanTreeCtrl', JvmMBeanTreeCtrl);
 
 
-JvmMBeanTreeCtrl.$inject = ['$scope', '$location', '$http', 'httpErrors', 'queryStrings'];
+JvmMBeanTreeCtrl.$inject = ['$scope', '$location', '$http', 'httpErrors', '$element'];
 
-function JvmMBeanTreeCtrl($scope, $location, $http, httpErrors, queryStrings) {
+function JvmMBeanTreeCtrl($scope, $location, $http, httpErrors, $element) {
 
-    $scope.$parent.heading = 'MBean tree';
+    $scope.page.title = 'JVM - MBean tree';
 
     if ($scope.hideMainContent()) {
         return;
     }
 
-    Handlebars.registerPartial('mbeanNodeExpanded', JST['mbean-node-expanded']);
-
-    Handlebars.registerPartial('mbeanNodeUnexpanded', JST['mbean-node-unexpanded']);
-
-    Handlebars.registerHelper('mbeanNodeIndentPx', function (mbeanNode) {
-        return 30 * mbeanNode.depth;
-    });
-
-    Handlebars.registerHelper('ifSimpleValue', function (value, options) {
-        if (!angular.isObject(value) && !angular.isArray(value)) {
-            return options.fn(this);
-        }
-        return options.inverse(this);
-    });
-
-    Handlebars.registerHelper('ifNull', function (value, options) {
-        if (value === null) {
-            return options.fn(this);
-        }
-        return options.inverse(this);
-    });
-
-    Handlebars.registerHelper('indentedJson', function (value) {
-        return JSON.stringify(value, null, 4);
-    });
-
     var expandedObjectNames = $location.search().expanded || [];
     if (!angular.isArray(expandedObjectNames)) {
         expandedObjectNames = [expandedObjectNames];
     }
-
-    var nodeMap = {};
 
     function updateLocation() {
         var query = {};
@@ -72,123 +44,88 @@ function JvmMBeanTreeCtrl($scope, $location, $http, httpErrors, queryStrings) {
         $location.search(query).replace();
     }
 
-    function renderNext(mbeanNodes, start) {
-        // large numbers of mbean nodes (e.g. 20,000) render much faster when grouped into sub-divs
-        var batchSize = 500;
-        var i;
-        var html = '';
-        for (i = start; i < Math.min(start + batchSize, mbeanNodes.length); i++) {
-            html += JST['mbean-node'](mbeanNodes[i]);
-        }
-        $('#mbeanTree').append(html);
-        if (start + 100 < mbeanNodes.length) {
-            setTimeout(function () {
-                renderNext(mbeanNodes, start + batchSize);
-            }, 10);
-        }
-    }
+    // @see JvmToolbar.html
+    $scope.$on('jvmRrefresh', function () {
+        $scope.refresh();
+    });
 
-    $scope.refresh = function (deferred) {
-        var queryData = {
-            agentId: $scope.agentId,
-            expanded: expandedObjectNames
-        };
-        $http.get('backend/jvm/mbean-tree' + queryStrings.encodeObject(queryData))
-                .then(function (response) {
-                    $scope.loaded = true;
-                    $scope.agentNotConnected = response.data.agentNotConnected;
-                    if ($scope.agentNotConnected) {
-                        return;
+    $scope.refresh = function () {
+        $scope.loaded = false;
+        $http.get('backend/jvm/mbean-tree', {
+            params: {
+                'agent-id': $scope.agentId,
+                expanded: expandedObjectNames
+            }
+        }).then(function (response) {
+            $scope.agentNotConnected = response.data.agentNotConnected;
+            if ($scope.agentNotConnected) {
+                return;
+            }
+
+            $scope.loaded = true;
+
+            var flattened = [];
+            var SEQ = 1;
+            function recurse(list, depth, parent) {
+                angular.forEach(list, function (node) {
+                    node.depth = depth;
+                    node.id = SEQ++;
+                    node.parent = parent;
+                    flattened.push(node);
+                    if (node.childNodes) {
+                        recurse(node.childNodes, depth + 1, node.id);
                     }
-                    var flattened = [];
-                    function recurse(list, depth) {
-                        angular.forEach(list, function (node) {
-                            node.depth = depth;
-                            if (node.objectName) {
-                                nodeMap[node.objectName] = node;
-                            }
-                            flattened.push(node);
-                            if (node.childNodes) {
-                                recurse(node.childNodes, depth + 1);
-                            }
-                        });
-                    }
-                    recurse(response.data, 0);
-                    $('#mbeanTree').empty();
-                    renderNext(flattened, 0);
-                    if (deferred) {
-                        deferred.resolve('Refreshed');
-                    }
-                }, function (response) {
-                    httpErrors.handle(response, $scope, deferred);
                 });
+            }
+            recurse(response.data, 0);
+            $scope.data = flattened;
+        }, function (response) {
+            $scope.$emit('httpError', response);
+        });
     };
 
-    function incNodeVersion(node) {
-        if (node.v) {
-            node.v++;
+
+    $scope.isSimpleValue = function (value) {
+        if (angular.isObject(value) || angular.isArray(value)) {
+            return false;
+        }
+        return true;
+    };
+
+    $scope.toggleAttributes = function (node) {
+        node.expanded = !node.expanded;
+
+        if (node.expanded) {
+            expandedObjectNames.push(node.objectName);
         } else {
-            node.v = 1;
+            var idx = expandedObjectNames.indexOf(node.objectName);
+            if (idx >= 0) {
+                expandedObjectNames.splice(idx, 1);
+            }
         }
-    }
+        updateLocation();
 
-    var mousedownPageX, mousedownPageY;
-
-    $(document).off('mousedown.mbeanTree');
-    $(document).on('mousedown.mbeanTree', '.gt-mbean-expanded-content, .gt-mbean-unexpanded-content', function (e) {
-        mousedownPageX = e.pageX;
-        mousedownPageY = e.pageY;
-    });
-
-    $('#mbeanTree').on('click', '.gt-mbean-expanded-content', function (e, keyboard) {
-        if (!keyboard && (Math.abs(e.pageX - mousedownPageX) > 5 || Math.abs(e.pageY - mousedownPageY) > 5)) {
-            // not a simple single click, probably highlighting text
+        if (node.attributeMap) {
             return;
         }
-        var $parent = $(this).parent();
-        var objectName = $parent.data('object-name');
-        var index = expandedObjectNames.indexOf(objectName);
-        expandedObjectNames.splice(index, 1);
-        updateLocation();
-        var node = nodeMap[objectName];
-        incNodeVersion(node);
-        node.attributeMap = undefined;
-        $parent.html(JST['mbean-node-unexpanded'](node));
-    });
 
-    $('#mbeanTree').on('click', '.gt-mbean-unexpanded-content', function (e, keyboard) {
-        if (!keyboard && (Math.abs(e.pageX - mousedownPageX) > 5 || Math.abs(e.pageY - mousedownPageY) > 5)) {
-            // not a simple single click, probably highlighting text
-            return;
-        }
-        var $parent = $(this).parent();
-        var objectName = $parent.data('object-name');
-        expandedObjectNames.push(objectName);
-        updateLocation();
-        var node = nodeMap[objectName];
-        incNodeVersion(node);
-        var v = node.v;
-        $parent.html(JST['mbean-node-loading'](node));
-        var $gtSpinner = $parent.find('.gt-spinner');
-        var spinner = Glowroot.showSpinner($gtSpinner);
-        var queryData = {
-            agentId: $scope.agentId,
-            objectName: node.objectName
-        };
-        $http.get('backend/jvm/mbean-attribute-map' + queryStrings.encodeObject(queryData))
-                .then(function (response) {
-                    spinner.stop();
-                    if (node.v !== v) {
-                        // interrupted by close
-                        return;
-                    }
-                    node.attributeMap = response.data;
-                    $parent.html(JST['mbean-node-expanded'](node));
-                }, function (response) {
-                    spinner.stop();
-                    $scope.$emit('httpError', response);
-                });
-    });
+        $http.get('backend/jvm/mbean-attribute-map', {
+            params: {
+                'agent-id': $scope.agentId,
+                'object-name': node.objectName
+            }
+        }).then(function (response) {
+            node.attributeMap = response.data;
+        }, function (response) {
+            $scope.$emit('httpError', response);
+        });
+    };
+
+
+
+
+
+
 
     $scope.refresh();
 }

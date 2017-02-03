@@ -20,9 +20,9 @@ angular
         .controller('JvmThreadDumpCtrl', JvmThreadDumpCtrl);
 
 
-JvmThreadDumpCtrl.$inject = ['$scope', '$http', '$location', 'locationChanges', 'traceModal', 'httpErrors'];
+JvmThreadDumpCtrl.$inject = ['$scope', '$http', '$location', 'locationChanges', 'traceModal'];
 
-function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal, httpErrors) {
+function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal) {
 
     if ($scope.hideMainContent()) {
         return;
@@ -36,7 +36,7 @@ function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal
 
 
     // @see JvmToolbar.html
-    $scope.$on('threadDumpRrefresh', function () {
+    $scope.$on('jvmRrefresh', function () {
         $scope.refresh();
     });
 
@@ -53,6 +53,7 @@ function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal
     });
 
     $scope.refresh = function () {
+        $scope.loaded = false;
         $http.get('backend/jvm/thread-dump', {
             params: {
                 'agent-id': $scope.agentId

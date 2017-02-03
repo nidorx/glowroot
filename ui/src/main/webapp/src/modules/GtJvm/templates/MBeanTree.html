@@ -13,17 +13,64 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<div ng-include src="'template/gt-loading-overlay.html'"></div>
-<div ng-include src="'template/gt-http-error-overlay.html'"></div>
-<div ng-if="agentNotConnected" class="alert alert-danger">
-  This feature is only available when the agent is running and connected
-</div>
-<!-- need ng-show instead of ng-if here so #mbeanTree can be populated during loading -->
-<div ng-show="loaded && !agentNotConnected">
-  <div gt-button
-       gt-label="Refresh"
-       gt-click="refresh(deferred)"
-       style="margin-bottom: 20px;">
-  </div>
-  <div id="mbeanTree"></div>
+<div ng-controller="JvmMBeanTreeCtrl">
+
+    <gt-alert type="error" ng-if="::agentNotConnected">
+        This feature is only available when the agent is running and connected
+    </gt-alert>
+
+    <div class="table-responsive">
+        <table class="table table-bordered table-hover">
+            <thead>
+                <tr>
+                    <th>Tree</th>
+                    <th>Attributes</th>
+                </tr>
+            </thead>
+            <tbody ng-if="loaded">
+                <tr ng-repeat="node in ::data">
+                    <td class="col-md-4" colspan="{{::(node.objectName?'':'2')}}">
+                        <span style="display: inline-block; width: {{16 * node.depth}}px"></span>
+                        <span class="icon node-icon pficon pficon-folder-open" ng-if="::!node.objectName"></span>
+                        <span class="icon node-icon fa fa-file-o" ng-if="::node.objectName"></span>
+                        {{::node.nodeName}}
+                        <button 
+                            class="btn btn-default ng-scope pull-right btn-xs" 
+                            ng-if="::node.objectName"
+                            ng-click="toggleAttributes(node)"
+                            >
+                            <span class="glyphicon glyphicon-eye-open"></span>
+                        </button>
+                    </td>
+                    <td ng-if="::node.objectName">
+                        <div ng-if="::node.attributeMap">
+                            <dl ng-show="node.expanded" class="dl-horizontal" style="margin: 0;">
+                                <dt 
+                                    ng-repeat-start="(key, value) in node.attributeMap"
+                                    style="word-break: break-word;white-space: normal;"
+                                    >
+                                    {{::key}}
+                                </dt>
+                                <dd ng-repeat-end style="padding-left: 15px;">
+                                    <span ng-if="::isSimpleValue(value)">
+                                        {{::(value === null)?'null':value}}
+                                    </span>
+                                    <div tc-debug 
+                                         model="value"
+                                         all="true"
+                                         col="0"
+                                         title="object"
+                                         ng-if="::!isSimpleValue(value)"
+                                         >                                        
+                                    </div>
+                                </dd>
+                            </dl>
+                        </div>
+                    </td>
+                </tr>                     
+            </tbody>
+        </table>
+    </div>
+
+
 </div>

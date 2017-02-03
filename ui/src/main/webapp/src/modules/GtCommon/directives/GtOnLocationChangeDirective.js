@@ -33,8 +33,11 @@ function GtOnLocationChangeDirective($location) {
             gtOnLocationChange: '&'
         },
         link: function ($scope) {
+            var path = $location.path();
             $scope.$on('$locationChangeSuccess', function () {
-                $scope.gtOnLocationChange();
+                if ($location.path() !== path) {
+                    $scope.gtOnLocationChange();
+                }
             });
         }
     };

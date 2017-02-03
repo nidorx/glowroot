@@ -35,9 +35,9 @@
         - [ ] Export
     - [ ] Heap histogram
         - [ ] Export
-    - [ ] MBean tree
-    - [ ] System properties
-    - [ ] Environment
+    - [x] MBean tree
+    - [x] System properties
+    - [x] Environment
 
 - [ ] Configuration
     - [ ] i18n
