@@ -15,6 +15,26 @@
 -->
 <div ng-controller="JvmHeapDumpCtrl">
 
+    <!--Toolbar Actions - START-->
+    <gt-toolbar-action>
+        <button
+            ng-click="checkDiskSpace()"
+            class="btn btn-primary"
+            >
+            Check disk space
+        </button>
+
+        <button
+            class="btn btn-danger"
+            ng-click="heapDump()"
+            gt-confirm="Note: This may hang the JVM for a bit while the heap dump is generated."
+            gt-confirm-header="Perform heap dump?"
+            >
+            Heap dump
+        </button>
+    </gt-toolbar-action>
+    <!--Toolbar Actions - END-->
+
     <div ng-if="::agentNotConnected" class="message-container no-chart">
         <div class="message-container-container">
             <div class="alert alert-info message-container-message">
@@ -36,30 +56,13 @@
             <input
                 type="text"
                 class="form-control"
-                ng-model="page.directory"
+                ng-model="ref.directory"
                 id="directory"
                 name="directory">
             <p class="help-block">
                 Use the jvm arg <code style="white-space: nowrap;">-XX:HeapDumpPath=&lt;directory&gt;</code>
                 to change the default heap dump location.
             </p>
-        </div>
-
-        <div class="text-right">
-            <button
-                ng-click="checkDiskSpace()"
-                class="btn btn-primary"
-                >
-                Check disk space
-            </button>
-            <button
-                class="btn btn-danger"
-                ng-click="heapDump(deferred)"
-                gt-confirm="Note: This may hang the JVM for a bit while the heap dump is generated."
-                gt-confirm-header="Perform heap dump?"
-                >
-                Heap dump
-            </button>
         </div>
     </div>
 

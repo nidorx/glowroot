@@ -24,22 +24,15 @@ JvmThreadDumpCtrl.$inject = ['$scope', '$http', '$location', 'locationChanges', 
 
 function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal) {
 
-    if ($scope.hideMainContent()) {
-        return;
-    }
-
     // Page header
     $scope.page.title = 'JVM - Thread Dump';
     $scope.page.subTitle = 'Snapshot of the state of all threads that are part of the process.';
     $scope.page.helpPopoverTemplate = 'modules/GtJvm/templates/help/ThreadDumpPageHelp.html';
     $scope.page.breadcrumb = null;
 
-
-    // @see JvmToolbar.html
-    $scope.$on('jvmRrefresh', function () {
-        $scope.refresh();
-    });
-
+    if ($scope.hideMainContent()) {
+        return;
+    }
 
     locationChanges.on($scope, function () {
         var modalTraceId = $location.search()['modal-trace-id'];
@@ -93,4 +86,3 @@ function JvmThreadDumpCtrl($scope, $http, $location, locationChanges, traceModal
 
     $scope.refresh();
 }
-

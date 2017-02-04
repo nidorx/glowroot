@@ -31,56 +31,31 @@
     </gt-toolbar-action>
     <!--Toolbar Actions - END-->
 
-    <div ng-if="agentNotConnected" class="alert alert-danger">
+    <gt-alert type="error" ng-if="::agentNotConnected">
         This feature is only available when the agent is running and connected
-    </div>
+    </gt-alert>
 
     <!-- ng-show explicitly needed here instead of ng-if because thread-dump.js binds directly to #threadDump -->
     <div ng-if="loaded && !agentNotConnected">
-
         <div id="threadDump">
             <ng-include
                 ng-if="data.deadlocks"
                 src="'modules/GtJvm/templates/ThreadDumpDeadlockedCycles.html'"
                 >
             </ng-include>
-            <!--
-            {{#if transactions}}
-                <strong><u>Matched threads</u></strong>
-                (matched to currently executing transactions):
-                <br>
-                {{#each transactions}}
-                    {{#if transactionType}}
-                        <strong>{{headline}}</strong>
-                        {{#if traceId}}
-                            <a href="jvm/thread-dump?{{#agentIdQueryString}}{{/agentIdQueryString}}modal-trace-id={{traceId}}&modal-check-live-traces=true" style="padding-left: 5px;">
-                                view trace
-                            </a>
-                        {{/if}}
-                        <strong>Transaction type: </strong>{{transactionType}}
-                        <strong>Transaction name:</strong> {{transactionName}}
-                        <strong>Duration:</strong> {{nanosToMillis totalDurationNanos}} milliseconds
-                        {{#ifNotNA totalCpuNanos}}
-                            <strong>CPU time:</strong> {{nanosToMillis totalCpuNanos}} milliseconds
-                        {{/ifNotNA}}
-                    {{/if}}
-                {{#each threads}}
-                    "{{name}}" #{{id}}
-                    &nbsp;&nbsp;&nbsp;java.lang.Thread.State: {{state}}
-                    {{#each stackTraceElements}}
-                        {{.}}
-                    {{/each}}
-                {{/each}}
-                <br>
-                {{/each}}
-            {{/if}}
-            -->
+
+            <ng-include
+                ng-if="data.transactions"
+                src="'modules/GtJvm/templates/ThreadDumpMatchedThreads.html'"
+                >
+            </ng-include>
 
             <ng-include
                 ng-if="data.unmatchedThreads"
                 src="'modules/GtJvm/templates/ThreadDumpUnmatchedThreads.html'"
                 >
             </ng-include>
+            
             <ng-include
                 ng-if="data.threadDumpingThread"
                 src="'modules/GtJvm/templates/ThreadDumpThreadDumpingThread.html'"

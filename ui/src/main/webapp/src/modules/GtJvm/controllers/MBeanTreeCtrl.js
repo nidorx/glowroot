@@ -20,10 +20,11 @@ angular
         .controller('JvmMBeanTreeCtrl', JvmMBeanTreeCtrl);
 
 
-JvmMBeanTreeCtrl.$inject = ['$scope', '$location', '$http', 'httpErrors', '$element'];
+JvmMBeanTreeCtrl.$inject = ['$scope', '$location', '$http'];
 
-function JvmMBeanTreeCtrl($scope, $location, $http, httpErrors, $element) {
+function JvmMBeanTreeCtrl($scope, $location, $http) {
 
+    // Page header
     $scope.page.title = 'JVM - MBean tree';
     $scope.page.subTitle = '';
     $scope.page.helpPopoverTemplate = '';
@@ -46,11 +47,6 @@ function JvmMBeanTreeCtrl($scope, $location, $http, httpErrors, $element) {
         query.expanded = expandedObjectNames;
         $location.search(query).replace();
     }
-
-    // @see JvmToolbar.html
-    $scope.$on('jvmRrefresh', function () {
-        $scope.refresh();
-    });
 
     $scope.refresh = function () {
         $scope.loaded = false;
@@ -87,7 +83,6 @@ function JvmMBeanTreeCtrl($scope, $location, $http, httpErrors, $element) {
         });
     };
 
-
     $scope.isSimpleValue = function (value) {
         if (angular.isObject(value) || angular.isArray(value)) {
             return false;
@@ -123,12 +118,6 @@ function JvmMBeanTreeCtrl($scope, $location, $http, httpErrors, $element) {
             $scope.$emit('httpError', response);
         });
     };
-
-
-
-
-
-
 
     $scope.refresh();
 }

@@ -20,9 +20,9 @@ angular
         .controller('JvmHeapDumpCtrl', JvmHeapDumpCtrl);
 
 
-JvmHeapDumpCtrl.$inject = ['$scope', '$http', 'httpErrors'];
+JvmHeapDumpCtrl.$inject = ['$scope', '$http'];
 
-function JvmHeapDumpCtrl($scope, $http, httpErrors) {
+function JvmHeapDumpCtrl($scope, $http) {
 
     // Page header
     $scope.page.title = 'JVM - Heap dump';
@@ -35,11 +35,11 @@ function JvmHeapDumpCtrl($scope, $http, httpErrors) {
     }
 
     // initialize page binding object
-    $scope.page = {};
+    $scope.ref = {};
 
     $scope.checkDiskSpace = function () {
         var postData = {
-            directory: $scope.page.directory
+            directory: $scope.ref.directory
         };
         $scope.availableDiskSpaceBytes = undefined;
         $scope.heapDumpResponse = false;
@@ -58,16 +58,15 @@ function JvmHeapDumpCtrl($scope, $http, httpErrors) {
                 $scope.$emit('txtError', 'Directory does not exist');
             } else {
                 $scope.availableDiskSpaceBytes = data;
-                //deferred.resolve('See disk space below');
             }
         }, function (response) {
             $scope.$emit('httpError', response);
         });
     };
 
-    $scope.heapDump = function (deferred) {
+    $scope.heapDump = function () {
         var postData = {
-            directory: $scope.page.directory
+            directory: $scope.ref.directory
         };
         $scope.availableDiskSpaceBytes = undefined;
         $scope.heapDumpResponse = false;
@@ -102,9 +101,8 @@ function JvmHeapDumpCtrl($scope, $http, httpErrors) {
         if ($scope.agentNotConnected) {
             return;
         }
-        $scope.page.directory = response.data.directory;
+        $scope.ref.directory = response.data.directory;
     }, function (response) {
         $scope.$emit('httpError', response);
     });
 }
-

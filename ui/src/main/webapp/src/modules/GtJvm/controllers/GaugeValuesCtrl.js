@@ -25,6 +25,7 @@ JvmGaugeValuesCtrl.$inject = [
 ];
 
 function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, charts, httpErrors) {
+
     // Page header
     $scope.page.title = 'JVM - Gauges';
     $scope.page.subTitle = '';

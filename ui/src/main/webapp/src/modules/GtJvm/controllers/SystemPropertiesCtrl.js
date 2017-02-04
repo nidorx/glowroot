@@ -24,6 +24,7 @@ JvmSystemPropertiesCtrl.$inject = ['$scope', '$http'];
 
 function JvmSystemPropertiesCtrl($scope, $http) {
 
+    // Page header
     $scope.page.title = 'JVM - System properties';
     $scope.page.subTitle = '';
     $scope.page.helpPopoverTemplate = '';
@@ -37,18 +38,20 @@ function JvmSystemPropertiesCtrl($scope, $http) {
         return angular.isArray(value);
     };
 
-    $http.get('backend/jvm/system-properties?agent-id=' + encodeURIComponent($scope.agentId))
-            .then(function (response) {
-                $scope.loaded = true;
-                var data = response.data;
-                $scope.agentNotConnected = data.agentNotConnected;
-                $scope.agentUnsupportedOperation = data.agentUnsupportedOperation;
-                if ($scope.agentNotConnected || $scope.agentUnsupportedOperation) {
-                    return;
-                }
-                $scope.properties = data.properties;
-            }, function (response) {
-                $scope.$emit('httpError', response);
-            });
+    $http.get('backend/jvm/system-properties', {
+        params: {
+            'agent-id': $scope.agentId
+        }
+    }).then(function (response) {
+        $scope.loaded = true;
+        var data = response.data;
+        $scope.agentNotConnected = data.agentNotConnected;
+        $scope.agentUnsupportedOperation = data.agentUnsupportedOperation;
+        if ($scope.agentNotConnected || $scope.agentUnsupportedOperation) {
+            return;
+        }
+        $scope.properties = data.properties;
+    }, function (response) {
+        $scope.$emit('httpError', response);
+    });
 }
-

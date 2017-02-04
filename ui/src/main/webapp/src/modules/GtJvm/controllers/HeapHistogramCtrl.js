@@ -20,11 +20,11 @@ angular
         .controller('JvmHeapHistogramCtrl', JvmHeapHistogramCtrl);
 
 
-JvmHeapHistogramCtrl.$inject = ['$scope', '$http', '$location', 'locationChanges', 'queryStrings', 'httpErrors'];
+JvmHeapHistogramCtrl.$inject = ['$scope', '$http', '$location', 'locationChanges', 'queryStrings'];
 
-function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, queryStrings, httpErrors) {
+function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, queryStrings) {
 
-     // Page header
+    // Page header
     $scope.page.title = 'JVM - Heap histogram';
     $scope.page.subTitle = '';
     $scope.page.helpPopoverTemplate = '';
@@ -73,11 +73,7 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
 
     $scope.$watch('ref.filterLimit', function (newValue, oldValue) {
         if (oldValue !== newValue) {
-            if (newValue === '200') {
-                $location.search('filter-limit', null);
-            } else {
-                $location.search('filter-limit', newValue);
-            }
+            $location.search('filter-limit', newValue);
         }
     });
 
@@ -161,38 +157,28 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
         appliedSortAsc = $scope.sortAsc;
     }
 
-
-    $scope.$on('jvmHeapHistogramLimit', function (event, limit) {
-        $scope.ref.filterLimit = limit;
-    });
-
-
-    $scope.$on('jvmHeapHistogramFilterValue', function (event, value) {
-        $scope.ref.filterValue = value;
-    });
-
-    $scope.refresh = function (deferred) {
-        $http.post('backend/jvm/heap-histogram?agent-id=' + encodeURIComponent($scope.agentId))
-                .then(function (response) {
-                    $scope.loaded = true;
-                    var data = response.data;
-                    $scope.agentNotConnected = data.agentNotConnected;
-                    $scope.agentUnsupportedOperation = data.agentUnsupportedOperation;
-                    $scope.unavailableDueToRunningInJre = data.unavailableDueToRunningInJre;
-                    if ($scope.agentNotConnected || $scope.agentUnsupportedOperation || $scope.unavailableDueToRunningInJre) {
-                        return;
-                    }
-                    $scope.histogram = data;
-                    appliedSortAttribute = 'bytes';
-                    appliedSortAsc = false;
-                    sortIfNeeded();
-                    applyFilter();
-                    if (deferred) {
-                        deferred.resolve('Complete');
-                    }
-                }, function (response) {
-                    httpErrors.handle(response, $scope, deferred);
-                });
+    $scope.refresh = function () {
+        $http.post('backend/jvm/heap-histogram', {}, {
+            params: {
+                'agent-id': $scope.agentId
+            }
+        }).then(function (response) {
+            $scope.loaded = true;
+            var data = response.data;
+            $scope.agentNotConnected = data.agentNotConnected;
+            $scope.agentUnsupportedOperation = data.agentUnsupportedOperation;
+            $scope.unavailableDueToRunningInJre = data.unavailableDueToRunningInJre;
+            if ($scope.agentNotConnected || $scope.agentUnsupportedOperation || $scope.unavailableDueToRunningInJre) {
+                return;
+            }
+            $scope.histogram = data;
+            appliedSortAttribute = 'bytes';
+            appliedSortAsc = false;
+            sortIfNeeded();
+            applyFilter();
+        }, function (response) {
+            $scope.$emit('httpError', response);
+        });
     };
 
     $scope.exportAsCsv = function () {
@@ -206,13 +192,6 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
         var csvWindow = window.open();
         $(csvWindow.document.body).html('<pre style="white-space: pre-wrap;">' + csv + '</pre>');
     };
-
-    $scope.smallScreen = function () {
-        // using innerWidth so it will match to screen media queries
-        return window.innerWidth < 768;
-    };
-
-
 
     function applyFilter() {
         if ($scope.displayedItems === undefined) {

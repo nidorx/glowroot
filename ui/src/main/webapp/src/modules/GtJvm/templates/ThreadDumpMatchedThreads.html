@@ -1,0 +1,72 @@
+<div class="threads" ng-repeat="transaction in data.transactions track by $index">
+
+    <div class="section-header">
+        <h2>
+            Matched thread
+            <button
+                class="btn btn-default pull-right hidden-print"
+                ng-click="transaction._show = true;"
+                ng-if="!transaction._show"
+                >
+                <span class="glyphicon glyphicon-eye-open"></span>
+                Show
+            </button>
+            <button
+                class="btn btn-default pull-right hidden-print"
+                ng-click="transaction._show = false;"
+                ng-if="transaction._show"
+                >
+                <span class="glyphicon glyphicon-eye-close"></span>
+                Hide
+            </button>
+            <p class="lead">
+                {{::transaction.headline}}
+            </p>
+        </h2>
+    </div>
+    <div ng-if="transaction._show">
+        <a
+            ng-if="transaction.traceId"
+            class="btn btn-primary pull-right hidden-print"
+            href="#jvm/thread-dump?modal-trace-id={{transaction.traceId}}&modal-check-live-traces=true">
+            View trace
+        </a>
+        <dl class="dl-horizontal">
+            <dt>Transaction type</dt>
+            <dd>{{::transaction.transactionType}}</dd>
+            <dt>Transaction name</dt>
+            <dd>{{::transaction.transactionName}}</dd>
+            <dt>Duration</dt>
+            <dd>{{::transaction.totalDurationNanos|gtNanosToMillis}} milliseconds</dd>
+            <dt ng-if="::transaction.totalCpuNanos !== - 1">CPU time</dt>
+            <dd ng-if="::transaction.totalCpuNanos !== - 1">{{::transaction.totalCpuNanos| gtNanosToMillis}} milliseconds</dd>
+        </dl>
+        <ul class="list-group list-view-pf list-view-pf-view">
+            <li ng-repeat="thread in transaction.threads" class="list-group-item list-view-pf-expand-active">
+                <div class="list-group-item-header">
+                    <div class="list-view-pf-main-info">
+                        <div class="list-view-pf-body">
+                            <div class="list-view-pf-description">
+                                <div class="list-group-item-heading">
+                                    <div class="pull-right">
+                                        <span title="Java Thread State" class="badge">
+                                            {{::thread.state}}
+                                        </span>
+                                    </div>
+                                    #{{::thread.id}} - {{::thread.name}}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div
+                    class="list-group-item-container container-fluid"
+                    ng-if="::thread.stackTraceElements.length"
+                    ng-bind-html="::thread.stackTraceElements | gtTraceLine"
+                    >
+                </div>
+                <br>
+            </li>
+        </ul>
+    </div>
+</div>

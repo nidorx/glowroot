@@ -20,26 +20,33 @@ angular
         .controller('JvmCapabilitiesCtrl', JvmCapabilitiesCtrl);
 
 
-JvmCapabilitiesCtrl.$inject = ['$scope', '$http', 'httpErrors'];
+JvmCapabilitiesCtrl.$inject = ['$scope', '$http'];
 
-function JvmCapabilitiesCtrl($scope, $http, httpErrors) {
+function JvmCapabilitiesCtrl($scope, $http) {
 
-    $scope.$parent.heading = 'Capabilities';
+    // Page header
+    $scope.page.title = 'JVM - Capabilities';
+    $scope.page.subTitle = '';
+    $scope.page.helpPopoverTemplate = '';
+    $scope.page.breadcrumb = null;
 
     if ($scope.hideMainContent()) {
         return;
     }
 
-    $http.get('backend/jvm/capabilities?agent-id=' + encodeURIComponent($scope.agentId))
-            .then(function (response) {
-                $scope.loaded = true;
-                $scope.agentNotConnected = response.data.agentNotConnected;
-                if ($scope.agentNotConnected) {
-                    return;
-                }
-                $scope.capabilities = response.data;
-            }, function (response) {
-                $scope.$emit('httpError', response);
-            });
+    $http.get('backend/jvm/capabilities', {
+        params: {
+            'agent-id': $scope.agentId
+        }
+    }).then(function (response) {
+        $scope.loaded = true;
+        $scope.agentNotConnected = response.data.agentNotConnected;
+        if ($scope.agentNotConnected) {
+            return;
+        }
+        $scope.capabilities = response.data;
+    }, function (response) {
+        $scope.$emit('httpError', response);
+    });
 }
 

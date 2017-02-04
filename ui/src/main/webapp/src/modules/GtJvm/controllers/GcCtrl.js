@@ -20,34 +20,43 @@ angular
         .controller('JvmGcCtrl', JvmGcCtrl);
 
 
-JvmGcCtrl.$inject = ['$scope', '$http', 'httpErrors'];
+JvmGcCtrl.$inject = ['$scope', '$http'];
 
-function JvmGcCtrl($scope, $http, httpErrors) {
+function JvmGcCtrl($scope, $http) {
 
-    $scope.$parent.heading = 'GC';
+    // Page header
+    $scope.page.title = 'JVM - Garbage Collection';
+    $scope.page.subTitle = '';
+    $scope.page.helpPopoverTemplate = '';
+    $scope.page.breadcrumb = null;
 
     if ($scope.hideMainContent()) {
         return;
     }
 
-    $scope.gc = function (deferred) {
-        $http.post('backend/jvm/gc?agent-id=' + encodeURIComponent($scope.agentId))
-                .then(function () {
-                    deferred.resolve('Success');
-                }, function (response) {
-                    httpErrors.handle(response, $scope, deferred);
-                });
+    $scope.gc = function () {
+        $http.post('backend/jvm/gc', {}, {
+            params: {
+                'agent-id': $scope.agentId
+            }
+        }).then(function () {
+
+        }, function (response) {
+            $scope.$emit('httpError', response);
+        });
     };
 
-    $http.get('backend/jvm/gc-check-agent-connected?agent-id=' + encodeURIComponent($scope.agentId))
-            .then(function (response) {
-                $scope.loaded = true;
-                $scope.agentNotConnected = !response.data;
-                if ($scope.agentNotConnected) {
-                    return;
-                }
-            }, function (response) {
-                $scope.$emit('httpError', response);
-            });
+    $http.get('backend/jvm/gc-check-agent-connected', {
+        params: {
+            'agent-id': $scope.agentId
+        }
+    }).then(function (response) {
+        $scope.loaded = true;
+        $scope.agentNotConnected = !response.data;
+        if ($scope.agentNotConnected) {
+            return;
+        }
+    }, function (response) {
+        $scope.$emit('httpError', response);
+    });
 }
-

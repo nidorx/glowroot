@@ -33,12 +33,13 @@ function GtTraceLineFilter($sce) {
         CLASS: 'style="color:#2222ff;font-weight: bold;"',
         METHOD: 'style="color:#000;font-weight: bold;"',
         LINE_NUMBER: 'style="color:#2222ff;font-weight: bold;"',
-        TEXT: 'style="color:olive;"'
+        TEXT: 'style="color:olive;min-height: 20px;"'
     };
 
     var REG_NATIVE_METHOD = /\.([a-z$_][a-z0-9$_]*)\.([a-z$_][a-z0-9$_]*)\(Native Method\)\s*$/i;
     var REG_JAVA_CLASS = /\.([a-z$_][a-z0-9$_]*)\.([a-z$_][a-z0-9$_]*)\(([a-z$_][a-z0-9$_]*).java\:(\d+)\)\s*$/i;
-    var REG_TRIM = /(^\s*)|(\s*$)/g;
+    var REG_R_TRIM = /(\s*$)/g;
+    var TAB = '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;';
 
     return function (input) {
         if (!input) {
@@ -54,7 +55,7 @@ function GtTraceLineFilter($sce) {
         }
 
         var lines = input.map(function (line) {
-            line = line.replace(REG_TRIM, '');
+            line = line.replace(REG_R_TRIM, '').replace(/\t/g, TAB).replace(/\s/g, '&nbsp;');
             var out = '<div ' + STYLE.TEXT + '>';
             if (line.indexOf('Native Method') >= 0) {
                 out += line.replace(REG_NATIVE_METHOD, function ($0, $1, $2) {
@@ -79,7 +80,7 @@ function GtTraceLineFilter($sce) {
         });
 
 
-        return $sce.trustAsHtml('<pre class="entry-message"><code>' + lines.join('') + '</code></pre>');
+        return $sce.trustAsHtml('<pre class="entry-message"><code style="white-space: nowrap;">' + lines.join('') + '</code></pre>');
     };
 }
 

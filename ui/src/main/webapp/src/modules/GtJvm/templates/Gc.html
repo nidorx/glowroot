@@ -13,15 +13,17 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<div ng-include src="'template/gt-loading-overlay.html'"></div>
-<div ng-include src="'template/gt-http-error-overlay.html'"></div>
-<div ng-if="agentNotConnected" class="alert alert-danger">
-  This feature is only available when the agent is running and connected
-</div>
-<div ng-if="loaded && !agentNotConnected">
-  <div gt-button
-       gt-label="GC"
-       gt-click="gc(deferred)"
-       style="padding: 28px 0 0 20px;">
-  </div>
+<div ng-controller="JvmGcCtrl">
+
+    <gt-alert type="error" ng-if="::agentNotConnected">
+        This feature is only available when the agent is running and connected
+    </gt-alert>
+
+
+
+    <div ng-if="loaded && !agentNotConnected" class="text-center" style="margin:20px;">
+        <button class="btn btn-danger" ng-click="gc()">
+            Perform Garbage Collection
+        </button>
+    </div>
 </div>

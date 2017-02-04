@@ -20,10 +20,11 @@ angular
         .controller('JvmEnvironmentCtrl', JvmEnvironmentCtrl);
 
 
-JvmEnvironmentCtrl.$inject = ['$scope', '$http', 'httpErrors'];
+JvmEnvironmentCtrl.$inject = ['$scope', '$http'];
 
-function JvmEnvironmentCtrl($scope, $http, httpErrors) {
+function JvmEnvironmentCtrl($scope, $http) {
 
+    // Page header
     $scope.page.title = 'JVM - Environment';
     $scope.page.subTitle = '';
     $scope.page.helpPopoverTemplate = '';
@@ -52,13 +53,16 @@ function JvmEnvironmentCtrl($scope, $http, httpErrors) {
         }
     };
 
-    $http.get('backend/jvm/environment?agent-id=' + encodeURIComponent($scope.agentId))
-            .then(function (response) {
-                $scope.loaded = true;
-                $scope.data = response.data;
-                $scope.uptime = Date.now() - response.data.process.startTime;
-            }, function (response) {
-                $scope.$emit('httpError', response);
-            });
+    $http.get('backend/jvm/environment', {
+        params: {
+            'agent-id': $scope.agentId
+        }
+    }).then(function (response) {
+        $scope.loaded = true;
+        $scope.data = response.data;
+        $scope.uptime = Date.now() - response.data.process.startTime;
+    }, function (response) {
+        $scope.$emit('httpError', response);
+    });
 }
 

@@ -111,14 +111,7 @@ function AppConfig($stateProvider, $urlRouterProvider) {
             })
             .state('page.jvm', {
                 url: '/jvm?agent-id&agent-rollup-id',
-                views: {
-                    page: {
-                        templateUrl: urlTemplate('Jvm', 'GtJvm')
-                    },
-                    toolbar: {
-                        templateUrl: urlTemplate('JvmToolbar', 'GtJvm')
-                    }
-                },
+                templateUrl: urlTemplate('Jvm', 'GtJvm'),
                 resolve: {
                     mdl: resolveModule('GtJvm'),
                     waitForLayout: WaitForLayoutResolver(false),

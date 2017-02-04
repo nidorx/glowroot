@@ -15,6 +15,18 @@
 -->
 <div ng-controller="JvmSystemPropertiesCtrl">
 
+     <!--Toolbar Actions - START-->
+    <gt-toolbar-action>
+        <button class="btn btn-primary" ng-click="toggleExpandend()">
+            <span
+                class="glyphicon glyphicon-resize-full"
+                ng-class="{'glyphicon-resize-full':!isExpandend, 'glyphicon-resize-small':isExpandend}"
+                >
+            </span>
+        </button>
+    </gt-toolbar-action>
+    <!--Toolbar Actions - END-->
+
     <gt-alert type="error" ng-if="::agentNotConnected">
         This feature is only available when the agent is running and connected
     </gt-alert>

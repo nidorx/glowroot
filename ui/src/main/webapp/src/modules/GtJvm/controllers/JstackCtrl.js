@@ -20,11 +20,15 @@ angular
         .controller('JvmJstackCtrl', JvmJstackCtrl);
 
 
-JvmJstackCtrl.$inject = ['$scope', '$http', 'httpErrors'];
+JvmJstackCtrl.$inject = ['$scope', '$http'];
 
-function JvmJstackCtrl($scope, $http, httpErrors) {
+function JvmJstackCtrl($scope, $http) {
 
-    $scope.$parent.heading = 'Thread dump: jstack';
+    // Page header
+    $scope.page.title = 'JVM - Thread dump: jstack';
+    $scope.page.subTitle = '';
+    $scope.page.helpPopoverTemplate = '';
+    $scope.page.breadcrumb = null;
 
     if ($scope.hideMainContent()) {
         return;
@@ -37,25 +41,26 @@ function JvmJstackCtrl($scope, $http, httpErrors) {
         $(textWindow.document.body).html('<pre style="white-space: pre-wrap;">' + jstack + '</pre>');
     };
 
-    $scope.refresh = function (deferred) {
-        $http.get('backend/jvm/jstack?agent-id=' + encodeURIComponent($scope.agentId))
-                .then(function (response) {
-                    $scope.loaded = true;
-                    var data = response.data;
-                    $scope.agentNotConnected = data.agentNotConnected;
-                    $scope.agentUnsupportedOperation = data.agentUnsupportedOperation;
-                    $scope.unavailableDueToRunningInJre = data.unavailableDueToRunningInJre;
-                    if ($scope.agentNotConnected || $scope.agentUnsupportedOperation || $scope.unavailableDueToRunningInJre) {
-                        return;
-                    }
-                    jstack = data.jstack;
-                    $('#jstack').html('<br>' + jstack);
-                    if (deferred) {
-                        deferred.resolve('Refreshed');
-                    }
-                }, function (response) {
-                    httpErrors.handle(response, $scope, deferred);
-                });
+    $scope.refresh = function () {
+        $scope.loaded = false;
+        $http.get('backend/jvm/jstack', {
+            params: {
+                'agent-id': $scope.agentId
+            }
+        }).then(function (response) {
+            $scope.loaded = true;
+            var data = response.data;
+            $scope.agentNotConnected = data.agentNotConnected;
+            $scope.agentUnsupportedOperation = data.agentUnsupportedOperation;
+            $scope.unavailableDueToRunningInJre = data.unavailableDueToRunningInJre;
+            if ($scope.agentNotConnected || $scope.agentUnsupportedOperation || $scope.unavailableDueToRunningInJre) {
+                return;
+            }
+            jstack = data.jstack;
+            $scope.data = data;
+        }, function (response) {
+            $scope.$emit('httpError', response);
+        });
     };
 
     $scope.refresh();
