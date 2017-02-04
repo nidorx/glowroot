@@ -15,6 +15,79 @@
 -->
 <div ng-controller="JvmHeapHistogramCtrl">
 
+    <!--Toolbar Actions - START-->
+    <gt-toolbar-action>
+        <div class="btn-group" ng-init="_filterBy = 'contains'">
+            <div class="input-group">
+                <div class="input-group-btn">
+                    <button
+                        type="button"
+                        class="btn btn-default dropdown-toggle"
+                        data-toggle="dropdown"
+                        aria-haspopup="true" aria-expanded="false">
+                        {{filterComparatorOptions[ref.filterComparator]}}
+                        <span class="caret"></span>
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li
+                            ng-class="{active:ref.filterComparator === key}"
+                            ng-repeat="(key,value) in ::filterComparatorOptions"
+                            >
+                            <a ng-click="ref.filterComparator = key">
+                                {{value}}
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <input
+                    ng-model="ref.filterValue"
+                    type="text"
+                    class="form-control"
+                    id="filter"
+                    placeholder="Filter by class name"
+                    >
+            </div>
+        </div>
+
+        <div class="dropdown btn-group" ng-init="_displayLimit = 200">
+            <button
+                type="button"
+                class="btn btn-default dropdown-toggle"
+                data-toggle="dropdown"
+                aria-haspopup="true"
+                aria-expanded="false"
+                >
+                Display limit ({{ref.filterLimit}})
+                <span class="caret"></span>
+            </button>
+            <ul class="dropdown-menu">
+                <li ng-class="{active:ref.filterLimit === value}" ng-repeat="value in ::displayLimits">
+                    <a ng-click="ref.filterLimit = value">
+                        {{value}}
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+         <button class="btn btn-primary" ng-click="exportAsCsv()">
+            <span class="glyphicon glyphicon-download"></span>
+            Export as text
+        </button>
+
+        <button class="btn btn-default" ng-click="refresh()">
+            <span class="glyphicon glyphicon-refresh"></span>
+            Refresh
+        </button>
+
+        <button class="btn btn-primary" ng-click="toggleExpandend()">
+            <span class="glyphicon glyphicon-resize-full"
+                ng-class="{'glyphicon-resize-full':!isExpandend, 'glyphicon-resize-small':isExpandend}"
+                >
+            </span>
+        </button>
+    </gt-toolbar-action>
+    <!--Toolbar Actions - END-->
+
     <gt-alert type="error" ng-if="::agentNotConnected">
         This feature is only available when the agent is running and connected
     </gt-alert>
@@ -29,53 +102,25 @@
     </gt-alert>
 
     <div ng-if="loaded && !agentNotConnected && !agentUnsupportedOperation && !unavailableDueToRunningInJre">
-        <div class="clearfix"
-             style="float: right;">
-            <button class="btn btn-default" ng-click="exportAsCsv()">
-                Export as text
-            </button>
-        </div>
 
-        <div ng-form class="form-horizontal well">
-            <div class="row">
-                <div class="col-md-9">
-                    <div class="input-group" style="width: 100%;">
-                        <div gt-input-group-dropdown
-                             gt-model="page.filterComparator"
-                             gt-items="filterComparatorOptions">
-                        </div>
-                        <input type="text"
-                               ng-model="page.filterValue"
-                               class="form-control"
-                               placeholder="Filter by class name">
-                    </div>
-                </div>
-            </div>
-        </div>
-        <table class="table table-sortable" style="table-layout: fixed;">
+        <table class="table table-sortable table-bordered table-hover table-striped" style="table-layout: fixed;">
             <thead>
                 <tr>
                     <th>
-                        <a ng-href="jvm/heap-histogram{{sortQueryString('class-name')}}" class="gt-sortable-table-header">
-                            <span ng-class="sortIconClass('class-name')"
-                                  ng-show="sortAttribute === 'class-name'">
-                            </span>
+                        <a ng-href="#jvm/heap-histogram{{sortQueryString('class-name')}}" class="gt-sortable-table-header">
+                            <span ng-class="sortIconClass('class-name')" ng-show="sortAttribute === 'class-name'"></span>
                             Class name
                         </a>
                     </th>
                     <th class="gt-heap-histogram-other-column">
-                        <a ng-href="jvm/heap-histogram{{sortQueryString('bytes')}}" class="gt-sortable-table-header">
-                            <span ng-class="sortIconClass('bytes')"
-                                  ng-show="sortAttribute === 'bytes'">
-                            </span>
+                        <a ng-href="#jvm/heap-histogram{{sortQueryString('bytes')}}" class="gt-sortable-table-header">
+                            <span ng-class="sortIconClass('bytes')" ng-show="sortAttribute === 'bytes'"></span>
                             Bytes
                         </a>
                     </th>
                     <th class="gt-heap-histogram-other-column">
-                        <a ng-href="jvm/heap-histogram{{sortQueryString('count')}}" class="gt-sortable-table-header">
-                            <span ng-class="sortIconClass('count')"
-                                  ng-show="sortAttribute === 'count'">
-                            </span>
+                        <a ng-href="#jvm/heap-histogram{{sortQueryString('count')}}" class="gt-sortable-table-header">
+                            <span ng-class="sortIconClass('count')"ng-show="sortAttribute === 'count'"></span>
                             Count
                         </a>
                     </th>
@@ -88,15 +133,15 @@
                     <td class="gt-heap-histogram-other-column">{{filteredTotalCount}}</td>
                 </tr>
             </tfoot>
-            <tbody ng-if="!smallScreen()">
+            <tbody>
                 <tr ng-repeat="item in displayedItems track by item.className">
-                    <td ng-if="sortAttribute === 'bytes' && !sortAsc"
-                        style="padding: 0;">
+                    <td ng-if="sortAttribute === 'bytes' && !sortAsc" style="padding: 0;">
                         <!-- cannot apply relative positioning to td elements in firefox
                          see https://bugzilla.mozilla.org/show_bug.cgi?id=35168 -->
                         <div style="position: relative;">
-                            <div style="position: absolute; height: 100%; background-color: #eee;"
-                                 ng-style="{width: classNameBarWidth(item.bytes)}">
+                            <div
+                                style="position: absolute; height: 100%; opacity: 0.5; background-color: #def3ff; border-right: 1px solid #7dc3e8"
+                                 ng-style="{width: item.percent+'%'}">
                             </div>
                             <div style="position: relative; padding: 8px; word-break: break-all;">
                                 {{item.className}}
@@ -106,30 +151,6 @@
                     <td ng-if="sortAttribute !== 'bytes' || sortAsc">{{item.className}}</td>
                     <td class="gt-heap-histogram-other-column">{{item.bytes}}</td>
                     <td class="gt-heap-histogram-other-column">{{item.count}}</td>
-                </tr>
-                <tr ng-show="limitApplied">
-                    <td>... <em>display limit applied</em></td>
-                    <td></td>
-                    <td></td>
-                </tr>
-            </tbody>
-            <tbody ng-if="smallScreen()">
-                <tr ng-repeat-start="item in displayedItems track by item.className">
-                    <td colspan="3"
-                        style="padding-bottom: 4px;">
-                        {{item.className}}
-                    </td>
-                </tr>
-                <tr ng-repeat-end>
-                    <td style="border-top: none; padding-top: 0;"></td>
-                    <td class="gt-heap-histogram-other-column"
-                        style="border-top: none; padding-top: 0;">
-                        {{item.bytes}}
-                    </td>
-                    <td class="gt-heap-histogram-other-column"
-                        style="border-top: none; padding-top: 0;">
-                        {{item.count}}
-                    </td>
                 </tr>
                 <tr ng-show="limitApplied">
                     <td>... <em>display limit applied</em></td>

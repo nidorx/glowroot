@@ -479,6 +479,13 @@ h2 {
     margin-bottom: 10px;
 }
 
+.toolbar-pf .form-group .btn+.btn,
+.toolbar-pf .form-group .btn+.btn-group,
+.toolbar-pf .form-group .btn-group+.btn,
+.toolbar-pf .form-group .btn-group+.btn-group{
+    margin: 0;
+}
+
 .card-heading-config{
     font-size: 16px;
     opacity: 0.5;

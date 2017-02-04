@@ -15,6 +15,23 @@
 -->
 <div ng-controller="JvmMBeanTreeCtrl">
 
+    <!--Toolbar Actions - START-->
+    <gt-toolbar-action>
+        <button class="btn btn-default" ng-click="refresh()">
+            <span class="glyphicon glyphicon-refresh"></span>
+            Refresh
+        </button>
+        
+        <button class="btn btn-primary" ng-click="toggleExpandend()">
+            <span
+                class="glyphicon glyphicon-resize-full"
+                ng-class="{'glyphicon-resize-full':!isExpandend, 'glyphicon-resize-small':isExpandend}"
+                >
+            </span>
+        </button>
+    </gt-toolbar-action>
+    <!--Toolbar Actions - END-->
+
     <gt-alert type="error" ng-if="::agentNotConnected">
         This feature is only available when the agent is running and connected
     </gt-alert>
@@ -34,8 +51,8 @@
                         <span class="icon node-icon pficon pficon-folder-open" ng-if="::!node.objectName"></span>
                         <span class="icon node-icon fa fa-file-o" ng-if="::node.objectName"></span>
                         {{::node.nodeName}}
-                        <button 
-                            class="btn btn-default ng-scope pull-right btn-xs" 
+                        <button
+                            class="btn btn-default ng-scope pull-right btn-xs"
                             ng-if="::node.objectName"
                             ng-click="toggleAttributes(node)"
                             >
@@ -45,7 +62,7 @@
                     <td ng-if="::node.objectName">
                         <div ng-if="::node.attributeMap">
                             <dl ng-show="node.expanded" class="dl-horizontal" style="margin: 0;">
-                                <dt 
+                                <dt
                                     ng-repeat-start="(key, value) in node.attributeMap"
                                     style="word-break: break-word;white-space: normal;"
                                     >
@@ -55,19 +72,19 @@
                                     <span ng-if="::isSimpleValue(value)">
                                         {{::(value === null)?'null':value}}
                                     </span>
-                                    <div tc-debug 
+                                    <div tc-debug
                                          model="value"
                                          all="true"
                                          col="0"
                                          title="object"
                                          ng-if="::!isSimpleValue(value)"
-                                         >                                        
+                                         >
                                     </div>
                                 </dd>
                             </dl>
                         </div>
                     </td>
-                </tr>                     
+                </tr>
             </tbody>
         </table>
     </div>

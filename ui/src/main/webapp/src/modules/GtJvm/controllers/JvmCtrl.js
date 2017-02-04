@@ -29,11 +29,11 @@ function JvmCtrl($scope, $location, queryStrings) {
     $scope.page.titleClass = 'header-pre-cards-pf';
     $scope.page.breadcrumb = null;
 
-    // @see JvmToolbar.html
-    $scope.$on('jvmExpandContent', function (even, expanded) {
-        $scope.isExpandend = expanded;
+
+    $scope.toggleExpandend = function(){
+        $scope.isExpandend = !$scope.isExpandend;
         $scope.forceResize();
-    });
+    }
 
     $scope.hideAgentRollupDropdown = function () {
         if (!$scope.layout) {

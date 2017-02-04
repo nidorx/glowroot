@@ -25,6 +25,9 @@ JvmMBeanTreeCtrl.$inject = ['$scope', '$location', '$http', 'httpErrors', '$elem
 function JvmMBeanTreeCtrl($scope, $location, $http, httpErrors, $element) {
 
     $scope.page.title = 'JVM - MBean tree';
+    $scope.page.subTitle = '';
+    $scope.page.helpPopoverTemplate = '';
+    $scope.page.breadcrumb = null;
 
     if ($scope.hideMainContent()) {
         return;

@@ -25,6 +25,9 @@ JvmEnvironmentCtrl.$inject = ['$scope', '$http', 'httpErrors'];
 function JvmEnvironmentCtrl($scope, $http, httpErrors) {
 
     $scope.page.title = 'JVM - Environment';
+    $scope.page.subTitle = '';
+    $scope.page.helpPopoverTemplate = '';
+    $scope.page.breadcrumb = null;
 
     if ($scope.hideMainContent()) {
         return;

@@ -25,6 +25,9 @@ JvmSystemPropertiesCtrl.$inject = ['$scope', '$http'];
 function JvmSystemPropertiesCtrl($scope, $http) {
 
     $scope.page.title = 'JVM - System properties';
+    $scope.page.subTitle = '';
+    $scope.page.helpPopoverTemplate = '';
+    $scope.page.breadcrumb = null;
 
     if ($scope.hideMainContent()) {
         return;

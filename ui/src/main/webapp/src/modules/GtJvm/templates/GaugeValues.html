@@ -17,43 +17,50 @@
 
     <div ng-include src="'modules/GtApp/templates/GtHttpErrorOverlay.html'"></div>
 
-    <div style="margin: 20px 0 10px;">
-        <div class="pull-right">
-            <div class="btn-group" role="group">
-                <button type="button" class="btn btn-default" ng-click="zoomOut()" title="Zoom out">
-                    <span class="glyphicon glyphicon-zoom-out"></span>
-                </button>
-                <button type="button" class="btn btn-default" ng-click="refresh()" title="Refresh">
-                    <span class="glyphicon glyphicon-refresh"></span>
-                </button>
-                <button
-                    type="button"
-                    class="btn btn-info"
-                    uib-popover-template="'modules/GtTransaction/templates/help/ChartHelp.html'"
-                    popover-placement="left"
-                    popover-append-to-body="true"
-                    popover-animation="false"
-                    popover-trigger="mouseenter"
-                    ng-hide="$state.is('page.transaction.detail.traces') || $state.is('page.error.detail.traces')"
-                    >
-                    <span class="glyphicon glyphicon-question-sign"></span>
-                </button>
-                <button
-                    type="button"
-                    class="btn btn-info"
-                    uib-popover-template="'modules/GtTransaction/templates/help/ChartTracesHelp.html'"
-                    popover-placement="left"
-                    popover-append-to-body="true"
-                    popover-animation="false"
-                    popover-trigger="mouseenter"
-                    ng-show="$state.is('page.transaction.detail.traces') || $state.is('page.error.detail.traces')"
-                    >
-                    <span class="glyphicon glyphicon-question-sign"></span>
-                </button>
-            </div>
+    <!--Toolbar Actions - START-->
+    <gt-toolbar-action>
+        <gt-chart-range
+            ng-if="$state.is('page.jvm.gauges')"
+            >
+        </gt-chart-range>
+
+        <div class="btn-group" role="group">
+
         </div>
-        <div class="clearfix"></div>
-    </div>
+
+        <button type="button" class="btn btn-default" ng-click="zoomOut()">
+            <span class="glyphicon glyphicon-zoom-out"></span>
+            Zoom out
+        </button>
+
+        <button type="button" class="btn btn-default" ng-click="refresh()">
+            <span class="glyphicon glyphicon-refresh"></span>
+            Refresh
+        </button>
+
+        <button
+            type="button"
+            class="btn btn-info"
+            uib-popover-template="'modules/GtTransaction/templates/help/ChartTracesHelp.html'"
+            popover-placement="left"
+            popover-append-to-body="true"
+            popover-animation="false"
+            popover-trigger="mouseenter"
+            ng-show="$state.is('page.transaction.detail.traces') || $state.is('page.error.detail.traces')"
+            >
+            <span class="glyphicon glyphicon-question-sign"></span>
+        </button>
+
+        <button class="btn btn-primary" ng-click="toggleExpandend()">
+            <span
+                class="glyphicon glyphicon-resize-full"
+                ng-class="{'glyphicon-resize-full':!isExpandend, 'glyphicon-resize-small':isExpandend}"
+                >
+            </span>
+        </button>
+    </gt-toolbar-action>
+    <!--Toolbar Actions - END-->
+
 
     <div class="gt-chart-container">
         <div class="gt-chart-dimensions" id="chart"></div>

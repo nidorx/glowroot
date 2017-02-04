@@ -24,13 +24,25 @@ JvmHeapHistogramCtrl.$inject = ['$scope', '$http', '$location', 'locationChanges
 
 function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, queryStrings, httpErrors) {
 
-    $scope.$parent.heading = 'Heap histogram';
+     // Page header
+    $scope.page.title = 'JVM - Heap histogram';
+    $scope.page.subTitle = '';
+    $scope.page.helpPopoverTemplate = '';
+    $scope.page.breadcrumb = null;
 
-    $scope.page = {};
+    $scope.ref = {};
 
     if ($scope.hideMainContent()) {
         return;
     }
+
+    $scope.filterComparatorOptions = {
+        contains: 'Contains',
+        begins: 'Begins with',
+        ends: 'Ends with'
+    };
+
+    $scope.displayLimits = [100, 200, 500, 1000, 2000, 5000];
 
     // this is used to calculate bar width under class name representing the proportion of total bytes
     var maxBytes;
@@ -39,7 +51,7 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
         return (bytes / maxBytes) * 100 + '%';
     };
 
-    $scope.$watch('page.filterComparator', function (newValue, oldValue) {
+    $scope.$watch('ref.filterComparator', function (newValue, oldValue) {
         if (oldValue !== newValue) {
             if (newValue === 'contains') {
                 $location.search('filter-comparator', null);
@@ -49,7 +61,7 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
         }
     });
 
-    $scope.$watch('page.filterValue', function (newValue, oldValue) {
+    $scope.$watch('ref.filterValue', function (newValue, oldValue) {
         if (oldValue !== newValue) {
             if (newValue) {
                 $location.search('filter-value', newValue);
@@ -59,7 +71,7 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
         }
     });
 
-    $scope.$watch('page.filterLimit', function (newValue, oldValue) {
+    $scope.$watch('ref.filterLimit', function (newValue, oldValue) {
         if (oldValue !== newValue) {
             if (newValue === '200') {
                 $location.search('filter-limit', null);
@@ -70,9 +82,9 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
     });
 
     locationChanges.on($scope, function () {
-        $scope.page.filterComparator = $location.search()['filter-comparator'] || 'contains';
-        $scope.page.filterValue = $location.search()['filter-value'] || '';
-        $scope.page.filterLimit = $location.search()['filter-limit'] || '200';
+        $scope.ref.filterComparator = $location.search()['filter-comparator'] || 'contains';
+        $scope.ref.filterValue = $location.search()['filter-value'] || '';
+        $scope.ref.filterLimit = $location.search()['filter-limit'] || '200';
 
         $scope.sortAttribute = $location.search()['sort-attribute'] || 'bytes';
         if ($scope.sortAttribute === 'class-name') {
@@ -90,14 +102,14 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
 
     $scope.sortQueryString = function (attributeName) {
         var query = {};
-        if ($scope.page.filterComparator !== 'contains') {
-            query['filter-comparator'] = $scope.page.filterComparator;
+        if ($scope.ref.filterComparator !== 'contains') {
+            query['filter-comparator'] = $scope.ref.filterComparator;
         }
-        if ($scope.page.filterValue) {
-            query['filter-value'] = $scope.page.filterValue;
+        if ($scope.ref.filterValue) {
+            query['filter-value'] = $scope.ref.filterValue;
         }
-        if ($scope.page.filterLimit !== '200') {
-            query['filter-limit'] = $scope.page.filterLimit;
+        if ($scope.ref.filterLimit !== '200') {
+            query['filter-limit'] = $scope.ref.filterLimit;
         }
         if (attributeName !== 'bytes' || ($scope.sortAttribute === 'bytes' && !$scope.sortAsc)) {
             query['sort-attribute'] = attributeName;
@@ -149,13 +161,14 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
         appliedSortAsc = $scope.sortAsc;
     }
 
-    // @see JvmToolbar.html
-    $scope.$on('jvmRrefresh', function () {
-        $scope.refresh();
+
+    $scope.$on('jvmHeapHistogramLimit', function (event, limit) {
+        $scope.ref.filterLimit = limit;
     });
-    
-    $scope.$on('jvmHeapHistogramLimit', function (event, limit) {        
-        $scope.page.filterLimit = limit;
+
+
+    $scope.$on('jvmHeapHistogramFilterValue', function (event, value) {
+        $scope.ref.filterValue = value;
     });
 
     $scope.refresh = function (deferred) {
@@ -199,20 +212,7 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
         return window.innerWidth < 768;
     };
 
-    $scope.filterComparatorOptions = [
-        {
-            display: 'Contains',
-            value: 'contains'
-        },
-        {
-            display: 'Begins with',
-            value: 'begins'
-        },
-        {
-            display: 'Ends with',
-            value: 'ends'
-        }
-    ];
+
 
     function applyFilter() {
         if ($scope.displayedItems === undefined) {
@@ -222,15 +222,18 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
         $scope.limitApplied = false;
         $scope.filteredTotalBytes = 0;
         $scope.filteredTotalCount = 0;
-        if ($scope.page.filterValue === '') {
+        if ($scope.ref.filterValue === '') {
             // optimization
-            $scope.displayedItems = $scope.histogram.items.slice(0, $scope.page.filterLimit);
-            $scope.limitApplied = ($scope.histogram.items.length > $scope.page.filterLimit);
+            $scope.displayedItems = $scope.histogram.items.slice(0, $scope.ref.filterLimit);
+            $scope.limitApplied = ($scope.histogram.items.length > $scope.ref.filterLimit);
             $scope.filteredTotalBytes = $scope.histogram.totalBytes;
             $scope.filteredTotalCount = $scope.histogram.totalCount;
             maxBytes = 0;
             angular.forEach($scope.displayedItems, function (item) {
                 maxBytes = Math.max(maxBytes, item.bytes);
+            });
+            angular.forEach($scope.displayedItems, function (item) {
+                item.percent = (item.bytes / maxBytes) * 100;
             });
             return;
         }
@@ -239,7 +242,7 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
             if (matchesFilter(item.className)) {
-                if ($scope.displayedItems.length < $scope.page.filterLimit) {
+                if ($scope.displayedItems.length < $scope.ref.filterLimit) {
                     $scope.displayedItems.push(item);
                     maxBytes = Math.max(maxBytes, item.bytes);
                 } else {
@@ -249,18 +252,23 @@ function JvmHeapHistogramCtrl($scope, $http, $location, locationChanges, querySt
                 $scope.filteredTotalCount += item.count;
             }
         }
+
+        angular.forEach($scope.displayedItems, function (item) {
+            item.percent = (item.bytes / maxBytes) * 100;
+        });
+
     }
 
     function matchesFilter(className) {
-        if ($scope.page.filterComparator === 'begins') {
-            return className.toLowerCase().indexOf($scope.page.filterValue.toLowerCase()) === 0;
+        if ($scope.ref.filterComparator === 'begins') {
+            return className.toLowerCase().indexOf($scope.ref.filterValue.toLowerCase()) === 0;
         }
-        if ($scope.page.filterComparator === 'ends') {
-            return className.toLowerCase().indexOf($scope.page.filterValue.toLowerCase(),
-                    className.length - $scope.page.filterValue.length) !== -1;
+        if ($scope.ref.filterComparator === 'ends') {
+            return className.toLowerCase().indexOf($scope.ref.filterValue.toLowerCase(),
+                    className.length - $scope.ref.filterValue.length) !== -1;
         }
         // filterComparator === 'contains'
-        return className.toLowerCase().indexOf($scope.page.filterValue.toLowerCase()) !== -1;
+        return className.toLowerCase().indexOf($scope.ref.filterValue.toLowerCase()) !== -1;
     }
 
     $scope.refresh();

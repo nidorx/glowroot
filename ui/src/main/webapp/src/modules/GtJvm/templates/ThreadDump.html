@@ -15,7 +15,21 @@
 -->
 <div ng-controller="JvmThreadDumpCtrl" class="thread-dump-page">
 
-    <div ng-include src="'modules/GtApp/templates/GtHttpErrorOverlay.html'"></div>
+    <!--Toolbar Actions - START-->
+    <gt-toolbar-action>
+        <button class="btn btn-default" ng-click="refresh()">
+            <span class="glyphicon glyphicon-refresh"></span>
+            Refresh
+        </button>
+        <button class="btn btn-primary" ng-click="toggleExpandend()">
+            <span
+                class="glyphicon glyphicon-resize-full"
+                ng-class="{'glyphicon-resize-full':!isExpandend, 'glyphicon-resize-small':isExpandend}"
+                >
+            </span>
+        </button>
+    </gt-toolbar-action>
+    <!--Toolbar Actions - END-->
 
     <div ng-if="agentNotConnected" class="alert alert-danger">
         This feature is only available when the agent is running and connected
@@ -74,7 +88,7 @@
             </ng-include>
         </div>
     </div>
-    
+
     <!-- escape key doesn't close modal in some situations without tabindex="-1"
          in particular, open trace modal, expand trace entries, then expand a concatenated span (one with ...)
          then hit escape key and modal doesn't close (at least not in chrome) -->

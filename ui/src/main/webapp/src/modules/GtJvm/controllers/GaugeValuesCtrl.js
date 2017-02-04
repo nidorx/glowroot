@@ -27,6 +27,9 @@ JvmGaugeValuesCtrl.$inject = [
 function JvmGaugeValuesCtrl($scope, $location, $filter, $http, locationChanges, charts, httpErrors) {
     // Page header
     $scope.page.title = 'JVM - Gauges';
+    $scope.page.subTitle = '';
+    $scope.page.helpPopoverTemplate = 'modules/GtTransaction/templates/help/ChartHelp.html';
+    $scope.page.breadcrumb = null;
 
     if ($scope.hideMainContent()) {
         $scope.buildQueryObject = function () {

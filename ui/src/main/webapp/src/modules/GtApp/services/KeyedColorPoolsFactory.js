@@ -112,7 +112,7 @@ function KeyedColorPoolsFactory() {
                 return color;
             },
             get: function (key) {
-                console.log('key', key, colors[key]);
+                //console.log('key', key, colors[key]);
                 return colors[key];
             },
             remove: function (key) {
