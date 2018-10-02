@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,7 @@
  */
 package org.glowroot.agent.plugin.jdbc;
 
-import java.sql.PreparedStatement;
 import java.util.List;
-
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.QueryEntry;
@@ -27,6 +23,8 @@ import org.glowroot.agent.plugin.api.QueryMessageSupplier;
 import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.Timer;
 import org.glowroot.agent.plugin.api.TimerName;
+import org.glowroot.agent.plugin.api.checker.NonNull;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.config.BooleanProperty;
 import org.glowroot.agent.plugin.api.config.ConfigService;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
@@ -41,6 +39,7 @@ import org.glowroot.agent.plugin.api.weaving.OnBefore;
 import org.glowroot.agent.plugin.api.weaving.OnReturn;
 import org.glowroot.agent.plugin.api.weaving.OnThrow;
 import org.glowroot.agent.plugin.api.weaving.Pointcut;
+import org.glowroot.agent.plugin.api.weaving.Shim;
 import org.glowroot.agent.plugin.jdbc.PreparedStatementMirror.ByteArrayParameterValue;
 import org.glowroot.agent.plugin.jdbc.PreparedStatementMirror.StreamingParameterValue;
 import org.glowroot.agent.plugin.jdbc.message.BatchPreparedStatementMessageSupplier;
@@ -62,35 +61,43 @@ public class StatementAspect {
     private static final BooleanProperty captureStatementClose =
             configService.getBooleanProperty("captureStatementClose");
 
+    @Shim("java.sql.PreparedStatement")
+    public interface PreparedStatement {}
+
     // ===================== Mixin =====================
 
-    // the field and method names are verbose to avoid conflict since they will become fields
-    // and methods in all classes that extend java.sql.Statement or java.sql.ResultSet
+    // the field and method names are verbose since they will be mixed in to existing classes
     @Mixin({"java.sql.Statement", "java.sql.ResultSet"})
     public static class HasStatementMirrorImpl implements HasStatementMirror {
+
         // does not need to be volatile, app/framework must provide visibility of Statements and
         // ResultSets if used across threads and this can piggyback
-        private @Nullable StatementMirror glowroot$statementMirror;
+        private transient @Nullable StatementMirror glowroot$statementMirror;
+
         @Override
         public @Nullable StatementMirror glowroot$getStatementMirror() {
             return glowroot$statementMirror;
         }
+
         @Override
         public void glowroot$setStatementMirror(@Nullable StatementMirror statementMirror) {
-            this.glowroot$statementMirror = statementMirror;
+            glowroot$statementMirror = statementMirror;
         }
+
         @Override
         public boolean glowroot$hasStatementMirror() {
             return glowroot$statementMirror != null;
         }
     }
 
-    // the method names are verbose to avoid conflict since they will become methods in all classes
-    // that extend java.sql.Statement or java.sql.ResultSet
+    // the method names are verbose since they will be mixed in to existing classes
     public interface HasStatementMirror {
+
         @Nullable
         StatementMirror glowroot$getStatementMirror();
+
         void glowroot$setStatementMirror(@Nullable StatementMirror statementMirror);
+
         boolean glowroot$hasStatementMirror();
     }
 
@@ -151,7 +158,7 @@ public class StatementAspect {
         }
         @OnReturn
         public static void onReturn(@BindReceiver HasStatementMirror preparedStatement,
-                @BindParameter int parameterIndex, @BindParameter byte/*@Nullable*/[] x) {
+                @BindParameter int parameterIndex, @BindParameter byte /*@Nullable*/ [] x) {
             PreparedStatementMirror mirror =
                     (PreparedStatementMirror) preparedStatement.glowroot$getStatementMirror();
             if (mirror != null) {
@@ -298,15 +305,15 @@ public class StatementAspect {
                 return null;
             }
             QueryEntry query = context.startQueryEntry(QUERY_TYPE, sql,
-                    QueryMessageSupplier.create("jdbc execution: "), timerName);
-            mirror.setLastQuery(query);
+                    QueryMessageSupplier.create("jdbc execute: "), timerName);
+            mirror.setLastQueryEntry(query);
             return query;
         }
         @OnReturn
         public static void onReturn(@BindTraveler @Nullable QueryEntry queryEntry) {
             if (queryEntry != null) {
-                queryEntry.endWithStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
-                        MILLISECONDS);
+                queryEntry.endWithLocationStackTrace(
+                        JdbcPluginProperties.stackTraceThresholdMillis(), MILLISECONDS);
             }
         }
         @OnThrow
@@ -320,7 +327,7 @@ public class StatementAspect {
 
     @Pointcut(className = "java.sql.Statement", methodName = "executeQuery",
             methodParameterTypes = {"java.lang.String"}, methodReturnType = "java.sql.ResultSet",
-            nestingGroup = "jdbc", timerName = "jdbc execute")
+            nestingGroup = "jdbc")
     public static class StatementExecuteQueryAdvice {
         @IsEnabled
         public static boolean isEnabled(@BindReceiver HasStatementMirror statement) {
@@ -344,8 +351,8 @@ public class StatementAspect {
                 resultSet.glowroot$setStatementMirror(mirror);
             }
             if (queryEntry != null) {
-                queryEntry.endWithStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
-                        MILLISECONDS);
+                queryEntry.endWithLocationStackTrace(
+                        JdbcPluginProperties.stackTraceThresholdMillis(), MILLISECONDS);
             }
         }
         @OnThrow
@@ -359,7 +366,7 @@ public class StatementAspect {
 
     @Pointcut(className = "java.sql.Statement", methodName = "executeUpdate",
             methodParameterTypes = {"java.lang.String", ".."}, methodReturnType = "int",
-            nestingGroup = "jdbc", timerName = "jdbc execute")
+            nestingGroup = "jdbc")
     public static class StatementExecuteUpdateAdvice {
         @IsEnabled
         public static boolean isEnabled(@BindReceiver HasStatementMirror statement) {
@@ -375,8 +382,8 @@ public class StatementAspect {
                 @BindTraveler @Nullable QueryEntry queryEntry) {
             if (queryEntry != null) {
                 queryEntry.setCurrRow(rowCount);
-                queryEntry.endWithStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
-                        MILLISECONDS);
+                queryEntry.endWithLocationStackTrace(
+                        JdbcPluginProperties.stackTraceThresholdMillis(), MILLISECONDS);
             }
         }
         @OnThrow
@@ -401,25 +408,24 @@ public class StatementAspect {
         public static QueryEntry onBefore(ThreadContext context,
                 @BindReceiver HasStatementMirror preparedStatement) {
             @SuppressWarnings("nullness") // just checked above in isEnabled()
-            @Nonnull
+            @NonNull
             PreparedStatementMirror mirror =
                     (PreparedStatementMirror) preparedStatement.glowroot$getStatementMirror();
             QueryMessageSupplier queryMessageSupplier;
             String queryText = mirror.getSql();
             if (captureBindParameters.value()) {
-                queryMessageSupplier =
-                        new PreparedStatementMessageSupplier(mirror.getParametersCopy());
+                queryMessageSupplier = new PreparedStatementMessageSupplier(mirror.getParameters());
             } else {
-                queryMessageSupplier = QueryMessageSupplier.create("jdbc execution: ");
+                queryMessageSupplier = QueryMessageSupplier.create("jdbc execute: ");
             }
             QueryEntry queryEntry =
                     context.startQueryEntry(QUERY_TYPE, queryText, queryMessageSupplier, timerName);
-            mirror.setLastQuery(queryEntry);
+            mirror.setLastQueryEntry(queryEntry);
             return queryEntry;
         }
         @OnReturn
         public static void onReturn(@BindTraveler QueryEntry queryEntry) {
-            queryEntry.endWithStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
+            queryEntry.endWithLocationStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
                     MILLISECONDS);
         }
         @OnThrow
@@ -431,7 +437,7 @@ public class StatementAspect {
 
     @Pointcut(className = "java.sql.PreparedStatement", methodName = "executeQuery",
             methodParameterTypes = {}, methodReturnType = "java.sql.ResultSet",
-            nestingGroup = "jdbc", timerName = "jdbc execute")
+            nestingGroup = "jdbc")
     public static class PreparedStatementExecuteQueryAdvice {
         @IsEnabled
         public static boolean isEnabled(@BindReceiver HasStatementMirror preparedStatement) {
@@ -454,7 +460,7 @@ public class StatementAspect {
                 StatementMirror mirror = preparedStatement.glowroot$getStatementMirror();
                 resultSet.glowroot$setStatementMirror(mirror);
             }
-            queryEntry.endWithStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
+            queryEntry.endWithLocationStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
                     MILLISECONDS);
         }
         @OnThrow
@@ -465,8 +471,7 @@ public class StatementAspect {
     }
 
     @Pointcut(className = "java.sql.PreparedStatement", methodName = "executeUpdate",
-            methodParameterTypes = {}, methodReturnType = "int", nestingGroup = "jdbc",
-            timerName = "jdbc execute")
+            methodParameterTypes = {}, methodReturnType = "int", nestingGroup = "jdbc")
     public static class PreparedStatementExecuteUpdateAdvice {
         @IsEnabled
         public static boolean isEnabled(@BindReceiver HasStatementMirror preparedStatement) {
@@ -481,7 +486,7 @@ public class StatementAspect {
         public static void onReturn(@BindReturn int rowCount,
                 @BindTraveler QueryEntry queryEntry) {
             queryEntry.setCurrRow(rowCount);
-            queryEntry.endWithStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
+            queryEntry.endWithLocationStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
                     MILLISECONDS);
         }
         @OnThrow
@@ -504,7 +509,7 @@ public class StatementAspect {
         public static QueryEntry onBefore(ThreadContext context,
                 @BindReceiver HasStatementMirror statement) {
             @SuppressWarnings("nullness") // just checked above in isEnabled()
-            @Nonnull
+            @NonNull
             StatementMirror mirror = statement.glowroot$getStatementMirror();
             if (statement instanceof PreparedStatement) {
                 return onBeforePreparedStatement(context, (PreparedStatementMirror) mirror);
@@ -516,11 +521,18 @@ public class StatementAspect {
         public static void onReturn(@BindReturn int[] rowCounts,
                 @BindTraveler QueryEntry queryEntry) {
             int totalRowCount = 0;
+            boolean count = false;
             for (int rowCount : rowCounts) {
-                totalRowCount += rowCount;
+                if (rowCount > 0) {
+                    // ignore Statement.SUCCESS_NO_INFO (-2) and Statement.EXECUTE_FAILED (-3)
+                    totalRowCount += rowCount;
+                    count = true;
+                }
             }
-            queryEntry.setCurrRow(totalRowCount);
-            queryEntry.endWithStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
+            if (count) {
+                queryEntry.setCurrRow(totalRowCount);
+            }
+            queryEntry.endWithLocationStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
                     MILLISECONDS);
         }
         @OnThrow
@@ -533,15 +545,19 @@ public class StatementAspect {
             QueryMessageSupplier queryMessageSupplier;
             String queryText = mirror.getSql();
             int batchSize = mirror.getBatchSize();
-            if (captureBindParameters.value()) {
-                queryMessageSupplier =
-                        new BatchPreparedStatementMessageSupplier(mirror.getBatchedParameters());
+            if (batchSize <= 0) {
+                queryText = "[empty batch] " + queryText;
+                queryMessageSupplier = QueryMessageSupplier.create("jdbc execute: ");
+                batchSize = 1;
+            } else if (captureBindParameters.value()) {
+                queryMessageSupplier = new BatchPreparedStatementMessageSupplier(
+                        mirror.getBatchedParameters(), batchSize);
             } else {
                 queryMessageSupplier = new BatchPreparedStatementMessageSupplier2(batchSize);
             }
             QueryEntry queryEntry = context.startQueryEntry(QUERY_TYPE, queryText, batchSize,
                     queryMessageSupplier, timerName);
-            mirror.setLastQuery(queryEntry);
+            mirror.setLastQueryEntry(queryEntry);
             mirror.clearBatch();
             return queryEntry;
         }
@@ -563,8 +579,8 @@ public class StatementAspect {
                 concatenated = sb.toString();
             }
             QueryEntry queryEntry = context.startQueryEntry(QUERY_TYPE, concatenated,
-                    QueryMessageSupplier.create("jdbc execution: "), timerName);
-            mirror.setLastQuery(queryEntry);
+                    QueryMessageSupplier.create("jdbc execute: "), timerName);
+            mirror.setLastQueryEntry(queryEntry);
             mirror.clearBatch();
             return queryEntry;
         }
@@ -572,9 +588,9 @@ public class StatementAspect {
 
     // ================== Additional ResultSet Tracking ==================
 
-    @Pointcut(className = "java.sql.Statement", methodName = "getResultSet|getGeneratedKeys",
+    @Pointcut(className = "java.sql.Statement", methodName = "getResultSet",
             methodParameterTypes = {".."}, methodReturnType = "java.sql.ResultSet")
-    public static class StatementReturnResultSetAdvice {
+    public static class StatementGetResultSetAdvice {
         @IsEnabled
         public static boolean isEnabled(@BindReceiver HasStatementMirror statement) {
             return statement.glowroot$hasStatementMirror();
@@ -606,7 +622,7 @@ public class StatementAspect {
             StatementMirror mirror = statement.glowroot$getStatementMirror();
             if (mirror != null) {
                 // this should always be true since just checked hasGlowrootStatementMirror() above
-                mirror.clearLastQuery();
+                mirror.clearLastQueryEntry();
             }
             if (captureStatementClose.value()) {
                 return context.startTimer(timerName);

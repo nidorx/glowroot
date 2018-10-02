@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,6 @@ import java.util.Hashtable;
 import java.util.List;
 import java.util.Set;
 
-import javax.annotation.Nullable;
-import javax.crypto.SecretKey;
 import javax.naming.Context;
 import javax.naming.NamingEnumeration;
 import javax.naming.NamingException;
@@ -30,17 +28,19 @@ import javax.naming.ldap.InitialLdapContext;
 import javax.naming.ldap.LdapContext;
 
 import com.google.common.collect.Sets;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 
-import org.glowroot.common.config.LdapConfig;
-import org.glowroot.common.repo.util.Encryption;
+import org.glowroot.agent.api.Instrumentation;
+import org.glowroot.common2.config.LdapConfig;
+import org.glowroot.common2.repo.util.Encryption;
+import org.glowroot.common2.repo.util.LazySecretKey;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
 class LdapAuthentication {
 
-    static Set<String> getGlowrootRoles(Set<String> ldapGroupDns, LdapConfig ldapConfig)
-            throws NamingException {
+    static Set<String> getGlowrootRoles(Set<String> ldapGroupDns, LdapConfig ldapConfig) {
         Set<String> glowrootRoles = Sets.newHashSet();
         for (String ldapGroupDn : ldapGroupDns) {
             List<String> roles = ldapConfig.roleMappings().get(ldapGroupDn);
@@ -51,13 +51,14 @@ class LdapAuthentication {
         return glowrootRoles;
     }
 
+    // optional newPlainPassword can be passed in to test LDAP from
+    // AdminJsonService.testLdapConnection() without possibility of throwing
+    // org.glowroot.common.repo.util.LazySecretKey.SymmetricEncryptionKeyMissingException
     static Set<String> authenticateAndGetLdapGroupDns(String username, String password,
-            LdapConfig ldapConfig, SecretKey secretKey) throws Exception {
+            LdapConfig ldapConfig, @Nullable String passwordOverride, LazySecretKey lazySecretKey)
+            throws Exception {
         String systemUsername = ldapConfig.username();
-        String systemPassword = ldapConfig.password();
-        if (!systemPassword.isEmpty()) {
-            systemPassword = Encryption.decrypt(systemPassword, secretKey);
-        }
+        String systemPassword = getPassword(ldapConfig, passwordOverride, lazySecretKey);
         LdapContext ldapContext;
         try {
             ldapContext = createLdapContext(systemUsername, systemPassword, ldapConfig);
@@ -92,37 +93,57 @@ class LdapAuthentication {
         return new InitialLdapContext(env, null);
     }
 
+    private static String getPassword(LdapConfig ldapConfig, @Nullable String passwordOverride,
+            LazySecretKey lazySecretKey) throws Exception {
+        if (passwordOverride != null) {
+            return passwordOverride;
+        }
+        String password = ldapConfig.password();
+        if (password.isEmpty()) {
+            return "";
+        }
+        return Encryption.decrypt(password, lazySecretKey);
+    }
+
+    @Instrumentation.TraceEntry(message = "get ldap user DN for username: {{1}}", timer = "ldap")
     private static @Nullable String getUserDn(LdapContext ldapContext, String username,
             LdapConfig ldapConfig) throws NamingException {
         SearchControls searchCtls = new SearchControls();
         searchCtls.setSearchScope(SearchControls.SUBTREE_SCOPE);
         NamingEnumeration<?> namingEnum = ldapContext.search(ldapConfig.userBaseDn(),
                 ldapConfig.userSearchFilter(), new String[] {username}, searchCtls);
-        if (!namingEnum.hasMore()) {
-            return null;
+        try {
+            if (!namingEnum.hasMore()) {
+                return null;
+            }
+            SearchResult result = (SearchResult) checkNotNull(namingEnum.next());
+            String userDn = result.getNameInNamespace();
+            if (namingEnum.hasMore()) {
+                throw new IllegalStateException("More than matching user: " + username);
+            }
+            return userDn;
+        } finally {
+            namingEnum.close();
         }
-        SearchResult result = (SearchResult) checkNotNull(namingEnum.next());
-        String userDn = result.getNameInNamespace();
-        if (namingEnum.hasMore()) {
-            throw new IllegalStateException("More than matching user: " + username);
-        }
-        namingEnum.close();
-        return userDn;
     }
 
+    @Instrumentation.TraceEntry(message = "get ldap group DNs for user DN: {{1}}", timer = "ldap")
     private static Set<String> getGroupDnsForUserDn(LdapContext ldapContext, String userDn,
             LdapConfig ldapConfig) throws NamingException {
         SearchControls searchCtls = new SearchControls();
         searchCtls.setSearchScope(SearchControls.SUBTREE_SCOPE);
         NamingEnumeration<?> namingEnum = ldapContext.search(ldapConfig.groupBaseDn(),
                 ldapConfig.groupSearchFilter(), new String[] {userDn}, searchCtls);
-        Set<String> ldapGroups = Sets.newHashSet();
-        while (namingEnum.hasMore()) {
-            SearchResult result = (SearchResult) checkNotNull(namingEnum.next());
-            ldapGroups.add(result.getNameInNamespace());
+        try {
+            Set<String> ldapGroups = Sets.newHashSet();
+            while (namingEnum.hasMore()) {
+                SearchResult result = (SearchResult) checkNotNull(namingEnum.next());
+                ldapGroups.add(result.getNameInNamespace());
+            }
+            return ldapGroups;
+        } finally {
+            namingEnum.close();
         }
-        namingEnum.close();
-        return ldapGroups;
     }
 
     @Value.Immutable
@@ -138,11 +159,11 @@ class LdapAuthentication {
             super(message);
         }
 
-        AuthenticationException(Throwable cause) {
+        private AuthenticationException(Throwable cause) {
             super(cause);
         }
 
-        AuthenticationException(String message, @Nullable Throwable cause) {
+        private AuthenticationException(String message, @Nullable Throwable cause) {
             super(message, cause);
         }
     }

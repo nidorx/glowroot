@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,32 +17,32 @@ package org.glowroot.agent.live;
 
 import java.io.IOException;
 import java.util.List;
-
-import javax.annotation.Nullable;
+import java.util.Set;
 
 import com.google.common.collect.Lists;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 import org.glowroot.agent.impl.AggregateIntervalCollector;
-import org.glowroot.agent.impl.Aggregator;
+import org.glowroot.agent.impl.TransactionProcessor;
 import org.glowroot.common.live.LiveAggregateRepository;
 import org.glowroot.common.model.OverallErrorSummaryCollector;
 import org.glowroot.common.model.OverallSummaryCollector;
 import org.glowroot.common.model.ProfileCollector;
 import org.glowroot.common.model.QueryCollector;
 import org.glowroot.common.model.ServiceCallCollector;
-import org.glowroot.common.model.TransactionErrorSummaryCollector;
-import org.glowroot.common.model.TransactionSummaryCollector;
+import org.glowroot.common.model.TransactionNameErrorSummaryCollector;
+import org.glowroot.common.model.TransactionNameSummaryCollector;
 
 public class LiveAggregateRepositoryImpl implements LiveAggregateRepository {
 
-    private final Aggregator aggregator;
+    private final TransactionProcessor aggregator;
 
-    public LiveAggregateRepositoryImpl(Aggregator aggregator) {
+    public LiveAggregateRepositoryImpl(TransactionProcessor aggregator) {
         this.aggregator = aggregator;
     }
 
     @Override
-    public long mergeInOverallSummary(String agentId, OverallQuery query,
+    public long mergeInOverallSummary(String agentId, SummaryQuery query,
             OverallSummaryCollector collector) {
         List<AggregateIntervalCollector> intervalCollectors =
                 aggregator.getOrderedIntervalCollectorsInRange(query.from(), query.to());
@@ -55,20 +55,20 @@ public class LiveAggregateRepositoryImpl implements LiveAggregateRepository {
     }
 
     @Override
-    public long mergeInTransactionSummaries(String agentId, OverallQuery query,
-            TransactionSummaryCollector collector) {
+    public long mergeInTransactionNameSummaries(String agentId, SummaryQuery query,
+            TransactionNameSummaryCollector collector) {
         List<AggregateIntervalCollector> intervalCollectors =
                 aggregator.getOrderedIntervalCollectorsInRange(query.from(), query.to());
         long revisedTo = query.to();
         for (AggregateIntervalCollector intervalCollector : intervalCollectors) {
-            intervalCollector.mergeTransactionSummariesInto(collector, query.transactionType());
+            intervalCollector.mergeTransactionNameSummariesInto(collector, query.transactionType());
             revisedTo = Math.min(revisedTo, intervalCollector.getCaptureTime() - 1);
         }
         return revisedTo;
     }
 
     @Override
-    public long mergeInOverallErrorSummary(String agentId, OverallQuery query,
+    public long mergeInOverallErrorSummary(String agentId, SummaryQuery query,
             OverallErrorSummaryCollector collector) {
         List<AggregateIntervalCollector> intervalCollectors =
                 aggregator.getOrderedIntervalCollectorsInRange(query.from(), query.to());
@@ -81,13 +81,13 @@ public class LiveAggregateRepositoryImpl implements LiveAggregateRepository {
     }
 
     @Override
-    public long mergeInTransactionErrorSummaries(String agentId, OverallQuery query,
-            TransactionErrorSummaryCollector collector) {
+    public long mergeInTransactionNameErrorSummaries(String agentId, SummaryQuery query,
+            TransactionNameErrorSummaryCollector collector) {
         List<AggregateIntervalCollector> intervalCollectors =
                 aggregator.getOrderedIntervalCollectorsInRange(query.from(), query.to());
         long revisedTo = query.to();
         for (AggregateIntervalCollector intervalCollector : intervalCollectors) {
-            intervalCollector.mergeTransactionErrorSummariesInto(collector,
+            intervalCollector.mergeTransactionNameErrorSummariesInto(collector,
                     query.transactionType());
             revisedTo = Math.min(revisedTo, intervalCollector.getCaptureTime() - 1);
         }
@@ -95,8 +95,13 @@ public class LiveAggregateRepositoryImpl implements LiveAggregateRepository {
     }
 
     @Override
+    public Set<String> getTransactionTypes(String agentId) {
+        return aggregator.getTransactionTypes();
+    }
+
+    @Override
     public @Nullable LiveResult<OverviewAggregate> getOverviewAggregates(String agentId,
-            TransactionQuery query) {
+            AggregateQuery query) {
         List<AggregateIntervalCollector> intervalCollectors =
                 aggregator.getOrderedIntervalCollectorsInRange(query.from(), query.to());
         if (intervalCollectors.isEmpty()) {
@@ -117,7 +122,7 @@ public class LiveAggregateRepositoryImpl implements LiveAggregateRepository {
 
     @Override
     public @Nullable LiveResult<PercentileAggregate> getPercentileAggregates(String agentId,
-            TransactionQuery query) {
+            AggregateQuery query) {
         List<AggregateIntervalCollector> intervalCollectors =
                 aggregator.getOrderedIntervalCollectorsInRange(query.from(), query.to());
         if (intervalCollectors.isEmpty()) {
@@ -138,7 +143,7 @@ public class LiveAggregateRepositoryImpl implements LiveAggregateRepository {
 
     @Override
     public @Nullable LiveResult<ThroughputAggregate> getThroughputAggregates(String agentId,
-            TransactionQuery query) {
+            AggregateQuery query) {
         List<AggregateIntervalCollector> intervalCollectors =
                 aggregator.getOrderedIntervalCollectorsInRange(query.from(), query.to());
         if (intervalCollectors.isEmpty()) {
@@ -171,7 +176,7 @@ public class LiveAggregateRepositoryImpl implements LiveAggregateRepository {
     }
 
     @Override
-    public long mergeInQueries(String agentId, TransactionQuery query, QueryCollector collector)
+    public long mergeInQueries(String agentId, AggregateQuery query, QueryCollector collector)
             throws IOException {
         List<AggregateIntervalCollector> intervalCollectors =
                 aggregator.getOrderedIntervalCollectorsInRange(query.from(), query.to());
@@ -185,9 +190,8 @@ public class LiveAggregateRepositoryImpl implements LiveAggregateRepository {
     }
 
     @Override
-    public long mergeInServiceCalls(String agentId, TransactionQuery query,
-            ServiceCallCollector collector)
-            throws IOException {
+    public long mergeInServiceCalls(String agentId, AggregateQuery query,
+            ServiceCallCollector collector) throws IOException {
         List<AggregateIntervalCollector> intervalCollectors =
                 aggregator.getOrderedIntervalCollectorsInRange(query.from(), query.to());
         long revisedTo = query.to();
@@ -200,7 +204,7 @@ public class LiveAggregateRepositoryImpl implements LiveAggregateRepository {
     }
 
     @Override
-    public long mergeInMainThreadProfiles(String agentId, TransactionQuery query,
+    public long mergeInMainThreadProfiles(String agentId, AggregateQuery query,
             ProfileCollector collector) {
         List<AggregateIntervalCollector> intervalCollectors =
                 aggregator.getOrderedIntervalCollectorsInRange(query.from(), query.to());
@@ -214,7 +218,7 @@ public class LiveAggregateRepositoryImpl implements LiveAggregateRepository {
     }
 
     @Override
-    public long mergeInAuxThreadProfiles(String agentId, TransactionQuery query,
+    public long mergeInAuxThreadProfiles(String agentId, AggregateQuery query,
             ProfileCollector collector) {
         List<AggregateIntervalCollector> intervalCollectors =
                 aggregator.getOrderedIntervalCollectorsInRange(query.from(), query.to());
@@ -228,7 +232,7 @@ public class LiveAggregateRepositoryImpl implements LiveAggregateRepository {
     }
 
     @Override
-    public void clearInMemoryAggregate() {
-        aggregator.clearInMemoryAggregate();
+    public void clearInMemoryData() {
+        aggregator.clearInMemoryData();
     }
 }

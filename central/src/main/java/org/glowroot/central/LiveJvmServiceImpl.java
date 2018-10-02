@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ class LiveJvmServiceImpl implements LiveJvmService {
     }
 
     @Override
-    public boolean isAvailable(String agentId) {
+    public boolean isAvailable(String agentId) throws Exception {
         return downstreamService.isAvailable(agentId);
     }
 
@@ -66,8 +66,13 @@ class LiveJvmServiceImpl implements LiveJvmService {
     }
 
     @Override
-    public void gc(String agentId) throws Exception {
-        downstreamService.gc(agentId);
+    public boolean isExplicitGcDisabled(String agentId) throws Exception {
+        return downstreamService.isExplicitGcDisabled(agentId);
+    }
+
+    @Override
+    public void forceGC(String agentId) throws Exception {
+        downstreamService.forceGC(agentId);
     }
 
     @Override
@@ -84,7 +89,14 @@ class LiveJvmServiceImpl implements LiveJvmService {
 
     @Override
     public MBeanMeta getMBeanMeta(String agentId, String objectName) throws Exception {
-        return downstreamService.mbeanMeta(agentId, objectName);
+        MBeanMeta mbeanMeta = downstreamService.mbeanMeta(agentId, objectName);
+        if (mbeanMeta.getUnavailableOld()) {
+            // agent version prior to 0.12.0
+            return mbeanMeta.toBuilder()
+                    .setNoMatchFound(true)
+                    .build();
+        }
+        return mbeanMeta;
     }
 
     @Override

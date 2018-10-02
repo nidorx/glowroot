@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2017 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,23 +14,18 @@
  * limitations under the License.
  */
 
-/* global glowroot */
+/* global glowroot, $ */
 
 glowroot.controller('ConfigCtrl', [
   '$scope',
   '$location',
-  function ($scope, $location) {
+  '$http',
+  '$timeout',
+  'queryStrings',
+  function ($scope, $location, $http, $timeout) {
     // \u00b7 is &middot;
     document.title = 'Configuration \u00b7 Glowroot';
     $scope.$parent.activeNavbarItem = 'gears';
-
-    $scope.hideAgentRollupDropdown = function () {
-      if (!$scope.layout) {
-        // this is ok, under grunt serve and layout hasn't loaded yet
-        return true;
-      }
-      return $scope.layout.agentRollups.length === 1;
-    };
 
     $scope.hideMainContent = function () {
       return $scope.layout.central && !$scope.agentRollupId && !$scope.agentId;
@@ -64,14 +59,64 @@ glowroot.controller('ConfigCtrl', [
       return $location.path().substring(1);
     };
 
-    $scope.$on('$stateChangeSuccess', function () {
-      // don't let the active sidebar selection get out of sync (which can happen after using the back button)
-      if (document.activeElement) {
-        var gtUrl = document.activeElement.getAttribute('gt-url');
-        if (gtUrl && gtUrl !== $location.path().substring(1)) {
-          document.activeElement.blur();
+    function agentRollupUrl(path, agentRollupId) {
+      if ($scope.isRollup(agentRollupId)) {
+        return path + '?agent-rollup-id=' + encodeURIComponent(agentRollupId);
+      } else {
+        return path + '?agent-id=' + encodeURIComponent(agentRollupId);
+      }
+    }
+
+    $scope.agentRollupUrl = function (agentRollupId) {
+      var path = $location.path().substring(1);
+      if (path === 'config/gauge') {
+        path = 'config/gauge-list';
+      } else if (path === 'config/synthetic-monitor') {
+        path = 'config/synthetic-monitor-list';
+      } else if (path === 'config/alert') {
+        path = 'config/alert-list';
+      } else if (path === 'config/plugin') {
+        path = 'config/plugin-list';
+      } else if (path === 'config/instrumentation') {
+        path = 'config/instrumentation-list';
+      }
+      if ($scope.isRollup(agentRollupId)) {
+        if (path !== 'config/general' && path !== 'config/synthetic-monitor-list' && path !== 'config/alert-list'
+            && path !== 'config/ui-defaults' && path !== 'config/advanced') {
+          path = 'config/general';
         }
       }
-    });
+      return agentRollupUrl(path, agentRollupId);
+    };
+
+    if ($scope.layout.central) {
+
+      $scope.$watch(function () {
+        return $location.search();
+      }, function (newValue, oldValue) {
+        if (newValue !== oldValue) {
+          // need to refresh selectpicker in order to update hrefs of the items
+          $timeout(function () {
+            // timeout is needed so this runs after dom is updated
+            $('#agentRollupDropdown').selectpicker('refresh');
+          });
+        }
+      }, true);
+
+      var refreshAgentRollups = function () {
+        var now = new Date().getTime();
+        var from = now - 7 * 24 * 60 * 60 * 1000;
+        // looking to the future just to be safe
+        var to = now + 7 * 24 * 60 * 60 * 1000;
+        $scope.refreshAgentRollups(from, to, $scope);
+      };
+
+      // the show.bs.dropdown event target is the button which is a sibling of the select
+      $('#agentRollupDropdown').parent().on('show.bs.dropdown', refreshAgentRollups);
+
+      if ($scope.agentRollups === undefined) {
+        refreshAgentRollups();
+      }
+    }
   }
 ]);

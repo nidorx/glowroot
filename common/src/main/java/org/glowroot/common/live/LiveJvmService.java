@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ import org.glowroot.wire.api.model.DownstreamServiceOuterClass.ThreadDump;
 
 public interface LiveJvmService {
 
-    boolean isAvailable(String agentId);
+    boolean isAvailable(String agentId) throws Exception;
 
     ThreadDump getThreadDump(String agentId) throws Exception;
 
@@ -40,7 +40,9 @@ public interface LiveJvmService {
 
     HeapHistogram heapHistogram(String agentId) throws Exception;
 
-    void gc(String agentId) throws Exception;
+    boolean isExplicitGcDisabled(String agentId) throws Exception;
+
+    void forceGC(String agentId) throws Exception;
 
     MBeanDump getMBeanDump(String agentId, MBeanDumpKind mbeanDumpKind, List<String> objectNames)
             throws Exception;
@@ -62,6 +64,9 @@ public interface LiveJvmService {
 
     @SuppressWarnings("serial")
     public class UnavailableDueToRunningInJreException extends Exception {}
+
+    @SuppressWarnings("serial")
+    public class UnavailableDueToRunningInIbmJvmException extends Exception {}
 
     @SuppressWarnings("serial")
     public class DirectoryDoesNotExistException extends Exception {}

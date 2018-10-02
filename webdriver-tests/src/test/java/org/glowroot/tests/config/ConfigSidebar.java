@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2016 the original author or authors.
+ * Copyright 2013-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import org.openqa.selenium.WebElement;
 import org.glowroot.tests.util.Utils;
 
 import static org.openqa.selenium.By.cssSelector;
-import static org.openqa.selenium.By.linkText;
 
 public class ConfigSidebar {
 
@@ -31,59 +30,68 @@ public class ConfigSidebar {
         this.driver = driver;
     }
 
-    public WebElement getGaugesLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Gauges"));
+    public void clickTransactionsLink() {
+        clickWithWait("Transactions");
     }
 
-    public WebElement getAlertsLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Alerts"));
+    public void clickGaugesLink() {
+        clickWithWait("Gauges");
     }
 
-    public WebElement getUiLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("UI"));
+    public void clickJvmLink() {
+        clickWithWait("JVM");
     }
 
-    public WebElement getPluginsLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Plugins"));
+    public void clickAlertsLink() {
+        clickWithWait("Alerts");
     }
 
-    public WebElement getInstrumentationLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Instrumentation"));
+    public void clickUiDefaultsLink() {
+        clickWithWait("UI Defaults");
     }
 
-    public WebElement getAdvancedLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Advanced"));
+    public void clickPluginsLink() {
+        clickWithWait("Plugins");
     }
 
-    public WebElement getUsersLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Users"));
+    public void clickInstrumentationLink() {
+        clickWithWait("Instrumentation");
     }
 
-    public WebElement getRolesLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Roles"));
+    public void clickAdvancedLink() {
+        clickWithWait("Advanced");
     }
 
-    public WebElement getWebLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Web"));
+    public void clickUsersLink() {
+        clickWithWait("Users");
     }
 
-    public WebElement getStorageLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Storage"));
+    public void clickRolesLink() {
+        clickWithWait("Roles");
     }
 
-    public WebElement getSmtpLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("SMTP"));
+    public void clickWebLink() {
+        clickWithWait("Web");
     }
 
-    public WebElement getLdapLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("LDAP"));
+    public void clickStorageLink() {
+        clickWithWait("Storage");
     }
 
-    public WebElement getChangePasswordLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Change my password"));
+    public void clickSmtpLink() {
+        clickWithWait("SMTP");
     }
 
-    private WebElement getSidebar() {
-        return Utils.withWait(driver, cssSelector("div.gt-sidebar"));
+    public void clickIntegrationsLink() {
+        clickWithWait("Integrations");
+    }
+
+    public void clickChangePasswordLink() {
+        clickWithWait("Change my password");
+    }
+
+    private void clickWithWait(String linkText) {
+        WebElement sidebar = Utils.getWithWait(driver, cssSelector("div.gt-sidebar"));
+        Utils.clickWithWait(driver, sidebar, Utils.linkText(linkText));
     }
 }

@@ -1,0 +1,73 @@
+/*
+ * Copyright 2012-2018 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// TODO fix modal scrolling on mobile devices, see https://github.com/twbs/bootstrap/issues/24737
+
+.gt-full-width-modal {
+  // this is to override padding-right that bootstrap modal (unnecessarily) adds for scrollbar
+  padding-right: 0 !important;
+}
+
+.gt-full-width-modal .modal-dialog {
+  width: calc(100% - (1.75rem * 2));
+  max-width: inherit; // override max-width from bootstrap
+}
+
+.gt-full-width-modal.modal .close {
+  position: absolute;
+  right: 25px;
+  top: 20px;
+}
+
+.gt-full-height-modal .modal-dialog {
+  align-items: inherit !important; // override align-items from bootstrap to make it fill available height
+}
+
+#queryModal .gt-clip {
+  position: absolute;
+  right: 26px;
+  top: 50px;
+  z-index: 100;
+  color: #7f7f7f;
+}
+
+.modal .close {
+  z-index: 100;
+  // override bootstrap styling for modal close icon
+  // important: IE9 (haven't tried other IE versions) has strange behavior after hovering over and
+  // out of close button
+  // this override is no longer applied and the button gets too light (default bootstrap opacity .2)
+  // so bootstrap close.scss is duplicated/modified to handle this
+  opacity: .42 !important; // just enough opacity to meet accessibility contrast ratio
+  font-size: 24px !important;
+}
+
+// override bootstrap styling for modal close icon
+.modal .close:hover, .modal .close:focus {
+  opacity: .62 !important;
+}
+
+@include media-breakpoint-up(lg) {
+  .gt-trace-timer-table {
+    max-width: 80%;
+  }
+}
+
+@media screen and (min-width: 1400px) {
+  .gt-trace-timer-table {
+    max-width: 85%;
+  }
+}

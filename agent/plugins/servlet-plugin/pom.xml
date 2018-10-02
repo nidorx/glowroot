@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
     <groupId>org.glowroot</groupId>
     <artifactId>glowroot-parent</artifactId>
-    <version>0.9.9</version>
+    <version>0.11.1</version>
     <relativePath>../../..</relativePath>
   </parent>
 
@@ -23,26 +24,6 @@
       <scope>provided</scope>
     </dependency>
     <dependency>
-      <!-- guava library is shaded below so that the plugin can use the guava library that is
-        already shaded and embedded inside glowroot-agent -->
-      <groupId>com.google.guava</groupId>
-      <artifactId>guava</artifactId>
-      <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>${checker.qual.group.id}</groupId>
-      <artifactId>${checker.qual.artifact.id}</artifactId>
-      <version>${checker.qual.version}</version>
-      <!-- don't need this dependency at runtime since only annotations -->
-      <optional>true</optional>
-    </dependency>
-    <dependency>
-      <groupId>com.google.code.findbugs</groupId>
-      <artifactId>jsr305</artifactId>
-      <!-- don't need this dependency at runtime since only annotations -->
-      <optional>true</optional>
-    </dependency>
-    <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
       <scope>test</scope>
@@ -53,9 +34,8 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>org.glowroot</groupId>
-      <artifactId>glowroot-agent-it-harness</artifactId>
-      <version>${project.version}</version>
+      <groupId>com.google.guava</groupId>
+      <artifactId>guava</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -79,9 +59,30 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <!-- this is needed because logback classic 1.1.10+ contains
+        META-INF/services/javax.servlet.ServletContainerInitializer which causes issues when running
+        tests with embedded tomcat inside JavaagentContainer because logback is loaded in the
+        bootstrap class loader (see JavaagentContainer.java) and so
+        LogbackServletContainerInitializer is loaded in the bootstrap class loader which then
+        looks for ServletContainerInitializer in the bootstrap class loader, but it is not, and
+        adding tomcat-embed-core (which has ServletContainerInitializer) to the bootstrap class
+        loader causes NullPointerException in org.apache.catalina.startup.ContextConfig
+
+        to get around this problem, javax.servlet-api artifact is included, and put in the bootstrap
+        class loader (see JavaagentContainer.java) so that logback's ServletContainerInitializer
+        can load in the the bootstrap class loader successfully
+      -->
+      <groupId>javax.servlet</groupId>
+      <artifactId>javax.servlet-api</artifactId>
+      <!-- Tomcat 7 (above) uses Servlet API 3.0 -->
+      <version>3.0.1</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>org.springframework</groupId>
       <artifactId>spring-test</artifactId>
-      <version>4.3.5.RELEASE</version>
+      <!-- Spring 5+ requires Java 8+ -->
+      <version>4.3.19.RELEASE</version>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -89,13 +90,15 @@
         org.springframework.mock.web.MockHttpServletRequest -->
       <groupId>org.springframework</groupId>
       <artifactId>spring-web</artifactId>
-      <version>4.3.5.RELEASE</version>
+      <!-- Spring 5+ requires Java 8+ -->
+      <version>4.3.19.RELEASE</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-server</artifactId>
-      <!-- jetty 9 requires Java 7+ -->
+      <!-- jetty 9 uses Servlet API 3.1.0 which conflicts with Tomcat 7 (which uses 3.0) -->
+      <!-- jetty 8.2 requires Java 7+ which causes "force-java6" profile below to fail -->
       <version>8.1.22.v20160922</version>
       <scope>test</scope>
     </dependency>
@@ -146,67 +149,56 @@
 
   <profiles>
     <profile>
-      <id>java6or7</id>
-      <activation>
-        <jdk>[1.6,1.8)</jdk>
-      </activation>
-      <build>
-        <plugins>
-          <plugin>
-            <artifactId>maven-failsafe-plugin</artifactId>
-            <configuration>
-              <!-- this is needed when building with Java 6 or 7 -->
-              <argLine>-XX:MaxPermSize=128m</argLine>
-            </configuration>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-    <profile>
-      <id>shade</id>
+      <id>auto-activated-test-unshaded</id>
       <activation>
         <property>
-          <name>!glowroot.shade.skip</name>
+          <name>!glowroot.test.shaded</name>
         </property>
       </activation>
-      <build>
-        <plugins>
-          <plugin>
-            <artifactId>maven-shade-plugin</artifactId>
-            <configuration>
-              <dependencyReducedPomLocation>
-                ${project.build.directory}/dependency-reduced-pom.xml
-              </dependencyReducedPomLocation>
-              <createSourcesJar>true</createSourcesJar>
-              <shadeSourcesContent>true</shadeSourcesContent>
-            </configuration>
-            <executions>
-              <execution>
-                <id>default</id>
-                <goals>
-                  <goal>shade</goal>
-                </goals>
-                <configuration>
-                  <artifactSet>
-                    <includes>
-                      <include>org.glowroot.plugins:servlet-plugin</include>
-                    </includes>
-                  </artifactSet>
-                  <relocations>
-                    <relocation>
-                      <pattern>com.google.common</pattern>
-                      <shadedPattern>org.glowroot.agent.shaded.google.common</shadedPattern>
-                    </relocation>
-                  </relocations>
-                </configuration>
-              </execution>
-            </executions>
-          </plugin>
-        </plugins>
-      </build>
+      <dependencies>
+        <dependency>
+          <groupId>org.glowroot</groupId>
+          <artifactId>glowroot-agent-it-harness-unshaded</artifactId>
+          <version>${project.version}</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>auto-activated-test-shaded</id>
+      <activation>
+        <property>
+          <name>glowroot.test.shaded</name>
+        </property>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.glowroot</groupId>
+          <artifactId>glowroot-agent-it-harness</artifactId>
+          <version>${project.version}</version>
+          <scope>test</scope>
+          <exclusions>
+            <exclusion>
+              <!-- exclusion is needed due to https://issues.apache.org/jira/browse/MSHADE-206 -->
+              <groupId>org.glowroot</groupId>
+              <artifactId>glowroot-agent-it-harness-unshaded</artifactId>
+            </exclusion>
+            <exclusion>
+              <!-- exclusion is needed due to https://issues.apache.org/jira/browse/MSHADE-206 -->
+              <groupId>org.glowroot</groupId>
+              <artifactId>glowroot-agent-core</artifactId>
+            </exclusion>
+          </exclusions>
+        </dependency>
+      </dependencies>
     </profile>
     <profile>
       <id>force-java6</id>
+      <activation>
+        <property>
+          <name>glowroot.forceJava6</name>
+        </property>
+      </activation>
       <build>
         <pluginManagement>
           <plugins>
@@ -224,6 +216,23 @@
             </plugin>
           </plugins>
         </pluginManagement>
+      </build>
+    </profile>
+    <profile>
+      <id>java6or7</id>
+      <activation>
+        <jdk>[1.6,1.8)</jdk>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <configuration>
+              <!-- this is needed when building with Java 6 or 7 -->
+              <argLine>-XX:MaxPermSize=128m</argLine>
+            </configuration>
+          </plugin>
+        </plugins>
       </build>
     </profile>
   </profiles>

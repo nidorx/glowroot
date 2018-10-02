@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2017 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -86,16 +86,7 @@ glowroot.controller('ChartRangeCtrl', [
     };
 
     $scope.headerRangeQueryString = function (last) {
-      var query = $scope.buildQueryObject();
-      delete query['trace-chart-from'];
-      delete query['trace-chart-to'];
-      delete query.from;
-      delete query.to;
-      if (last === 4 * 60 * 60 * 1000) {
-        delete query.last;
-      } else {
-        query.last = last;
-      }
+      var query = $scope.buildQueryObjectForChartRange(last);
       return queryStrings.encodeObject(query);
     };
 
@@ -107,6 +98,7 @@ glowroot.controller('ChartRangeCtrl', [
         event.preventDefault();
         return false;
       }
+      return true;
     };
 
     $scope.rangeSelections = [
@@ -123,37 +115,24 @@ glowroot.controller('ChartRangeCtrl', [
 
     $scope.openCustomRange = function () {
       modals.display('#customDateRangeModal', true);
-
-      var icons = {
-        time: 'fa fa-clock-o',
-        date: 'fa fa-calendar',
-        up: 'fa fa-chevron-up',
-        down: 'fa fa-chevron-down',
-        previous: 'fa fa-chevron-left',
-        next: 'fa fa-chevron-right'
-      };
       var from = $scope.range.chartFrom;
       var to = $scope.range.chartTo;
       $('#customDateRangeFromDate').datetimepicker({
-        icons: icons,
-        format: 'L'
+        format: 'L',
+        date: moment(from).startOf('day')
       });
       $('#customDateRangeFromTime').datetimepicker({
-        icons: icons,
-        format: 'LT'
+        format: 'LT',
+        date: moment(from)
       });
       $('#customDateRangeToDate').datetimepicker({
-        icons: icons,
-        format: 'L'
+        format: 'L',
+        date: moment(to).startOf('day')
       });
       $('#customDateRangeToTime').datetimepicker({
-        icons: icons,
-        format: 'LT'
+        format: 'LT',
+        date: moment(to)
       });
-      $('#customDateRangeFromDate').data('DateTimePicker').date(moment(from).startOf('day'));
-      $('#customDateRangeFromTime').data('DateTimePicker').date(moment(from));
-      $('#customDateRangeToDate').data('DateTimePicker').date(moment(to).startOf('day'));
-      $('#customDateRangeToTime').data('DateTimePicker').date(moment(to));
       // don't focus on first input as that makes esc not work, plus likely to use date picker anyways
     };
 
@@ -163,12 +142,12 @@ glowroot.controller('ChartRangeCtrl', [
         return dateTime.valueOf() - startOfDay;
       }
 
-      var fromDate = $('#customDateRangeFromDate').data('DateTimePicker').date();
-      var fromTime = $('#customDateRangeFromTime').data('DateTimePicker').date();
-      var toDate = $('#customDateRangeToDate').data('DateTimePicker').date();
-      var toTime = $('#customDateRangeToTime').data('DateTimePicker').date();
-      $scope.range.chartFrom = fromDate + timeComponent(fromTime);
-      $scope.range.chartTo = toDate + timeComponent(toTime);
+      var fromDate = $('#customDateRangeFromDate').datetimepicker('date');
+      var fromTime = $('#customDateRangeFromTime').datetimepicker('date');
+      var toDate = $('#customDateRangeToDate').datetimepicker('date');
+      var toTime = $('#customDateRangeToTime').datetimepicker('date');
+      $scope.range.chartFrom = fromDate.valueOf() + timeComponent(fromTime);
+      $scope.range.chartTo = toDate.valueOf() + timeComponent(toTime);
       $scope.range.last = 0;
       $scope.range.chartRefresh++;
       $('#customDateRangeModal').modal('hide');

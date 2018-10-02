@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2017 the original author or authors.
+ * Copyright 2014-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,20 +20,15 @@ glowroot.controller('JvmGaugeValuesCtrl', [
   '$scope',
   '$location',
   '$filter',
-  '$http',
   'locationChanges',
   'charts',
-  'keyedColorPools',
-  'queryStrings',
-  'httpErrors',
-  function ($scope, $location, $filter, $http, locationChanges, charts, keyedColorPools, queryStrings, httpErrors) {
+  function ($scope, $location, $filter, locationChanges, charts) {
 
     $scope.$parent.heading = 'Gauges';
 
     if ($scope.hideMainContent()) {
-      // these are needed to prevent nested controller chart-range.js from throwing errors
-      $scope.range = {};
-      $scope.buildQueryObject = function () {
+      // this is needed to prevent nested controller chart-range.js from throwing errors
+      $scope.buildQueryObjectForChartRange = function () {
         return {};
       };
       return;
@@ -41,8 +36,6 @@ glowroot.controller('JvmGaugeValuesCtrl', [
 
     // initialize page binding object
     $scope.page = {};
-
-    var DEFAULT_GAUGES = ['java.lang:type=Memory:HeapMemoryUsage.used'];
 
     var chartState = charts.createState();
 
@@ -57,9 +50,8 @@ glowroot.controller('JvmGaugeValuesCtrl', [
     var gaugeGrouping = {};
 
     $scope.page.gaugeFilter = '';
+    // used by charts functions
     $scope.useGaugeViewThresholdMultiplier = true;
-
-    $scope.range = {};
 
     $scope.currentTabUrl = function () {
       return 'jvm/gauges';
@@ -69,8 +61,14 @@ glowroot.controller('JvmGaugeValuesCtrl', [
       charts.refreshData('backend/jvm/gauges', chartState, $scope, autoRefresh, addToQuery, onRefreshData);
     }
 
+    var locationReplace = false;
+
     function watchListener(autoRefresh) {
-      $location.search($scope.buildQueryObject());
+      $location.search(buildQueryObject($scope.range.last));
+      if (locationReplace) {
+        $location.replace();
+        locationReplace = false;
+      }
       if ($scope.gaugeNames.length) {
         refreshData(autoRefresh);
       } else {
@@ -81,18 +79,19 @@ glowroot.controller('JvmGaugeValuesCtrl', [
       }
     }
 
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh', 'range.chartAutoRefresh'],
-        function (newValues, oldValues) {
-          if (newValues !== oldValues) {
-            watchListener(newValues[3] !== oldValues[3]);
-          }
-        });
+    function watchExpression(scope) {
+      return {
+        chartFrom: scope.range.chartFrom,
+        chartTo: scope.range.chartTo,
+        chartRefresh: scope.range.chartRefresh,
+        chartAutoRefresh: scope.range.chartAutoRefresh,
+        gaugeNames: scope.gaugeNames
+      };
+    }
 
-    $scope.$watchCollection('gaugeNames', function (newValue, oldValue) {
-      if (newValue !== oldValue || newValue.length) {
-        watchListener(false);
-      }
-    });
+    $scope.$watch(watchExpression, function (newValue, oldValue) {
+      watchListener(newValue.chartAutoRefresh !== oldValue.chartAutoRefresh);
+    }, true);
 
     $scope.$watch('seriesLabels', function (newValues, oldValues) {
       if (newValues !== oldValues) {
@@ -111,62 +110,93 @@ glowroot.controller('JvmGaugeValuesCtrl', [
       return window.innerWidth < 768;
     };
 
-    $scope.buildQueryObject = function (baseQuery) {
-      var query = baseQuery || angular.copy($location.search());
-      delete query.from;
-      delete query.to;
-      delete query.last;
-      if (!$scope.range.last) {
-        query.from = $scope.range.chartFrom;
-        query.to = $scope.range.chartTo;
-      } else if ($scope.range.last !== 4 * 60 * 60 * 1000) {
-        query.last = $scope.range.last;
+    $scope.buildQueryObjectForChartRange = function (last) {
+      return buildQueryObject(last);
+    };
+
+    function buildQueryObject(last) {
+      var query = {};
+      if ($scope.layout.central) {
+        var agentId = $location.search()['agent-id'];
+        if (agentId) {
+          query['agent-id'] = agentId;
+        } else {
+          query['agent-rollup-id'] = $location.search()['agent-rollup-id'];
+        }
       }
-      if (angular.equals($scope.gaugeNames, DEFAULT_GAUGES)) {
-        delete query['gauge-name'];
+      if ($scope.gaugeNames && $scope.gaugeNames.length === 0) {
+        // special case to differentiate between no gauges selected and default gauge list
+        query['gauge-name'] = '';
       } else {
         query['gauge-name'] = $scope.gaugeNames;
       }
+      if (!last) {
+        query.from = $scope.range.chartFrom;
+        query.to = $scope.range.chartTo;
+      } else if (last !== 4 * 60 * 60 * 1000) {
+        query.last = last;
+      }
       return query;
-    };
-
-    // TODO this is exact duplicate of same function in transaction.js
-    $scope.applyLast = function () {
-      if (!$scope.range.last) {
-        return;
-      }
-      var now = moment().startOf('second').valueOf();
-      var from = now - $scope.range.last;
-      var to = now + $scope.range.last / 10;
-      var dataPointIntervalMillis = charts.getDataPointIntervalMillis(from, to, true);
-      var revisedFrom = Math.floor(from / dataPointIntervalMillis) * dataPointIntervalMillis;
-      var revisedTo = Math.ceil(to / dataPointIntervalMillis) * dataPointIntervalMillis;
-      var revisedDataPointIntervalMillis = charts.getDataPointIntervalMillis(revisedFrom, revisedTo, true);
-      if (revisedDataPointIntervalMillis !== dataPointIntervalMillis) {
-        // expanded out to larger rollup threshold so need to re-adjust
-        // ok to use original from/to instead of revisedFrom/revisedTo
-        revisedFrom = Math.floor(from / revisedDataPointIntervalMillis) * revisedDataPointIntervalMillis;
-        revisedTo = Math.ceil(to / revisedDataPointIntervalMillis) * revisedDataPointIntervalMillis;
-      }
-      $scope.range.chartFrom = revisedFrom;
-      $scope.range.chartTo = revisedTo;
-    };
+    }
 
     var location;
 
     function addToQuery(query) {
-      query.gaugeNames = $scope.gaugeNames;
+      // singular name is used since it is query string
+      query.gaugeName = $scope.gaugeNames;
+    }
+
+    function updateGauges(allGauges) {
+      $scope.allGauges = allGauges;
+      createShortDataSeriesNames(allGauges);
+      allGaugeNames = [];
+      gaugeShortDisplayMap = {};
+      gaugeUnits = {};
+      gaugeGrouping = {};
+      angular.forEach(allGauges, function (gauge) {
+        allGaugeNames.push(gauge.name);
+        gaugeShortDisplayMap[gauge.name] = gauge.shortDisplay;
+        if (gauge.unit) {
+          gaugeUnits[gauge.name] = ' ' + gauge.unit;
+        } else {
+          gaugeUnits[gauge.name] = '';
+        }
+        if (gauge.grouping) {
+          gaugeGrouping[gauge.name] = gauge.grouping;
+        } else {
+          gaugeGrouping[gauge.name] = gauge.name;
+        }
+      });
     }
 
     function onRefreshData(data) {
-      updatePlotData(data.dataSeries);
+      updateGauges(data.allGauges);
+      var chartYaxisLabel = '';
       var i;
       for (i = 0; i < data.dataSeries.length; i++) {
         data.dataSeries[i].shortLabel = gaugeShortDisplayMap[data.dataSeries[i].name];
+        var gaugeUnit = gaugeUnits[data.dataSeries[i].name];
+        if (i === 0) {
+          chartYaxisLabel = gaugeUnit || '';
+        } else if (gaugeUnit !== chartYaxisLabel) {
+          chartYaxisLabel = '';
+        }
       }
+      if (chartYaxisLabel !== '') {
+        // strip leading space ' '
+        chartYaxisLabel = chartYaxisLabel.substring(1);
+      }
+      var convertBytesToMB = false;
+      if (chartYaxisLabel === 'bytes') {
+        chartYaxisLabel = 'MB';
+        convertBytesToMB = true;
+      }
+      chartState.plot.getAxes().yaxis.options.label = chartYaxisLabel;
+      updatePlotData(data.dataSeries, chartYaxisLabel === '' && data.dataSeries.length !== 1, convertBytesToMB);
     }
 
     locationChanges.on($scope, function () {
+
       var priorLocation = location;
       location = {};
       location.last = Number($location.search().last);
@@ -179,16 +209,16 @@ glowroot.controller('JvmGaugeValuesCtrl', [
         location.last = 4 * 60 * 60 * 1000;
       }
       location.gaugeNames = $location.search()['gauge-name'];
-      if (!location.gaugeNames) {
-        location.gaugeNames = [];
-        angular.forEach(DEFAULT_GAUGES, function (defaultGauge) {
-          if (allGaugeNames.indexOf(defaultGauge) !== -1) {
-            location.gaugeNames.push(defaultGauge);
-          }
-        });
-      }
-      if (!angular.isArray(location.gaugeNames)) {
-        location.gaugeNames = [location.gaugeNames];
+      if (location.gaugeNames === undefined) {
+        location.gaugeNames = $scope.agentRollup.defaultGaugeNames;
+        locationReplace = true;
+      } else if (!angular.isArray(location.gaugeNames)) {
+        if (location.gaugeNames === '') {
+          // special case to differentiate between no gauges selected and default gauge list
+          location.gaugeNames = [];
+        } else {
+          location.gaugeNames = [location.gaugeNames];
+        }
       }
       if (!angular.equals(location, priorLocation)) {
         // only update scope if relevant change
@@ -196,45 +226,9 @@ glowroot.controller('JvmGaugeValuesCtrl', [
         $scope.range.last = location.last;
         $scope.range.chartFrom = location.chartFrom;
         $scope.range.chartTo = location.chartTo;
-        $scope.applyLast();
+        charts.applyLast($scope, true);
       }
     });
-
-    if (!$scope.hideMainContent()) {
-      $http.get('backend/jvm/all-gauges?agent-rollup-id=' + encodeURIComponent($scope.agentRollupId))
-          .then(function (response) {
-            $scope.loaded = true;
-            $scope.allGauges = response.data;
-            createShortDataSeriesNames(response.data);
-            allGaugeNames = [];
-            gaugeShortDisplayMap = {};
-            gaugeUnits = {};
-            gaugeGrouping = {};
-            angular.forEach(response.data, function (gauge) {
-              allGaugeNames.push(gauge.name);
-              gaugeShortDisplayMap[gauge.name] = gauge.shortDisplay;
-              if (gauge.unit) {
-                gaugeUnits[gauge.name] = ' ' + gauge.unit;
-              } else {
-                gaugeUnits[gauge.name] = '';
-              }
-              if (gauge.grouping) {
-                gaugeGrouping[gauge.name] = gauge.grouping;
-              } else {
-                gaugeGrouping[gauge.name] = gauge.name;
-              }
-            });
-            if (!$scope.gaugeNames.length) {
-              angular.forEach(DEFAULT_GAUGES, function (defaultGauge) {
-                if (allGaugeNames.indexOf(defaultGauge) !== -1) {
-                  $scope.gaugeNames.push(defaultGauge);
-                }
-              });
-            }
-          }, function (response) {
-            httpErrors.handle(response, $scope);
-          });
-    }
 
     // scale will bring max into 0..100 range
     // not using Math.log / Math.log(10) due to floating point issues
@@ -251,7 +245,7 @@ glowroot.controller('JvmGaugeValuesCtrl', [
       return scale;
     }
 
-    function updatePlotData(data) {
+    function updatePlotData(data, needScale, convertBytesToMB) {
       // reset gauge scales
       gaugeScales = {};
       yvalMaps = {};
@@ -263,13 +257,24 @@ glowroot.controller('JvmGaugeValuesCtrl', [
       var dataSeries;
       var scale;
       var grouping;
+      var cpuLoad = false;
       for (i = 0; i < data.length; i++) {
         dataSeries = data[i];
         updateYvalMap(dataSeries.name, dataSeries.data);
         if (dataSeries.data.length) {
           // set negative data to zero after putting real value into yval map
           setNegativeDataToZero(dataSeries);
-          scale = getPointsScale(dataSeries.data);
+          if (dataSeries.name === 'java.lang:type=OperatingSystem:ProcessCpuLoad'
+              || dataSeries.name === 'java.lang:type=OperatingSystem:SystemCpuLoad') {
+            scale = 100;
+            cpuLoad = true;
+          } else if (needScale) {
+            scale = getPointsScale(dataSeries.data);
+          } else if (convertBytesToMB) {
+            scale = 1 / (1024 * 1024);
+          } else {
+            scale = 1;
+          }
           grouping = gaugeGrouping[dataSeries.name];
           if (groupingScale[grouping]) {
             if (scale !== 'ANY') {
@@ -290,11 +295,20 @@ glowroot.controller('JvmGaugeValuesCtrl', [
           if (scale === undefined) {
             scale = 1; // this corresponds to 'ANY' above
           }
-          gaugeScales[dataSeries.name] = scale;
+          if (convertBytesToMB) {
+            gaugeScales[dataSeries.name] = 1;
+          } else {
+            gaugeScales[dataSeries.name] = scale;
+          }
           scalePoints(dataSeries.data, scale);
         }
       }
       updateThePlotData(data);
+      if (cpuLoad) {
+        chartState.plot.getAxes().yaxis.options.max = 100;
+      } else {
+        chartState.plot.getAxes().yaxis.options.max = undefined;
+      }
     }
 
     function setNegativeDataToZero(dataSeries) {
@@ -366,7 +380,7 @@ glowroot.controller('JvmGaugeValuesCtrl', [
       var GAUGE_PATH_SEPARATOR = ' / ';
       var splitGaugeNames = [];
       angular.forEach(gauges, function (gauge) {
-        splitGaugeNames.push(gauge.displayPath);
+        splitGaugeNames.push(gauge.displayParts);
       });
       var minRequiredForUniqueName;
       var i, j;
@@ -412,28 +426,13 @@ glowroot.controller('JvmGaugeValuesCtrl', [
       }
     };
 
-    $scope.gaugeColorStyle = function (gaugeName) {
-      var style = {
-        width: '60px',
-        height: '18px'
-      };
-      var color = chartState.keyedColorPool.get(gaugeName);
-      if (color) {
-        style['background-color'] = color;
+    $scope.showGaugeScales = function () {
+      for (var i = 0; i < $scope.seriesLabels.length; i++) {
+        if (gaugeScales[$scope.seriesLabels[i].name] !== 1) {
+          return true;
+        }
       }
-      return style;
-    };
-
-    $scope.hasGaugeScale = function (gaugeName) {
-      return gaugeScales[gaugeName] || emptyGaugeNames[gaugeName];
-    };
-
-    $scope.gaugeScaleStyle = function (gaugeName) {
-      if (gaugeScales[gaugeName]) {
-        return {};
-      } else {
-        return {'font-style': 'italic'};
-      }
+      return false;
     };
 
     $scope.getGaugeScale = function (gaugeName) {
@@ -458,7 +457,7 @@ glowroot.controller('JvmGaugeValuesCtrl', [
       var index = $scope.gaugeNames.indexOf(gaugeName);
       if (index === -1) {
         $scope.gaugeNames.push(gaugeName);
-        // maintain selected gauge ordering matching to match ordering of allGaugeNames
+        // maintain selected gauge ordering to match ordering of allGaugeNames
         // (which are ordered server-side by case insensitive gauge display)
         var ordering = {};
         angular.forEach(allGaugeNames, function (gaugeName, index) {
@@ -502,16 +501,6 @@ glowroot.controller('JvmGaugeValuesCtrl', [
       });
     };
 
-    function displaySixDigitsOfPrecision(value) {
-      var nonScaledValue;
-      if (value < 1000000) {
-        nonScaledValue = parseFloat(value.toPrecision(6));
-      } else {
-        nonScaledValue = Math.round(value);
-      }
-      return nonScaledValue.toLocaleString(undefined, {maximumFractionDigits: 20});
-    }
-
     var chartOptions = {
       tooltip: true,
       yaxis: {
@@ -525,18 +514,14 @@ glowroot.controller('JvmGaugeValuesCtrl', [
       },
       tooltipOpts: {
         content: function (label, xval, yval, flotItem) {
-          var rollupConfig0 = $scope.layout.rollupConfigs[0];
-          var dataPointIntervalMillis =
-              charts.getDataPointIntervalMillis($scope.range.chartFrom, $scope.range.chartTo, true);
-          if (dataPointIntervalMillis === rollupConfig0.intervalMillis
-              && $scope.range.chartTo - $scope.range.chartFrom < 4 * rollupConfig0.viewThresholdMillis) {
+          if (chartState.dataPointIntervalMillis === 5000) {
             var nonScaledValue = yvalMaps[label][xval];
             var tooltip = '<table class="gt-chart-tooltip">';
             tooltip += '<tr><td colspan="2" style="font-weight: 600;">' + gaugeShortDisplayMap[label];
             tooltip += '</td></tr><tr><td style="padding-right: 10px;">Time:</td><td style="font-weight: 400;">';
             tooltip += moment(xval).format('h:mm:ss.SSS a (Z)') + '</td></tr>';
             tooltip += '<tr><td style="padding-right: 10px;">Value:</td><td style="font-weight: 600;">';
-            tooltip += displaySixDigitsOfPrecision(nonScaledValue) + gaugeUnits[label] + '</td></tr>';
+            tooltip += $filter('gtGaugeValue')(nonScaledValue) + gaugeUnits[label] + '</td></tr>';
             tooltip += '</table>';
             return tooltip;
           }
@@ -550,7 +535,7 @@ glowroot.controller('JvmGaugeValuesCtrl', [
                 if (nonScaledValue === undefined) {
                   return 'no data';
                 }
-                return displaySixDigitsOfPrecision(nonScaledValue) + gaugeUnits[label];
+                return $filter('gtGaugeValue')(nonScaledValue) + gaugeUnits[label];
               }, ' (average value over this interval)', true);
         }
       }

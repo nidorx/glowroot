@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2015 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,9 +17,8 @@ package org.glowroot.agent.weaving;
 
 import java.lang.reflect.Modifier;
 
-import javax.annotation.Nullable;
-
 import com.google.common.collect.ImmutableList;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 
 @Value.Immutable
@@ -30,8 +29,18 @@ abstract class AnalyzedClass {
     abstract @Nullable String superName();
     abstract ImmutableList<String> interfaceNames();
     abstract ImmutableList<AnalyzedMethod> analyzedMethods();
+    // this is only used for the rare case of WeavingClassVisitor.overrideAndWeaveInheritedMethod()
+    // to prevent final methods from being overridden
+    // only need to track public methods since only public methods can implement interface method
+    // and overrideAndWeaveInheritedMethod() is only used on "methodsThatOnlyNowFulfillAdvice"
+    // which occurs when method in superclass is used to implement interface that is only added in
+    // subclass
+    abstract ImmutableList<PublicFinalMethod> publicFinalMethods();
     abstract ImmutableList<ShimType> shimTypes();
     abstract ImmutableList<MixinType> mixinTypes();
+    abstract ImmutableList<MixinType> nonReweavableMixinTypes();
+
+    abstract boolean ejbRemote();
 
     // not using @Value.Derived to keep down memory footprint
     boolean isInterface() {

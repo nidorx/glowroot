@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2017 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,53 +17,74 @@ package org.glowroot.ui;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.StringWriter;
 import java.net.InetAddress;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import javax.annotation.Nullable;
-
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.base.Charsets;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
-import io.netty.handler.codec.http.DefaultFullHttpResponse;
-import io.netty.handler.codec.http.FullHttpResponse;
+import com.google.common.io.CharStreams;
+import com.google.common.net.MediaType;
+import com.google.common.primitives.Longs;
+import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.ssl.SslContextBuilder;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.checkerframework.checker.nullness.qual.RequiresNonNull;
 import org.immutables.value.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.glowroot.common.config.CentralStorageConfig;
-import org.glowroot.common.config.FatStorageConfig;
-import org.glowroot.common.config.ImmutableCentralStorageConfig;
-import org.glowroot.common.config.ImmutableFatStorageConfig;
-import org.glowroot.common.config.ImmutableLdapConfig;
-import org.glowroot.common.config.ImmutableSmtpConfig;
-import org.glowroot.common.config.ImmutableUserConfig;
-import org.glowroot.common.config.ImmutableWebConfig;
-import org.glowroot.common.config.LdapConfig;
-import org.glowroot.common.config.RoleConfig;
-import org.glowroot.common.config.SmtpConfig;
-import org.glowroot.common.config.UserConfig;
-import org.glowroot.common.config.WebConfig;
 import org.glowroot.common.live.LiveAggregateRepository;
-import org.glowroot.common.repo.ConfigRepository;
-import org.glowroot.common.repo.ConfigRepository.OptimisticLockException;
-import org.glowroot.common.repo.RepoAdmin;
-import org.glowroot.common.repo.util.AlertingService;
-import org.glowroot.common.repo.util.Encryption;
-import org.glowroot.common.repo.util.MailService;
 import org.glowroot.common.util.ObjectMappers;
+import org.glowroot.common2.config.CentralAdminGeneralConfig;
+import org.glowroot.common2.config.CentralStorageConfig;
+import org.glowroot.common2.config.CentralWebConfig;
+import org.glowroot.common2.config.EmbeddedAdminGeneralConfig;
+import org.glowroot.common2.config.EmbeddedStorageConfig;
+import org.glowroot.common2.config.EmbeddedWebConfig;
+import org.glowroot.common2.config.HealthchecksIoConfig;
+import org.glowroot.common2.config.HttpProxyConfig;
+import org.glowroot.common2.config.ImmutableCentralAdminGeneralConfig;
+import org.glowroot.common2.config.ImmutableCentralStorageConfig;
+import org.glowroot.common2.config.ImmutableCentralWebConfig;
+import org.glowroot.common2.config.ImmutableEmbeddedAdminGeneralConfig;
+import org.glowroot.common2.config.ImmutableEmbeddedStorageConfig;
+import org.glowroot.common2.config.ImmutableEmbeddedWebConfig;
+import org.glowroot.common2.config.ImmutableHealthchecksIoConfig;
+import org.glowroot.common2.config.ImmutableHttpProxyConfig;
+import org.glowroot.common2.config.ImmutableLdapConfig;
+import org.glowroot.common2.config.ImmutablePagerDutyConfig;
+import org.glowroot.common2.config.ImmutablePagerDutyIntegrationKey;
+import org.glowroot.common2.config.ImmutableSmtpConfig;
+import org.glowroot.common2.config.ImmutableUserConfig;
+import org.glowroot.common2.config.LdapConfig;
+import org.glowroot.common2.config.PagerDutyConfig;
+import org.glowroot.common2.config.RoleConfig;
+import org.glowroot.common2.config.SmtpConfig;
+import org.glowroot.common2.config.SmtpConfig.ConnectionSecurity;
+import org.glowroot.common2.config.UserConfig;
+import org.glowroot.common2.repo.ConfigRepository;
+import org.glowroot.common2.repo.ConfigRepository.DuplicatePagerDutyIntegrationKeyDisplayException;
+import org.glowroot.common2.repo.ConfigRepository.DuplicatePagerDutyIntegrationKeyException;
+import org.glowroot.common2.repo.ConfigRepository.OptimisticLockException;
+import org.glowroot.common2.repo.RepoAdmin;
+import org.glowroot.common2.repo.RepoAdmin.H2Table;
+import org.glowroot.common2.repo.util.AlertingService;
+import org.glowroot.common2.repo.util.Encryption;
+import org.glowroot.common2.repo.util.HttpClient;
+import org.glowroot.common2.repo.util.LazySecretKey.SymmetricEncryptionKeyMissingException;
+import org.glowroot.common2.repo.util.MailService;
+import org.glowroot.ui.CommonHandler.CommonResponse;
 import org.glowroot.ui.HttpServer.PortChangeFailedException;
 import org.glowroot.ui.HttpSessionManager.Authentication;
 import org.glowroot.ui.LdapAuthentication.AuthenticationException;
@@ -72,7 +93,6 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static io.netty.handler.codec.http.HttpResponseStatus.BAD_REQUEST;
 import static io.netty.handler.codec.http.HttpResponseStatus.OK;
 import static io.netty.handler.codec.http.HttpResponseStatus.PRECONDITION_FAILED;
-import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 @JsonService
 class AdminJsonService {
@@ -80,24 +100,39 @@ class AdminJsonService {
     private static final Logger logger = LoggerFactory.getLogger(ConfigJsonService.class);
     private static final ObjectMapper mapper = ObjectMappers.create();
 
+    private static final Ordering<H2Table> orderingByBytesDesc = new Ordering<H2Table>() {
+        @Override
+        public int compare(H2Table left, H2Table right) {
+            return Longs.compare(right.bytes(), left.bytes());
+        }
+    };
+
     private final boolean central;
-    private final File glowrootDir;
+    private final boolean offlineViewer;
+    private final boolean webPortReadOnly;
+    private final List<File> confDirs;
     private final ConfigRepository configRepository;
     private final RepoAdmin repoAdmin;
     private final LiveAggregateRepository liveAggregateRepository;
     private final MailService mailService;
+    private final HttpClient httpClient;
 
+    // null when running in servlet container
     private volatile @MonotonicNonNull HttpServer httpServer;
 
-    AdminJsonService(boolean central, File glowrootDir, ConfigRepository configRepository,
+    AdminJsonService(boolean central, boolean offlineViewer, boolean webPortReadOnly,
+            List<File> confDirs, ConfigRepository configRepository,
             RepoAdmin repoAdmin, LiveAggregateRepository liveAggregateRepository,
-            MailService mailService) {
+            MailService mailService, HttpClient httpClient) {
         this.central = central;
-        this.glowrootDir = glowrootDir;
+        this.offlineViewer = offlineViewer;
+        this.webPortReadOnly = webPortReadOnly;
+        this.confDirs = confDirs;
         this.configRepository = configRepository;
         this.repoAdmin = repoAdmin;
         this.liveAggregateRepository = liveAggregateRepository;
         this.mailService = mailService;
+        this.httpClient = httpClient;
     }
 
     void setHttpServer(HttpServer httpServer) {
@@ -125,11 +160,22 @@ class AdminJsonService {
         return "";
     }
 
+    @GET(path = "/backend/admin/general", permission = "admin:view:general")
+    String getGeneralConfig() throws Exception {
+        if (central) {
+            return getCentralAdminGeneralConfig();
+        } else {
+            return getEmbeddedAdminGeneralConfig();
+        }
+    }
+
     @GET(path = "/backend/admin/web", permission = "admin:view:web")
     String getWebConfig() throws Exception {
-        // this code cannot be reached when httpServer is null
-        checkNotNull(httpServer);
-        return getWebConfig(false);
+        if (central) {
+            return getCentralWebConfig();
+        } else {
+            return getEmbeddedWebConfig(false);
+        }
     }
 
     @GET(path = "/backend/admin/storage", permission = "admin:view:storage")
@@ -138,8 +184,8 @@ class AdminJsonService {
             CentralStorageConfig config = configRepository.getCentralStorageConfig();
             return mapper.writeValueAsString(CentralStorageConfigDto.create(config));
         } else {
-            FatStorageConfig config = configRepository.getFatStorageConfig();
-            return mapper.writeValueAsString(FatStorageConfigDto.create(config));
+            EmbeddedStorageConfig config = configRepository.getEmbeddedStorageConfig();
+            return mapper.writeValueAsString(EmbeddedStorageConfigDto.create(config));
         }
     }
 
@@ -151,6 +197,12 @@ class AdminJsonService {
                 .config(SmtpConfigDto.create(config))
                 .localServerName(localServerName)
                 .build());
+    }
+
+    @GET(path = "/backend/admin/http-proxy", permission = "admin:view:httpProxy")
+    String getHttpProxyConfig() throws Exception {
+        HttpProxyConfig config = configRepository.getHttpProxyConfig();
+        return mapper.writeValueAsString(HttpProxyConfigDto.create(config));
     }
 
     @GET(path = "/backend/admin/ldap", permission = "admin:view:ldap")
@@ -166,42 +218,98 @@ class AdminJsonService {
                 .build());
     }
 
-    @POST(path = "/backend/admin/web", permission = "admin:edit:web")
-    Object updateWebConfig(@BindRequest WebConfigDto configDto) throws Exception {
-        // this code cannot be reached when httpServer is null
-        checkNotNull(httpServer);
-        WebConfig config = configDto.convert();
+    @GET(path = "/backend/admin/pager-duty", permission = "admin:view:pagerDuty")
+    String getPagerDutyConfig() throws Exception {
+        PagerDutyConfig config = configRepository.getPagerDutyConfig();
+        return mapper.writeValueAsString(PagerDutyConfigDto.create(config));
+    }
 
-        if (config.https() && !httpServer.getHttps()) {
-            // validate certificate and private key exist and are valid
-            File certificateFile = new File(glowrootDir, "certificate.pem");
-            if (!certificateFile.exists()) {
-                return "{\"httpsRequiredFilesDoNotExist\":true}";
+    @GET(path = "/backend/admin/healthchecks-io", permission = "admin:view:healthchecksIo")
+    String getHealthchecksIoConfig() throws Exception {
+        HealthchecksIoConfig config = configRepository.getHealthchecksIoConfig();
+        return mapper.writeValueAsString(HealthchecksIoConfigDto.create(config));
+    }
+
+    @POST(path = "/backend/admin/general", permission = "admin:edit:general")
+    String updateGeneralConfig(@BindRequest String content) throws Exception {
+        if (central) {
+            CentralAdminGeneralConfigDto configDto =
+                    mapper.readValue(content, ImmutableCentralAdminGeneralConfigDto.class);
+            CentralAdminGeneralConfig config = configDto.convert();
+            try {
+                configRepository.updateCentralAdminGeneralConfig(config, configDto.version());
+            } catch (OptimisticLockException e) {
+                throw new JsonServiceException(PRECONDITION_FAILED, e);
             }
-            File privateKeyFile = new File(glowrootDir, "private.pem");
-            if (!privateKeyFile.exists()) {
-                return "{\"httpsRequiredFilesDoNotExist\":true}";
+            return getCentralAdminGeneralConfig();
+        } else {
+            EmbeddedAdminGeneralConfigDto configDto =
+                    mapper.readValue(content, ImmutableEmbeddedAdminGeneralConfigDto.class);
+            EmbeddedAdminGeneralConfig config = configDto.convert();
+            try {
+                configRepository.updateEmbeddedAdminGeneralConfig(config, configDto.version());
+            } catch (OptimisticLockException e) {
+                throw new JsonServiceException(PRECONDITION_FAILED, e);
+            }
+            return getEmbeddedAdminGeneralConfig();
+        }
+    }
+
+    @POST(path = "/backend/admin/web", permission = "admin:edit:web")
+    Object updateWebConfig(@BindRequest String content) throws Exception {
+        if (central) {
+            CentralWebConfigDto configDto =
+                    mapper.readValue(content, ImmutableCentralWebConfigDto.class);
+            CentralWebConfig config = configDto.convert();
+            try {
+                configRepository.updateCentralWebConfig(config, configDto.version());
+            } catch (OptimisticLockException e) {
+                throw new JsonServiceException(PRECONDITION_FAILED, e);
+            }
+            return getCentralWebConfig();
+        } else {
+            checkNotNull(httpServer);
+            EmbeddedWebConfigDto configDto =
+                    mapper.readValue(content, ImmutableEmbeddedWebConfigDto.class);
+            EmbeddedWebConfig config = configDto.convert();
+            if (config.https() && !httpServer.getHttps()) {
+                // validate certificate and private key exist and are valid
+                File certificateFile = getConfFile("ui-cert.pem");
+                if (certificateFile == null) {
+                    return "{\"httpsRequiredFilesDoNotExist\":true}";
+                }
+                File privateKeyFile = getConfFile("ui-key.pem");
+                if (privateKeyFile == null) {
+                    return "{\"httpsRequiredFilesDoNotExist\":true}";
+                }
+                try {
+                    SslContextBuilder.forServer(certificateFile, privateKeyFile);
+                } catch (Exception e) {
+                    logger.debug(e.getMessage(), e);
+                    StringBuilder sb = new StringBuilder();
+                    JsonGenerator jg =
+                            mapper.getFactory().createGenerator(CharStreams.asWriter(sb));
+                    try {
+                        jg.writeStartObject();
+                        jg.writeStringField("httpsValidationError", e.getMessage());
+                        jg.writeEndObject();
+                    } finally {
+                        jg.close();
+                    }
+                    return sb.toString();
+                }
+            }
+            if (webPortReadOnly && config.port() != checkNotNull(httpServer.getPort())) {
+                throw new JsonServiceException(BAD_REQUEST,
+                        "cannot change port when using -Dglowroot.agent.port");
             }
             try {
-                SslContextBuilder.forServer(new File(glowrootDir, "certificate.pem"),
-                        new File(glowrootDir, "private.pem"));
-            } catch (Exception e) {
-                logger.debug(e.getMessage(), e);
-                StringWriter sw = new StringWriter();
-                JsonGenerator jg = mapper.getFactory().createGenerator(sw);
-                jg.writeStartObject();
-                jg.writeStringField("httpsValidationError", e.getMessage());
-                jg.writeEndObject();
-                jg.close();
-                return sw.toString();
+                configRepository.updateEmbeddedWebConfig(config, configDto.version());
+            } catch (OptimisticLockException e) {
+                throw new JsonServiceException(PRECONDITION_FAILED, e);
             }
+            return onSuccessfulEmbeddedWebUpdate(config);
         }
-        try {
-            configRepository.updateWebConfig(config, configDto.version());
-        } catch (OptimisticLockException e) {
-            throw new JsonServiceException(PRECONDITION_FAILED, e);
-        }
-        return onSuccessfulWebUpdate(config);
     }
 
     @POST(path = "/backend/admin/storage", permission = "admin:edit:storage")
@@ -216,10 +324,11 @@ class AdminJsonService {
                 throw new JsonServiceException(PRECONDITION_FAILED, e);
             }
         } else {
-            FatStorageConfigDto configDto =
-                    mapper.readValue(content, ImmutableFatStorageConfigDto.class);
+            EmbeddedStorageConfigDto configDto =
+                    mapper.readValue(content, ImmutableEmbeddedStorageConfigDto.class);
             try {
-                configRepository.updateFatStorageConfig(configDto.convert(), configDto.version());
+                configRepository.updateEmbeddedStorageConfig(configDto.convert(),
+                        configDto.version());
             } catch (OptimisticLockException e) {
                 throw new JsonServiceException(PRECONDITION_FAILED, e);
             }
@@ -233,10 +342,25 @@ class AdminJsonService {
         try {
             configRepository.updateSmtpConfig(configDto.convert(configRepository),
                     configDto.version());
+        } catch (SymmetricEncryptionKeyMissingException e) {
+            return "{\"symmetricEncryptionKeyMissing\":true}";
         } catch (OptimisticLockException e) {
             throw new JsonServiceException(PRECONDITION_FAILED, e);
         }
         return getSmtpConfig();
+    }
+
+    @POST(path = "/backend/admin/http-proxy", permission = "admin:edit:httpProxy")
+    String updateHttpProxyConfig(@BindRequest HttpProxyConfigDto configDto) throws Exception {
+        try {
+            configRepository.updateHttpProxyConfig(configDto.convert(configRepository),
+                    configDto.version());
+        } catch (SymmetricEncryptionKeyMissingException e) {
+            return "{\"symmetricEncryptionKeyMissing\":true}";
+        } catch (OptimisticLockException e) {
+            throw new JsonServiceException(PRECONDITION_FAILED, e);
+        }
+        return getHttpProxyConfig();
     }
 
     @POST(path = "/backend/admin/ldap", permission = "admin:edit:ldap")
@@ -244,72 +368,277 @@ class AdminJsonService {
         try {
             configRepository.updateLdapConfig(configDto.convert(configRepository),
                     configDto.version());
+        } catch (SymmetricEncryptionKeyMissingException e) {
+            return "{\"symmetricEncryptionKeyMissing\":true}";
         } catch (OptimisticLockException e) {
             throw new JsonServiceException(PRECONDITION_FAILED, e);
         }
         return getLdapConfig();
     }
 
+    @POST(path = "/backend/admin/pager-duty", permission = "admin:edit:pagerDuty")
+    String updatePagerDutyConfig(@BindRequest PagerDutyConfigDto configDto) throws Exception {
+        try {
+            configRepository.updatePagerDutyConfig(configDto.convert(), configDto.version());
+        } catch (DuplicatePagerDutyIntegrationKeyException e) {
+            return "{\"duplicateIntegrationKey\":true}";
+        } catch (DuplicatePagerDutyIntegrationKeyDisplayException e) {
+            return "{\"duplicateIntegrationKeyDisplay\":true}";
+        } catch (OptimisticLockException e) {
+            throw new JsonServiceException(PRECONDITION_FAILED, e);
+        }
+        return getPagerDutyConfig();
+    }
+
+    @POST(path = "/backend/admin/healthchecks-io", permission = "admin:edit:healthchecksIo")
+    String updateHealthchecksIoConfig(@BindRequest HealthchecksIoConfigDto configDto)
+            throws Exception {
+        try {
+            configRepository.updateHealthchecksIoConfig(configDto.convert(), configDto.version());
+        } catch (OptimisticLockException e) {
+            throw new JsonServiceException(PRECONDITION_FAILED, e);
+        }
+        return getHealthchecksIoConfig();
+    }
+
     @POST(path = "/backend/admin/send-test-email", permission = "admin:edit:smtp")
     String sendTestEmail(@BindRequest SmtpConfigDto configDto) throws IOException {
-        String testEmailRecipient = configDto.testEmailRecipient();
+        // capturing newPlainPassword separately so that newPassword doesn't go through
+        // encryption/decryption which has possibility of throwing
+        // org.glowroot.common.repo.util.LazySecretKey.SymmetricEncryptionKeyMissingException
+        SmtpConfigDto configDtoWithoutNewPassword;
+        String passwordOverride;
+        String newPassword = configDto.newPassword();
+        if (newPassword.isEmpty()) {
+            configDtoWithoutNewPassword = configDto;
+            passwordOverride = null;
+        } else {
+            configDtoWithoutNewPassword = ImmutableSmtpConfigDto.builder()
+                    .copyFrom(configDto)
+                    .newPassword("")
+                    .build();
+            passwordOverride = newPassword;
+        }
+        String testEmailRecipient = configDtoWithoutNewPassword.testEmailRecipient();
         checkNotNull(testEmailRecipient);
         List<String> emailAddresses =
                 Splitter.on(',').trimResults().splitToList(testEmailRecipient);
         try {
-            AlertingService.sendEmail(emailAddresses, "Test email from Glowroot", "",
-                    configDto.convert(configRepository), configRepository.getSecretKey(),
-                    mailService);
+            String centralDisplay;
+            String agentDisplay;
+            if (central) {
+                centralDisplay =
+                        configRepository.getCentralAdminGeneralConfig().centralDisplayName();
+                agentDisplay = "";
+            } else {
+                centralDisplay = "";
+                agentDisplay = configRepository.getEmbeddedAdminGeneralConfig()
+                        .agentDisplayNameOrDefault();
+            }
+            String subject = "Test email";
+            AlertingService.sendEmail(centralDisplay, agentDisplay, subject, emailAddresses, "",
+                    configDtoWithoutNewPassword.convert(configRepository), passwordOverride,
+                    configRepository.getLazySecretKey(), mailService);
         } catch (Exception e) {
             logger.debug(e.getMessage(), e);
-            return createErrorResponse(e.getMessage());
+            return createErrorResponse(e);
         }
         return "{}";
     }
 
-    @POST(path = "/backend/admin/test-ldap-connection", permission = "admin:edit:ldap")
-    String testLdapConnection(@BindRequest LdapConfigDto configDto) throws Exception {
-        LdapConfig config = configDto.convert(configRepository);
-        String authTestUsername = checkNotNull(configDto.authTestUsername());
-        String authTestPassword = checkNotNull(configDto.authTestPassword());
+    @POST(path = "/backend/admin/test-http-proxy", permission = "admin:edit:httpProxy")
+    String testHttpProxy(@BindRequest HttpProxyConfigDto configDto) throws IOException {
+        // capturing newPlainPassword separately so that newPassword doesn't go through
+        // encryption/decryption which has possibility of throwing
+        // org.glowroot.common.repo.util.LazySecretKey.SymmetricEncryptionKeyMissingException
+        HttpProxyConfigDto configDtoWithoutNewPassword;
+        String passwordOverride;
+        String newPassword = configDto.newPassword();
+        if (newPassword.isEmpty()) {
+            configDtoWithoutNewPassword = configDto;
+            passwordOverride = null;
+        } else {
+            configDtoWithoutNewPassword = ImmutableHttpProxyConfigDto.builder()
+                    .copyFrom(configDto)
+                    .newPassword("")
+                    .build();
+            passwordOverride = newPassword;
+        }
+        String testUrl = configDtoWithoutNewPassword.testUrl();
+        checkNotNull(testUrl);
+        URI uri;
+        try {
+            uri = new URI(testUrl);
+        } catch (URISyntaxException e) {
+            logger.debug(e.getMessage(), e);
+            return createErrorResponse(e);
+        }
+        if (uri.getScheme() == null) {
+            return createErrorResponse("Invalid url, missing protocol (e.g. http://)");
+        }
+        if (uri.getHost() == null) {
+            return createErrorResponse("Invalid url, missing host");
+        }
+        String responseContent;
+        try {
+            responseContent = httpClient.getWithHttpProxyConfigOverride(testUrl,
+                    configDtoWithoutNewPassword.convert(configRepository), passwordOverride);
+        } catch (Exception e) {
+            logger.debug(e.getMessage(), e);
+            return createErrorResponse(e);
+        }
+        StringBuilder sb = new StringBuilder();
+        JsonGenerator jg = mapper.getFactory().createGenerator(CharStreams.asWriter(sb));
+        try {
+            jg.writeStartObject();
+            jg.writeStringField("content", responseContent);
+            jg.writeEndObject();
+        } finally {
+            jg.close();
+        }
+        return sb.toString();
+    }
+
+    @POST(path = "/backend/admin/test-ldap", permission = "admin:edit:ldap")
+    String testLdap(@BindRequest LdapConfigDto configDto) throws Exception {
+        // capturing newPlainPassword separately so that newPassword doesn't go through
+        // encryption/decryption which has possibility of throwing
+        // org.glowroot.common.repo.util.LazySecretKey.SymmetricEncryptionKeyMissingException
+        LdapConfigDto configDtoWithoutNewPassword;
+        String passwordOverride;
+        String newPassword = configDto.newPassword();
+        if (newPassword.isEmpty()) {
+            configDtoWithoutNewPassword = configDto;
+            passwordOverride = null;
+        } else {
+            configDtoWithoutNewPassword = ImmutableLdapConfigDto.builder()
+                    .copyFrom(configDto)
+                    .newPassword("")
+                    .build();
+            passwordOverride = newPassword;
+        }
+        LdapConfig config = configDtoWithoutNewPassword.convert(configRepository);
+        String authTestUsername = checkNotNull(configDtoWithoutNewPassword.authTestUsername());
+        String authTestPassword = checkNotNull(configDtoWithoutNewPassword.authTestPassword());
         Set<String> ldapGroupDns;
         try {
             ldapGroupDns = LdapAuthentication.authenticateAndGetLdapGroupDns(authTestUsername,
-                    authTestPassword, config, configRepository.getSecretKey());
+                    authTestPassword, config, passwordOverride,
+                    configRepository.getLazySecretKey());
         } catch (AuthenticationException e) {
             logger.debug(e.getMessage(), e);
-            return createErrorResponse(e.getMessage());
+            return createErrorResponse(e);
         }
         Set<String> glowrootRoles = LdapAuthentication.getGlowrootRoles(ldapGroupDns, config);
-        StringWriter sw = new StringWriter();
-        JsonGenerator jg = mapper.getFactory().createGenerator(sw);
-        jg.writeStartObject();
-        jg.writeObjectField("ldapGroupDns", ldapGroupDns);
-        jg.writeObjectField("glowrootRoles", glowrootRoles);
-        jg.writeEndObject();
-        jg.close();
-        return sw.toString();
+        StringBuilder sb = new StringBuilder();
+        JsonGenerator jg = mapper.getFactory().createGenerator(CharStreams.asWriter(sb));
+        try {
+            jg.writeStartObject();
+            jg.writeObjectField("ldapGroupDns", ldapGroupDns);
+            jg.writeObjectField("glowrootRoles", glowrootRoles);
+            jg.writeEndObject();
+        } finally {
+            jg.close();
+        }
+        return sb.toString();
+    }
+
+    @POST(path = "/backend/admin/defrag-h2-data", permission = "")
+    void defragH2Data(@BindAuthentication Authentication authentication) throws Exception {
+        if (!offlineViewer && !authentication.isAdminPermitted("admin:edit:storage")) {
+            throw new JsonServiceException(HttpResponseStatus.FORBIDDEN);
+        }
+        repoAdmin.defragH2Data();
+    }
+
+    @POST(path = "/backend/admin/compact-h2-data", permission = "")
+    void compactH2Data(@BindAuthentication Authentication authentication) throws Exception {
+        if (!offlineViewer && !authentication.isAdminPermitted("admin:edit:storage")) {
+            throw new JsonServiceException(HttpResponseStatus.FORBIDDEN);
+        }
+        repoAdmin.compactH2Data();
+    }
+
+    @POST(path = "/backend/admin/analyze-h2-disk-space", permission = "")
+    String analyzeH2DiskSpace(@BindAuthentication Authentication authentication) throws Exception {
+        if (!offlineViewer && !authentication.isAdminPermitted("admin:edit:storage")) {
+            throw new JsonServiceException(HttpResponseStatus.FORBIDDEN);
+        }
+        long h2DataFileSize = repoAdmin.getH2DataFileSize();
+        List<H2Table> tables = repoAdmin.analyzeH2DiskSpace();
+        StringBuilder sb = new StringBuilder();
+        JsonGenerator jg = mapper.getFactory().createGenerator(CharStreams.asWriter(sb));
+        try {
+            jg.writeStartObject();
+            jg.writeNumberField("h2DataFileSize", h2DataFileSize);
+            jg.writeObjectField("tables", orderingByBytesDesc.sortedCopy(tables));
+            jg.writeEndObject();
+        } finally {
+            jg.close();
+        }
+        return sb.toString();
+    }
+
+    @POST(path = "/backend/admin/analyze-trace-counts", permission = "")
+    String analyzeTraceCounts(@BindAuthentication Authentication authentication) throws Exception {
+        if (!offlineViewer && !authentication.isAdminPermitted("admin:edit:storage")) {
+            throw new JsonServiceException(HttpResponseStatus.FORBIDDEN);
+        }
+        return mapper.writeValueAsString(repoAdmin.analyzeTraceCounts());
     }
 
     @POST(path = "/backend/admin/delete-all-stored-data", permission = "admin:edit:storage")
     void deleteAllData() throws Exception {
         repoAdmin.deleteAllData();
-        liveAggregateRepository.clearInMemoryAggregate();
+        liveAggregateRepository.clearInMemoryData();
     }
 
-    @POST(path = "/backend/admin/defrag-data", permission = "admin:edit:storage")
-    void defragData() throws Exception {
-        repoAdmin.defrag();
+    @POST(path = "/backend/admin/update-cassandra-twcs-window-sizes",
+            permission = "admin:edit:storage")
+    String updateCassandraTwcsWindowSizes() throws Exception {
+        return Integer.toString(repoAdmin.updateCassandraTwcsWindowSizes());
+    }
+
+    @GET(path = "/backend/admin/cassandra-write-totals", permission = "admin:view:storage")
+    String getCassandraWriteTotals(@BindRequest CassandraWriteTotalsRequest request)
+            throws JsonProcessingException {
+        String tableName = request.tableName();
+        String agentRollupId = request.agentRollupId();
+        String transactionType = request.transactionType();
+        int limit = request.limit();
+        if (tableName == null) {
+            return mapper.writeValueAsString(repoAdmin.getCassandraWriteTotalsPerTable(limit));
+        } else if (agentRollupId == null) {
+            return mapper.writeValueAsString(
+                    repoAdmin.getCassandraWriteTotalsPerAgentRollup(tableName, limit));
+        } else if (transactionType == null) {
+            return mapper.writeValueAsString(repoAdmin
+                    .getCassandraWriteTotalsPerTransactionType(tableName, agentRollupId, limit));
+        } else {
+            return mapper.writeValueAsString(repoAdmin.getCassandraWriteTotalsPerTransactionName(
+                    tableName, agentRollupId, transactionType, limit));
+        }
+    }
+
+    private @Nullable File getConfFile(String fileName) {
+        for (File confDir : confDirs) {
+            File confFile = new File(confDir, fileName);
+            if (confFile.exists()) {
+                return confFile;
+            }
+        }
+        return null;
     }
 
     @RequiresNonNull("httpServer")
-    private Object onSuccessfulWebUpdate(WebConfig config) throws Exception {
-        boolean closeCurrentChannel = false;
+    private CommonResponse onSuccessfulEmbeddedWebUpdate(EmbeddedWebConfig config)
+            throws Exception {
+        boolean closeCurrentChannelAfterPortChange = false;
         boolean portChangeFailed = false;
-        if (config.port() != httpServer.getPort()) {
+        if (config.port() != checkNotNull(httpServer.getPort())) {
             try {
                 httpServer.changePort(config.port());
-                closeCurrentChannel = true;
+                closeCurrentChannelAfterPortChange = true;
             } catch (PortChangeFailedException e) {
                 logger.error(e.getMessage(), e);
                 portChangeFailed = true;
@@ -319,39 +648,79 @@ class AdminJsonService {
             // only change protocol if port change did not fail, otherwise confusing to display
             // message that port change failed while at the same time redirecting user to HTTP/S
             httpServer.changeProtocol(config.https());
-            closeCurrentChannel = true;
+            closeCurrentChannelAfterPortChange = true;
         }
-        String responseText = getWebConfig(portChangeFailed);
-        ByteBuf responseContent = Unpooled.copiedBuffer(responseText, Charsets.ISO_8859_1);
-        FullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, OK, responseContent);
-        if (closeCurrentChannel) {
-            response.headers().set("Glowroot-Close-Channel", "true");
+        String responseText = getEmbeddedWebConfig(portChangeFailed);
+        CommonResponse response = new CommonResponse(OK, MediaType.JSON_UTF_8, responseText);
+        if (closeCurrentChannelAfterPortChange) {
+            response.setCloseConnectionAfterPortChange();
         }
         return response;
     }
 
-    @RequiresNonNull("httpServer")
-    private String getWebConfig(boolean portChangeFailed) throws Exception {
-        WebConfig config = configRepository.getWebConfig();
-        return mapper.writeValueAsString(ImmutableWebConfigResponse.builder()
-                .config(WebConfigDto.create(config))
-                .activePort(httpServer.getPort())
-                .activeBindAddress(httpServer.getBindAddress())
-                .activeHttps(httpServer.getHttps())
-                .glowrootDir(glowrootDir.getAbsolutePath())
-                .portChangeFailed(portChangeFailed)
+    private String getEmbeddedAdminGeneralConfig() throws Exception {
+        return mapper.writeValueAsString(ImmutableEmbeddedAdminGeneralConfigResponse.builder()
+                .config(EmbeddedAdminGeneralConfigDto
+                        .create(configRepository.getEmbeddedAdminGeneralConfig()))
+                .defaultAgentDisplayName(EmbeddedAdminGeneralConfig.defaultAgentDisplayName())
                 .build());
     }
 
+    private String getCentralAdminGeneralConfig() throws Exception {
+        return mapper.writeValueAsString(CentralAdminGeneralConfigDto
+                .create(configRepository.getCentralAdminGeneralConfig()));
+    }
+
+    private String getEmbeddedWebConfig(boolean portChangeFailed) throws Exception {
+        EmbeddedWebConfig config = configRepository.getEmbeddedWebConfig();
+        ImmutableEmbeddedWebConfigResponse.Builder builder =
+                ImmutableEmbeddedWebConfigResponse.builder()
+                        .config(EmbeddedWebConfigDto.create(config))
+                        .portReadOnly(webPortReadOnly)
+                        .portChangeFailed(portChangeFailed);
+        if (httpServer == null) {
+            builder.activePort(config.port())
+                    .activeBindAddress(config.bindAddress())
+                    .activeHttps(config.https());
+        } else {
+            builder.activePort(checkNotNull(httpServer.getPort()))
+                    .activeBindAddress(httpServer.getBindAddress())
+                    .activeHttps(httpServer.getHttps());
+        }
+        for (File confDir : confDirs) {
+            builder.addConfDirs(confDir.getAbsolutePath());
+        }
+        return mapper.writeValueAsString(builder.build());
+    }
+
+    private String getCentralWebConfig() throws Exception {
+        return mapper.writeValueAsString(ImmutableCentralWebConfigResponse.builder()
+                .config(CentralWebConfigDto.create(configRepository.getCentralWebConfig()))
+                .build());
+    }
+
+    private static String createErrorResponse(Exception exception) throws IOException {
+        String message = exception.getLocalizedMessage();
+        String exceptionName = exception.getClass().getSimpleName();
+        if (message == null) {
+            return createErrorResponse(exceptionName);
+        } else {
+            return createErrorResponse(exceptionName + ": " + message);
+        }
+    }
+
     private static String createErrorResponse(@Nullable String message) throws IOException {
-        StringWriter sw = new StringWriter();
-        JsonGenerator jg = mapper.getFactory().createGenerator(sw);
-        jg.writeStartObject();
-        jg.writeBooleanField("error", true);
-        jg.writeStringField("message", message);
-        jg.writeEndObject();
-        jg.close();
-        return sw.toString();
+        StringBuilder sb = new StringBuilder();
+        JsonGenerator jg = mapper.getFactory().createGenerator(CharStreams.asWriter(sb));
+        try {
+            jg.writeStartObject();
+            jg.writeBooleanField("error", true);
+            jg.writeStringField("message", message);
+            jg.writeEndObject();
+        } finally {
+            jg.close();
+        }
+        return sb.toString();
     }
 
     @Value.Immutable
@@ -361,13 +730,25 @@ class AdminJsonService {
     }
 
     @Value.Immutable
-    interface WebConfigResponse {
-        WebConfigDto config();
+    interface EmbeddedAdminGeneralConfigResponse {
+        EmbeddedAdminGeneralConfigDto config();
+        String defaultAgentDisplayName();
+    }
+
+    @Value.Immutable
+    interface EmbeddedWebConfigResponse {
+        EmbeddedWebConfigDto config();
         int activePort();
         String activeBindAddress();
         boolean activeHttps();
-        String glowrootDir();
+        boolean portReadOnly();
         boolean portChangeFailed();
+        List<String> confDirs();
+    }
+
+    @Value.Immutable
+    interface CentralWebConfigResponse {
+        CentralWebConfigDto config();
     }
 
     @Value.Immutable
@@ -383,7 +764,58 @@ class AdminJsonService {
     }
 
     @Value.Immutable
-    abstract static class WebConfigDto {
+    interface CassandraWriteTotalsRequest {
+        @Nullable
+        String tableName();
+        @Nullable
+        String agentRollupId();
+        @Nullable
+        String transactionType();
+        int limit();
+    }
+
+    @Value.Immutable
+    abstract static class EmbeddedAdminGeneralConfigDto {
+
+        abstract String agentDisplayName();
+        abstract String version();
+
+        private EmbeddedAdminGeneralConfig convert() {
+            return ImmutableEmbeddedAdminGeneralConfig.builder()
+                    .agentDisplayName(agentDisplayName())
+                    .build();
+        }
+
+        private static EmbeddedAdminGeneralConfigDto create(EmbeddedAdminGeneralConfig config) {
+            return ImmutableEmbeddedAdminGeneralConfigDto.builder()
+                    .agentDisplayName(config.agentDisplayName())
+                    .version(config.version())
+                    .build();
+        }
+    }
+
+    @Value.Immutable
+    abstract static class CentralAdminGeneralConfigDto {
+
+        abstract String centralDisplayName();
+        abstract String version();
+
+        private CentralAdminGeneralConfig convert() {
+            return ImmutableCentralAdminGeneralConfig.builder()
+                    .centralDisplayName(centralDisplayName())
+                    .build();
+        }
+
+        private static CentralAdminGeneralConfigDto create(CentralAdminGeneralConfig config) {
+            return ImmutableCentralAdminGeneralConfigDto.builder()
+                    .centralDisplayName(config.centralDisplayName())
+                    .version(config.version())
+                    .build();
+        }
+    }
+
+    @Value.Immutable
+    abstract static class EmbeddedWebConfigDto {
 
         abstract int port();
         abstract String bindAddress();
@@ -393,8 +825,8 @@ class AdminJsonService {
         abstract String sessionCookieName();
         abstract String version();
 
-        private WebConfig convert() throws Exception {
-            return ImmutableWebConfig.builder()
+        private EmbeddedWebConfig convert() {
+            return ImmutableEmbeddedWebConfig.builder()
                     .port(port())
                     .bindAddress(bindAddress())
                     .https(https())
@@ -404,8 +836,8 @@ class AdminJsonService {
                     .build();
         }
 
-        private static WebConfigDto create(WebConfig config) {
-            return ImmutableWebConfigDto.builder()
+        private static EmbeddedWebConfigDto create(EmbeddedWebConfig config) {
+            return ImmutableEmbeddedWebConfigDto.builder()
                     .port(config.port())
                     .bindAddress(config.bindAddress())
                     .https(config.https())
@@ -418,7 +850,30 @@ class AdminJsonService {
     }
 
     @Value.Immutable
-    abstract static class FatStorageConfigDto {
+    abstract static class CentralWebConfigDto {
+
+        abstract int sessionTimeoutMinutes();
+        abstract String sessionCookieName();
+        abstract String version();
+
+        private CentralWebConfig convert() {
+            return ImmutableCentralWebConfig.builder()
+                    .sessionTimeoutMinutes(sessionTimeoutMinutes())
+                    .sessionCookieName(sessionCookieName())
+                    .build();
+        }
+
+        private static CentralWebConfigDto create(CentralWebConfig config) {
+            return ImmutableCentralWebConfigDto.builder()
+                    .sessionTimeoutMinutes(config.sessionTimeoutMinutes())
+                    .sessionCookieName(config.sessionCookieName())
+                    .version(config.version())
+                    .build();
+        }
+    }
+
+    @Value.Immutable
+    abstract static class EmbeddedStorageConfigDto {
 
         abstract ImmutableList<Integer> rollupExpirationHours();
         abstract int traceExpirationHours();
@@ -427,8 +882,8 @@ class AdminJsonService {
         abstract int traceCappedDatabaseSizeMb();
         abstract String version();
 
-        private FatStorageConfig convert() {
-            return ImmutableFatStorageConfig.builder()
+        private EmbeddedStorageConfig convert() {
+            return ImmutableEmbeddedStorageConfig.builder()
                     .rollupExpirationHours(rollupExpirationHours())
                     .traceExpirationHours(traceExpirationHours())
                     .fullQueryTextExpirationHours(fullQueryTextExpirationHours())
@@ -437,8 +892,8 @@ class AdminJsonService {
                     .build();
         }
 
-        private static FatStorageConfigDto create(FatStorageConfig config) {
-            return ImmutableFatStorageConfigDto.builder()
+        private static EmbeddedStorageConfigDto create(EmbeddedStorageConfig config) {
+            return ImmutableEmbeddedStorageConfigDto.builder()
                     .addAllRollupExpirationHours(config.rollupExpirationHours())
                     .traceExpirationHours(config.traceExpirationHours())
                     .fullQueryTextExpirationHours(config.fullQueryTextExpirationHours())
@@ -453,23 +908,28 @@ class AdminJsonService {
     abstract static class CentralStorageConfigDto {
 
         abstract ImmutableList<Integer> rollupExpirationHours();
+        abstract ImmutableList<Integer> queryAndServiceCallRollupExpirationHours();
+        abstract ImmutableList<Integer> profileRollupExpirationHours();
         abstract int traceExpirationHours();
-        abstract int fullQueryTextExpirationHours();
         abstract String version();
 
         private CentralStorageConfig convert() {
             return ImmutableCentralStorageConfig.builder()
                     .rollupExpirationHours(rollupExpirationHours())
+                    .queryAndServiceCallRollupExpirationHours(
+                            queryAndServiceCallRollupExpirationHours())
+                    .profileRollupExpirationHours(profileRollupExpirationHours())
                     .traceExpirationHours(traceExpirationHours())
-                    .fullQueryTextExpirationHours(fullQueryTextExpirationHours())
                     .build();
         }
 
         private static CentralStorageConfigDto create(CentralStorageConfig config) {
             return ImmutableCentralStorageConfigDto.builder()
                     .addAllRollupExpirationHours(config.rollupExpirationHours())
+                    .addAllQueryAndServiceCallRollupExpirationHours(
+                            config.queryAndServiceCallRollupExpirationHours())
+                    .addAllProfileRollupExpirationHours(config.profileRollupExpirationHours())
                     .traceExpirationHours(config.traceExpirationHours())
-                    .fullQueryTextExpirationHours(config.fullQueryTextExpirationHours())
                     .version(config.version())
                     .build();
         }
@@ -479,8 +939,10 @@ class AdminJsonService {
     abstract static class SmtpConfigDto {
 
         abstract String host();
+        @JsonInclude
         abstract @Nullable Integer port();
-        abstract boolean ssl();
+        @JsonInclude
+        abstract @Nullable ConnectionSecurity connectionSecurity();
         abstract String username();
         abstract boolean passwordExists();
         @Value.Default
@@ -497,7 +959,7 @@ class AdminJsonService {
             ImmutableSmtpConfig.Builder builder = ImmutableSmtpConfig.builder()
                     .host(host())
                     .port(port())
-                    .ssl(ssl())
+                    .connectionSecurity(connectionSecurity())
                     .username(username())
                     .putAllAdditionalProperties(additionalProperties())
                     .fromEmailAddress(fromEmailAddress())
@@ -508,7 +970,7 @@ class AdminJsonService {
             } else if (passwordExists() && !newPassword().isEmpty()) {
                 // change password
                 String newPassword =
-                        Encryption.encrypt(newPassword(), configRepository.getSecretKey());
+                        Encryption.encrypt(newPassword(), configRepository.getLazySecretKey());
                 builder.password(newPassword);
             } else {
                 // keep existing password
@@ -521,7 +983,7 @@ class AdminJsonService {
             return ImmutableSmtpConfigDto.builder()
                     .host(config.host())
                     .port(config.port())
-                    .ssl(config.ssl())
+                    .connectionSecurity(config.connectionSecurity())
                     .username(config.username())
                     .passwordExists(!config.password().isEmpty())
                     .putAllAdditionalProperties(config.additionalProperties())
@@ -533,9 +995,56 @@ class AdminJsonService {
     }
 
     @Value.Immutable
+    abstract static class HttpProxyConfigDto {
+
+        abstract String host();
+        @JsonInclude
+        abstract @Nullable Integer port();
+        abstract String username();
+        abstract boolean passwordExists();
+        @Value.Default
+        String newPassword() { // only used in request
+            return "";
+        }
+        abstract @Nullable String testUrl(); // only used in request
+        abstract String version();
+
+        private HttpProxyConfig convert(ConfigRepository configRepository) throws Exception {
+            ImmutableHttpProxyConfig.Builder builder = ImmutableHttpProxyConfig.builder()
+                    .host(host())
+                    .port(port())
+                    .username(username());
+            if (!passwordExists()) {
+                // clear password
+                builder.password("");
+            } else if (passwordExists() && !newPassword().isEmpty()) {
+                // change password
+                String newPassword =
+                        Encryption.encrypt(newPassword(), configRepository.getLazySecretKey());
+                builder.password(newPassword);
+            } else {
+                // keep existing password
+                builder.password(configRepository.getHttpProxyConfig().password());
+            }
+            return builder.build();
+        }
+
+        private static HttpProxyConfigDto create(HttpProxyConfig config) {
+            return ImmutableHttpProxyConfigDto.builder()
+                    .host(config.host())
+                    .port(config.port())
+                    .username(config.username())
+                    .passwordExists(!config.password().isEmpty())
+                    .version(config.version())
+                    .build();
+        }
+    }
+
+    @Value.Immutable
     abstract static class LdapConfigDto {
 
         abstract String host();
+        @JsonInclude
         abstract @Nullable Integer port();
         abstract boolean ssl();
         abstract String username();
@@ -570,7 +1079,7 @@ class AdminJsonService {
             } else if (passwordExists() && !newPassword().isEmpty()) {
                 // change password
                 String newPassword =
-                        Encryption.encrypt(newPassword(), configRepository.getSecretKey());
+                        Encryption.encrypt(newPassword(), configRepository.getLazySecretKey());
                 builder.password(newPassword);
             } else {
                 // keep existing password
@@ -591,6 +1100,46 @@ class AdminJsonService {
                     .groupBaseDn(config.groupBaseDn())
                     .groupSearchFilter(config.groupSearchFilter())
                     .roleMappings(config.roleMappings())
+                    .version(config.version())
+                    .build();
+        }
+    }
+
+    @Value.Immutable
+    abstract static class PagerDutyConfigDto {
+
+        public abstract List<ImmutablePagerDutyIntegrationKey> integrationKeys();
+        abstract String version();
+
+        private PagerDutyConfig convert() {
+            return ImmutablePagerDutyConfig.builder()
+                    .addAllIntegrationKeys(integrationKeys())
+                    .build();
+        }
+
+        private static PagerDutyConfigDto create(PagerDutyConfig config) {
+            return ImmutablePagerDutyConfigDto.builder()
+                    .addAllIntegrationKeys(config.integrationKeys())
+                    .version(config.version())
+                    .build();
+        }
+    }
+
+    @Value.Immutable
+    abstract static class HealthchecksIoConfigDto {
+
+        abstract String pingUrl();
+        abstract String version();
+
+        private HealthchecksIoConfig convert() {
+            return ImmutableHealthchecksIoConfig.builder()
+                    .pingUrl(pingUrl())
+                    .build();
+        }
+
+        private static HealthchecksIoConfigDto create(HealthchecksIoConfig config) {
+            return ImmutableHealthchecksIoConfigDto.builder()
+                    .pingUrl(config.pingUrl())
                     .version(config.version())
                     .build();
         }

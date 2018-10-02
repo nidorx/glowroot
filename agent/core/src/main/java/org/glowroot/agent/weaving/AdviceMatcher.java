@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,13 @@
 package org.glowroot.agent.weaving;
 
 import java.lang.reflect.Modifier;
+import java.util.Collection;
 import java.util.List;
 import java.util.regex.Pattern;
 
-import javax.annotation.Nullable;
-
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 import org.objectweb.asm.Type;
 import org.slf4j.Logger;
@@ -38,10 +38,11 @@ abstract class AdviceMatcher {
     private static final Logger logger = LoggerFactory.getLogger(AdviceMatcher.class);
 
     static ImmutableList<AdviceMatcher> getAdviceMatchers(String className,
-            List<String> classAnnotations, List<Advice> advisors) {
+            List<String> classAnnotations, Collection<String> superClassNames,
+            List<Advice> advisors) {
         List<AdviceMatcher> adviceMatchers = Lists.newArrayList();
         for (Advice advice : advisors) {
-            if (isDeclaringClassMatch(className, classAnnotations, advice)) {
+            if (isClassMatch(className, classAnnotations, superClassNames, advice)) {
                 adviceMatchers.add(ImmutableAdviceMatcher.of(advice));
             }
         }
@@ -100,16 +101,6 @@ abstract class AdviceMatcher {
         return parameterTypes.size() == pointcutMethodParameterTypes.size();
     }
 
-    private boolean isMethodParameterTypeMatch(Object pointcutMethodParameterType,
-            Type parameterType) {
-        String className = parameterType.getClassName();
-        if (pointcutMethodParameterType instanceof String) {
-            return pointcutMethodParameterType.equals(className);
-        } else {
-            return ((Pattern) pointcutMethodParameterType).matcher(className).matches();
-        }
-    }
-
     private boolean isMethodReturnMatch(Type returnType) {
         String pointcutMethodReturn = advice().pointcut().methodReturnType();
         return pointcutMethodReturn.isEmpty()
@@ -125,7 +116,17 @@ abstract class AdviceMatcher {
         return true;
     }
 
-    private boolean isMethodModifierMatch(MethodModifier methodModifier, int modifiers) {
+    private static boolean isMethodParameterTypeMatch(Object pointcutMethodParameterType,
+            Type parameterType) {
+        String className = parameterType.getClassName();
+        if (pointcutMethodParameterType instanceof String) {
+            return pointcutMethodParameterType.equals(className);
+        } else {
+            return ((Pattern) pointcutMethodParameterType).matcher(className).matches();
+        }
+    }
+
+    private static boolean isMethodModifierMatch(MethodModifier methodModifier, int modifiers) {
         switch (methodModifier) {
             case PUBLIC:
                 return Modifier.isPublic(modifiers);
@@ -138,18 +139,36 @@ abstract class AdviceMatcher {
         }
     }
 
-    private static boolean isDeclaringClassMatch(String className, List<String> classAnnotations,
-            Advice advice) {
-        if (!isAnnotationMatch(classAnnotations, advice.pointcutClassNameAnnotationPattern(),
+    private static boolean isClassMatch(String className, List<String> classAnnotations,
+            Collection<String> superClassNames, Advice advice) {
+        if (!isAnnotationMatch(classAnnotations, advice.pointcutClassAnnotationPattern(),
                 advice.pointcut().classAnnotation())) {
             return false;
         }
-        Pattern methodDeclaringClassNamePattern = advice.pointcutMethodDeclaringClassNamePattern();
-        if (methodDeclaringClassNamePattern != null) {
-            return methodDeclaringClassNamePattern.matcher(className).matches();
+        if (!isClassNameMatch(className, advice)) {
+            return false;
         }
-        String methodDeclaringClassName = advice.pointcutMethodDeclaringClassName();
-        return methodDeclaringClassName.isEmpty() || methodDeclaringClassName.equals(className);
+        Pattern pointcutSuperTypeRestrictionPattern = advice.pointcutSuperTypeRestrictionPattern();
+        if (pointcutSuperTypeRestrictionPattern != null) {
+            for (String superClassName : superClassNames) {
+                if (pointcutSuperTypeRestrictionPattern.matcher(superClassName).matches()) {
+                    return true;
+                }
+            }
+            return false;
+        } else {
+            String superTypeRestriction = advice.pointcut().superTypeRestriction();
+            return superTypeRestriction.isEmpty() || superClassNames.contains(superTypeRestriction);
+        }
+    }
+
+    private static boolean isClassNameMatch(String className, Advice advice) {
+        Pattern classNamePattern = advice.pointcutClassNamePattern();
+        if (classNamePattern != null) {
+            return classNamePattern.matcher(className).matches();
+        }
+        String pointcutClassName = advice.pointcut().className();
+        return pointcutClassName.isEmpty() || pointcutClassName.equals(className);
     }
 
     private static boolean isAnnotationMatch(List<String> annotations, @Nullable Pattern pattern,

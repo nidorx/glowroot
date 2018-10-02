@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,12 @@
  */
 package org.glowroot.agent.plugin.httpclient;
 
-import javax.annotation.Nullable;
-
 import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.MessageSupplier;
 import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.TimerName;
 import org.glowroot.agent.plugin.api.TraceEntry;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
 import org.glowroot.agent.plugin.api.weaving.BindThrowable;
 import org.glowroot.agent.plugin.api.weaving.BindTraveler;
@@ -35,8 +34,10 @@ public class ApacheHttpClient3xAspect {
 
     @Shim("org.apache.commons.httpclient.HttpMethod")
     public interface HttpMethod {
+
         @Nullable
         String getName();
+
         @Shim("org.apache.commons.httpclient.URI getURI()")
         @Nullable
         Object glowroot$getURI();
@@ -68,6 +69,9 @@ public class ApacheHttpClient3xAspect {
                 uri = "";
             } else {
                 uri = uriObj.toString();
+                if (uri == null) {
+                    uri = "";
+                }
             }
             return context.startServiceCallEntry("HTTP", method + Uris.stripQueryString(uri),
                     MessageSupplier.create("http client request: {}{}", method, uri),
@@ -80,9 +84,9 @@ public class ApacheHttpClient3xAspect {
             }
         }
         @OnThrow
-        public static void onThrow(@BindThrowable Throwable throwable,
+        public static void onThrow(@BindThrowable Throwable t,
                 @BindTraveler TraceEntry traceEntry) {
-            traceEntry.endWithError(throwable);
+            traceEntry.endWithError(t);
         }
     }
 }

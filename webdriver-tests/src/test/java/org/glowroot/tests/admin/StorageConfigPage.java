@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2016 the original author or authors.
+ * Copyright 2014-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,59 +15,71 @@
  */
 package org.glowroot.tests.admin;
 
-import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 
-import org.glowroot.tests.util.Utils;
+import org.glowroot.tests.util.Page;
 
 import static org.openqa.selenium.By.xpath;
 
-public class StorageConfigPage {
-
-    private final WebDriver driver;
+public class StorageConfigPage extends Page {
 
     public StorageConfigPage(WebDriver driver) {
-        this.driver = driver;
+        super(driver);
     }
 
     public WebElement getRollupExpirationTextField(int i) {
-        return withWait(xpath("//div[@gt-model='page.rollupExpirationDays[" + i + "]']//input"));
+        return getWithWait(xpath("//div[@gt-model='page.rollupExpirationDays[" + i + "]']//input"));
     }
 
     public WebElement getTraceExpirationTextField() {
-        return withWait(xpath("//div[@gt-model='page.traceExpirationDays']//input"));
+        return getWithWait(xpath("//div[@gt-model='page.traceExpirationDays']//input"));
     }
 
     public WebElement getFullQueryTextExpirationTextField() {
-        return withWait(xpath("//div[@gt-model='page.fullQueryTextExpirationDays']//input"));
+        return getWithWait(xpath("//div[@gt-model='page.fullQueryTextExpirationDays']//input"));
     }
 
     public WebElement getRollupCappedDatabaseSizeTextField(int i) {
-        return withWait(
+        return getWithWait(
                 xpath("//div[@gt-model='config.rollupCappedDatabaseSizesMb[" + i + "]']//input"));
     }
 
     public WebElement getTraceCappedDatabaseSizeTextField() {
-        return withWait(xpath("//div[@gt-model='config.traceCappedDatabaseSizeMb']//input"));
-    }
-
-    public void clickDeleteAllButton() throws InterruptedException {
-        WebElement deleteAllDataButton =
-                withWait(xpath("//button[normalize-space()='Delete all data']"));
-        deleteAllDataButton.click();
-        WebElement yesButton = withWait(xpath("//button[normalize-space()='Yes']"));
-        yesButton.click();
-        // TODO implement better wait for delete to complete
-        Thread.sleep(1000);
+        return getWithWait(xpath("//div[@gt-model='config.traceCappedDatabaseSizeMb']//input"));
     }
 
     public void clickSaveButton() {
-        WebElement saveButton = withWait(xpath("//button[normalize-space()='Save changes']"));
-        saveButton.click();
+        clickWithWait(xpath("//button[normalize-space()='Save changes']"));
     }
 
-    private WebElement withWait(By by) {
-        return Utils.withWait(driver, by);
+    public void clickDeleteAllButton() throws InterruptedException {
+        clickWithWait(xpath("//button[normalize-space()='Delete all data']"));
+        clickWithWait(xpath("//button[normalize-space()='Yes']"));
+    }
+
+    public void clickDefragH2Data() {
+        clickWithWait(xpath("//button[normalize-space()='Defrag H2 data']"));
+        clickWithWait(xpath("//button[normalize-space()='Yes']"));
+    }
+
+    public void clickCompactH2Data() {
+        clickWithWait(xpath("//button[normalize-space()='Compact H2 data']"));
+        clickWithWait(xpath("//button[normalize-space()='Yes']"));
+    }
+
+    public void clickAnalyzeH2DiskSpace() {
+        clickWithWait(xpath("//button[normalize-space()='Analyze H2 disk space']"));
+        clickWithWait(xpath("//button[normalize-space()='Yes']"));
+    }
+
+    public void clickAnalyzeTraceCounts() {
+        clickWithWait(xpath("//button[normalize-space()='Analyze trace counts']"));
+        clickWithWait(xpath("//button[normalize-space()='Yes']"));
+    }
+
+    public void clickUpdateTwcsWindowSizesButton() {
+        clickWithWait(xpath("//button[normalize-space()='Update TWCS window sizes']"));
+        clickWithWait(xpath("//button[normalize-space()='Yes']"));
     }
 }

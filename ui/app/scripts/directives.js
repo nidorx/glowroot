@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2017 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ glowroot.factory('gtButtonGroupControllerFactory', [
             var $buttonMessage = $element.find('.gt-button-message');
             var $buttonSpinner = $element.find('.gt-button-spinner');
             // in case button is clicked again before message fades out
-            $buttonMessage.addClass('hide');
+            $buttonMessage.addClass('d-none');
             var spinner;
             if (!noSpinner) {
               spinner = Glowroot.showSpinner($buttonSpinner);
@@ -58,7 +58,7 @@ glowroot.factory('gtButtonGroupControllerFactory', [
               $buttonMessage.text(message);
               $buttonMessage.removeClass('gt-button-message-success');
               $buttonMessage.addClass('gt-button-message-error');
-              $buttonMessage.removeClass('hide');
+              $buttonMessage.removeClass('d-none');
               alreadyExecuting = false;
             });
 
@@ -80,8 +80,8 @@ glowroot.directive('gtButtonGroup', [
       template: ''
       + '<div class="clearfix">'
       + '  <span ng-transclude style="margin-right: 15px;"></span>'
-      + '  <div class="gt-button-spinner hide"></div>'
-      + '  <div class="gt-button-message hide" style="padding-top: 5px;"></div>'
+      + '  <div class="gt-button-spinner d-none"></div>'
+      + '  <div class="gt-button-message d-none" style="padding-top: 4px;"></div>'
       + '</div>',
       controller: [
         '$element',
@@ -106,7 +106,8 @@ glowroot.directive('gtButton', [
         gtDisabled: '&',
         gtNoSpinner: '@',
         gtConfirmHeader: '@',
-        gtConfirmBody: '@'
+        gtConfirmBody: '@',
+        gtValidateForm: '='
       },
       templateUrl: 'template/gt-button.html',
       require: '^?gtButtonGroup',
@@ -116,9 +117,21 @@ glowroot.directive('gtButton', [
           gtButtonGroup = gtButtonGroupControllerFactory.create(iElement, scope.gtNoSpinner);
         }
         scope.onClick = function () {
+          if (scope.gtValidateForm) {
+            if (scope.gtValidateForm.$invalid) {
+              scope.gtValidateForm.$$element.addClass('was-validated');
+              gtButtonGroup.onClick(function (args) {
+                args.deferred.reject('See validation error(s) above');
+              });
+              return;
+            } else {
+              scope.gtValidateForm.$$element.removeClass('was-validated');
+              // and proceed
+            }
+          }
           if (scope.gtConfirmHeader) {
             var $modal = $('#confirmationModal');
-            $modal.find('.modal-header h3').text(scope.gtConfirmHeader);
+            $modal.find('.modal-title').text(scope.gtConfirmHeader);
             $modal.find('.modal-body p').text(scope.gtConfirmBody);
             modals.display('#confirmationModal', true);
             $('#confirmationModalButton').off('click');
@@ -169,6 +182,17 @@ glowroot.directive('gtFormGroup', [
         if (!scope.gtType) {
           // default
           scope.gtType = 'text';
+        }
+        if (scope.gtType === 'codemirror') {
+          scope.codeMirrorOpts = {
+            indentUnit: 4,
+            lineNumbers: true,
+            matchBrackets: true,
+            mode: 'text/x-java'
+          };
+          if (scope.gtDisabled()) {
+            scope.codeMirrorOpts.readOnly = true;
+          }
         }
         scope.$watch('gtModel', function (newValue) {
           // conditional prevents the '.' from being automatically deleted when user deletes the '3' in '2.3'
@@ -221,11 +245,6 @@ glowroot.directive('gtInputGroupDropdown', function () {
           }
         });
       });
-      if (scope.gtClass) {
-        scope.classes = 'input-group-btn ' + scope.gtClass;
-      } else {
-        scope.classes = 'input-group-btn';
-      }
     }
   };
 });
@@ -236,7 +255,8 @@ glowroot.directive('gtNavbarItem', [
       scope: {
         gtDisplay: '@',
         gtItemName: '@',
-        gtUrl: '@'
+        gtUrl: '@',
+        gtClick: '&'
       },
       // replace is needed in order to not mess up bootstrap css hierarchical selectors
       replace: true,
@@ -245,12 +265,6 @@ glowroot.directive('gtNavbarItem', [
       link: function (scope) {
         scope.isActive = function () {
           return scope.$parent.activeNavbarItem === scope.gtItemName;
-        };
-        scope.ngClick = function () {
-          // need to collapse the navbar in mobile view
-          var $navbarCollapse = $('.navbar-collapse');
-          $navbarCollapse.removeClass('in');
-          $navbarCollapse.addClass('collapse');
         };
       }
     };
@@ -306,7 +320,7 @@ glowroot.directive('gtSpinner', function () {
   return function (scope, iElement, iAttrs) {
     var spinner;
     var timer;
-    iElement.addClass('hide');
+    iElement.addClass('d-none');
     scope.$watch(iAttrs.gtShow,
         function (newValue) {
           if (newValue) {
@@ -320,7 +334,7 @@ glowroot.directive('gtSpinner', function () {
             // z-index should be less than navbar (which is 1030)
             spinner = new Spinner({lines: 9, radius: 8, width: 5, left: left, zIndex: 1020});
             if (iAttrs.gtNoDelay) {
-              iElement.removeClass('hide');
+              iElement.removeClass('d-none');
               spinner.spin(iElement[0]);
             } else {
               // small delay so that if there is an immediate response the spinner doesn't blink
@@ -329,13 +343,13 @@ glowroot.directive('gtSpinner', function () {
               // inside of 100 milliseconds
               clearTimeout(timer);
               timer = setTimeout(function () {
-                iElement.removeClass('hide');
+                iElement.removeClass('d-none');
                 spinner.spin(iElement[0]);
               }, 100);
             }
-          } else if (spinner !== undefined) {
+          } else if (spinner) {
             clearTimeout(timer);
-            iElement.addClass('hide');
+            iElement.addClass('d-none');
             spinner.stop();
             spinner = undefined;
           }
@@ -359,10 +373,9 @@ glowroot.directive('gtFormAutofocusOnFirstInput', [
   function ($timeout) {
     return function (scope, iElement) {
       $timeout(function () {
-        // don't focus on selects because then back button won't work (at least in chrome)
-        var selector = 'input:not(.gt-autofocus-ignore)';
+        var selector = 'input:not(.gt-autofocus-ignore),select';
         var unregisterWatch = scope.$watch(function () {
-          return iElement.find(selector).length && iElement.find('input').first().is(':visible');
+          return iElement.find(selector).length && iElement.find('input,select').first().is(':visible');
         }, function (newValue) {
           if (newValue) {
             iElement.find(selector).first().focus();
@@ -403,18 +416,21 @@ glowroot.directive('gtSelectpicker', [
   function ($timeout) {
     return {
       scope: {
-        ngModel: '=',
+        gtModel: '=',
         gtSelectpickerOptions: '&',
         gtTitle: '&'
       },
       link: function (scope, iElement) {
         // need to set title before initializing selectpicker in order to avoid flicker of 'None selected' text
         // when going back and forth between two different transaction types
-        iElement.attr('title', scope.gtTitle);
+        iElement.attr('title', scope.gtTitle());
         // set style outside of $timeout to avoid style flicker on loading
         iElement.selectpicker(scope.gtSelectpickerOptions());
-        scope.$watch('ngModel', function () {
-          iElement.selectpicker('val', scope.ngModel);
+        scope.$watch('gtModel', function () {
+          // only works inside of $timeout
+          $timeout(function () {
+            iElement.selectpicker('val', scope.gtModel);
+          });
         });
         $timeout(function () {
           // refresh only works inside of $timeout
@@ -428,35 +444,84 @@ glowroot.directive('gtSelectpicker', [
   }
 ]);
 
+glowroot.directive('gtMultiselect', [
+  function () {
+    return {
+      scope: {
+        gtNoneSelectedText: '@'
+      },
+      link: function (scope, iElement) {
+        iElement.multiselect({
+          enableFiltering: true,
+          enableCaseInsensitiveFiltering: true,
+          filterPlaceholder: 'Filter',
+          nonSelectedText: scope.gtNoneSelectedText,
+          maxHeight: 400,
+          numberDisplayed: 2,
+          includeSelectAllOption: true,
+          // mostly for bootstrap 4 compatibility,
+          // and mostly copied from https://github.com/davidstutz/bootstrap-multiselect/pull/1050
+          buttonClass: 'btn btn-secondary',
+          buttonContainer: '<div class="dropdown" />',
+          templates: {
+            button: '<button type="button" class="multiselect dropdown-toggle" data-toggle="dropdown" data-flip="false"><span class="multiselect-selected-text"></span> <b class="caret"></b></button>',
+            ul: '<ul class="multiselect-container dropdown-menu p-1 m-0"></ul>',
+            filter: '<li class="multiselect-item multiselect-filter"><input class="form-control multiselect-search" type="text" /></li>',
+            filterClearBtn: '',
+            li: '<li><a tabIndex="0" class="dropdown-item" style="padding: 2px 0;"><label class="custom-control custom-checkbox" style="padding-left: 36px;"><div class="custom-control-label"></div></label></a></li>',
+          },
+          optionLabel: function (element) {
+            return $(element).data('val').indentedDisplay;
+          },
+          optionFullText: function (element) {
+            return $(element).data('val').display;
+          },
+          onDropdownShown: function() {
+            iElement.parent().find('.multiselect-search').focus();
+          },
+          onDropdownHidden: function() {
+            iElement.removeClass('ng-untouched');
+            iElement.addClass('ng-touched');
+          }
+        });
+        scope.$on('$destroy', function () {
+          iElement.multiselect('destroy');
+        });
+      }
+    };
+  }
+]);
+
 glowroot.directive('gtDatePicker', [
   '$timeout',
   function ($timeout) {
     return {
       scope: {
         gtModel: '=',
-        gtId: '@'
+        gtId: '@',
+        gtForm: '='
       },
       templateUrl: 'template/gt-date-picker.html',
       link: function (scope, iElement) {
         var dateElement = iElement.find('.date');
-        var icons = {
-          time: 'fa fa-clock-o',
-          date: 'fa fa-calendar',
-          up: 'fa fa-chevron-up',
-          down: 'fa fa-chevron-down',
-          previous: 'fa fa-chevron-left',
-          next: 'fa fa-chevron-right'
-        };
-        var dateElementPicker = dateElement.datetimepicker({
-          icons: icons,
-          format: 'L'
+        dateElement.datetimepicker({
+          format: 'L',
+          keepInvalid: true
         });
         scope.$watch('gtModel', function (newValue) {
-          dateElement.data('DateTimePicker').date(moment(newValue));
+          dateElement.datetimepicker('date', moment(newValue));
         });
-        dateElementPicker.on('dp.change', function (event) {
+        var inputElement = iElement.find('input');
+        dateElement.on('change.datetimepicker', function (event) {
           $timeout(function () {
-            scope.gtModel = event.date.valueOf();
+            if (event.date && event.date.isValid()) {
+              scope.gtModel = event.date.valueOf();
+              scope.gtForm['input_' + scope.$id].$setValidity('required', true);
+              scope.gtForm['input_' + scope.$id].$setValidity('date', true);
+            } else {
+              scope.gtForm['input_' + scope.$id].$setValidity('required', !!inputElement.val());
+              scope.gtForm['input_' + scope.$id].$setValidity('date', !event.date);
+            }
           });
         });
       }

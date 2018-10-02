@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,6 @@
  */
 package org.glowroot.agent.plugin.netty;
 
-import javax.annotation.Nullable;
-
 import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.AuxThreadContext;
 import org.glowroot.agent.plugin.api.MessageSupplier;
@@ -24,12 +22,14 @@ import org.glowroot.agent.plugin.api.OptionalThreadContext;
 import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.TimerName;
 import org.glowroot.agent.plugin.api.TraceEntry;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
 import org.glowroot.agent.plugin.api.weaving.BindReceiver;
 import org.glowroot.agent.plugin.api.weaving.BindThrowable;
 import org.glowroot.agent.plugin.api.weaving.BindTraveler;
 import org.glowroot.agent.plugin.api.weaving.IsEnabled;
 import org.glowroot.agent.plugin.api.weaving.Mixin;
+import org.glowroot.agent.plugin.api.weaving.OnAfter;
 import org.glowroot.agent.plugin.api.weaving.OnBefore;
 import org.glowroot.agent.plugin.api.weaving.OnReturn;
 import org.glowroot.agent.plugin.api.weaving.OnThrow;
@@ -38,13 +38,12 @@ import org.glowroot.agent.plugin.api.weaving.Shim;
 
 public class NettyAspect {
 
-    // the field and method names are verbose to avoid conflict since they will become fields
-    // and methods in all classes that extend io.netty.channel.Channel
+    // the field and method names are verbose since they will be mixed in to existing classes
     @Mixin({"io.netty.channel.Channel"})
     public abstract static class ChannelImpl implements ChannelMixin {
 
-        private volatile boolean glowroot$completeAsyncTransaction;
-        private volatile @Nullable AuxThreadContext glowroot$auxContext;
+        private transient volatile boolean glowroot$completeAsyncTransaction;
+        private transient volatile @Nullable AuxThreadContext glowroot$auxContext;
 
         @Override
         public boolean glowroot$getCompleteAsyncTransaction() {
@@ -53,7 +52,7 @@ public class NettyAspect {
 
         @Override
         public void glowroot$setCompleteAsyncTransaction(boolean completeAsyncTransaction) {
-            this.glowroot$completeAsyncTransaction = completeAsyncTransaction;
+            glowroot$completeAsyncTransaction = completeAsyncTransaction;
         }
 
         @Override
@@ -63,12 +62,11 @@ public class NettyAspect {
 
         @Override
         public void glowroot$setAuxContext(@Nullable AuxThreadContext auxContext) {
-            this.glowroot$auxContext = auxContext;
+            glowroot$auxContext = auxContext;
         }
     }
 
-    // the method names are verbose to avoid conflict since they will become methods in all classes
-    // that extend io.netty.channel.Channel
+    // the method names are verbose since they will be mixed in to existing classes
     public interface ChannelMixin {
 
         boolean glowroot$getCompleteAsyncTransaction();
@@ -83,6 +81,7 @@ public class NettyAspect {
 
     @Shim("io.netty.channel.ChannelHandlerContext")
     public interface ChannelHandlerContext {
+
         @Shim("io.netty.channel.Channel channel()")
         @Nullable
         ChannelMixin glowroot$channel();
@@ -149,10 +148,10 @@ public class NettyAspect {
         }
 
         @OnThrow
-        public static void onThrow(@BindThrowable Throwable throwable,
+        public static void onThrow(@BindThrowable Throwable t,
                 @BindTraveler @Nullable TraceEntry traceEntry) {
             if (traceEntry != null) {
-                traceEntry.endWithError(throwable);
+                traceEntry.endWithError(t);
             }
         }
     }
@@ -184,10 +183,10 @@ public class NettyAspect {
         }
 
         @OnThrow
-        public static void onThrow(@BindThrowable Throwable throwable,
+        public static void onThrow(@BindThrowable Throwable t,
                 @BindTraveler @Nullable TraceEntry traceEntry) {
             if (traceEntry != null) {
-                traceEntry.endWithError(throwable);
+                traceEntry.endWithError(t);
             }
         }
     }
@@ -207,8 +206,8 @@ public class NettyAspect {
             return channel != null && channel.glowroot$getCompleteAsyncTransaction();
         }
 
-        @OnBefore
-        public static void onBefore(ThreadContext context,
+        @OnAfter
+        public static void onAfter(ThreadContext context,
                 @BindParameter @Nullable ChannelHandlerContext channelHandlerContext,
                 @BindParameter @Nullable Object msg) {
             if (channelHandlerContext == null) {

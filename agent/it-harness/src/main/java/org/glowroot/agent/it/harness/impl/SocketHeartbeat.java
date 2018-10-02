@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,42 +16,57 @@
 package org.glowroot.agent.it.harness.impl;
 
 import java.io.IOException;
-import java.io.ObjectOutputStream;
+import java.io.OutputStream;
+import java.net.Socket;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-class SocketHeartbeat implements Runnable {
+import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
-    private static final String PING_COMMAND = "PING";
+class SocketHeartbeat implements Runnable {
 
     private static final Logger logger = LoggerFactory.getLogger(SocketHeartbeat.class);
 
-    private final ObjectOutputStream objectOut;
+    private final OutputStream socketOut;
 
-    SocketHeartbeat(ObjectOutputStream objectOut) {
-        this.objectOut = objectOut;
+    private volatile @Nullable Thread thread;
+    private volatile boolean closed;
+
+    SocketHeartbeat(int port) throws Exception {
+        Socket socket = new Socket((String) null, port);
+        socketOut = socket.getOutputStream();
+    }
+
+    void close() {
+        closed = true;
+        // interrupt to break out of sleep immediately
+        checkNotNull(thread).interrupt();
     }
 
     @Override
     public void run() {
-        while (true) {
-            // sychronizing with SocketCommandProcessor
-            synchronized (objectOut) {
-                try {
-                    objectOut.writeObject(PING_COMMAND);
-                } catch (IOException e) {
-                    // the test jvm has been terminated
-                    System.exit(0);
-                }
+        thread = Thread.currentThread();
+        while (!closed) {
+            try {
+                socketOut.write(0);
+            } catch (IOException e) {
+                // the test jvm has been terminated
+                System.exit(0);
             }
             try {
-                Thread.sleep(1000);
+                SECONDS.sleep(1);
             } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                logger.error(e.getMessage(), e);
-                return;
+                // probably shutdown requested (see close method above)
+                logger.debug(e.getMessage(), e);
             }
+        }
+        try {
+            socketOut.close();
+        } catch (IOException e) {
+            logger.error(e.getMessage(), e);
         }
     }
 }

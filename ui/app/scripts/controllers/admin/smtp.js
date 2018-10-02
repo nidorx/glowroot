@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@
 glowroot.controller('AdminSmtpCtrl', [
   '$scope',
   '$http',
-  'modals',
+  'encryptionKeyMessage',
   'confirmIfHasChanges',
   'httpErrors',
-  function ($scope, $http, modals, confirmIfHasChanges, httpErrors) {
+  function ($scope, $http, encryptionKeyMessage, confirmIfHasChanges, httpErrors) {
 
     // initialize page binding object
     $scope.page = {};
@@ -35,12 +35,20 @@ glowroot.controller('AdminSmtpCtrl', [
     function onNewData(data) {
       $scope.loaded = true;
       $scope.config = data.config;
+      $scope.page.connectionSecurity = $scope.config.connectionSecurity || 'none';
       $scope.originalConfig = angular.copy(data.config);
       if (data.config.passwordExists) {
         $scope.password = '********';
       }
       $scope.localServerName = data.localServerName;
     }
+
+    $scope.$watch('page.connectionSecurity', function (newValue) {
+      if (!$scope.config) {
+        return;
+      }
+      $scope.config.connectionSecurity = newValue === 'none' ? null : newValue;
+    });
 
     $scope.onPasswordChange = function () {
       $scope.config.newPassword = $scope.password;
@@ -54,6 +62,11 @@ glowroot.controller('AdminSmtpCtrl', [
     $scope.save = function (deferred) {
       $http.post('backend/admin/smtp', $scope.config)
           .then(function (response) {
+            if (response.data.symmetricEncryptionKeyMissing) {
+              deferred.reject('cassandra.symmetricEncryptionKey must be configured in the glowroot-central.properties'
+                  + ' file before SMTP password can be saved to cassandra' + encryptionKeyMessage.extra());
+              return;
+            }
             onNewData(response.data);
             deferred.resolve('Saved');
           }, function (response) {
@@ -62,6 +75,14 @@ glowroot.controller('AdminSmtpCtrl', [
     };
 
     $scope.sendTestEmail = function (deferred) {
+      if (!$scope.page.testEmailRecipient) {
+        deferred.reject('Test email recipient is required');
+        return;
+      }
+      if (!$scope.config.host) {
+        deferred.reject('Host is required');
+        return;
+      }
       var postData = angular.copy($scope.config);
       postData.testEmailRecipient = $scope.page.testEmailRecipient;
       $http.post('backend/admin/send-test-email', postData)

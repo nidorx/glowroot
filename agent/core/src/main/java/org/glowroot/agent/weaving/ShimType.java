@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,7 @@
  */
 package org.glowroot.agent.weaving;
 
-import java.io.IOException;
 import java.lang.reflect.Method;
-import java.util.regex.Pattern;
-
-import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableList;
 import org.immutables.value.Value;
@@ -30,17 +26,9 @@ import org.glowroot.agent.plugin.api.weaving.Shim;
 @Value.Immutable
 abstract class ShimType {
 
-    static ShimType create(Shim shim, Class<?> iface) throws IOException {
+    static ShimType create(Shim shim, Class<?> iface) {
         ImmutableShimType.Builder builder = ImmutableShimType.builder();
-        String value = shim.value();
-        Pattern pattern = AdviceBuilder.buildPattern(value);
-        if (pattern == null) {
-            builder.target(value);
-        } else {
-            builder.target("");
-            builder.targetPattern(pattern);
-        }
-        builder.target(value);
+        builder.addTargets(shim.value());
         builder.iface(Type.getType(iface));
         for (Method method : iface.getMethods()) {
             if (method.isAnnotationPresent(Shim.class)) {
@@ -51,7 +39,6 @@ abstract class ShimType {
     }
 
     abstract Type iface();
-    abstract String target();
-    abstract @Nullable Pattern targetPattern();
+    abstract ImmutableList<String> targets();
     abstract ImmutableList<Method> shimMethods();
 }

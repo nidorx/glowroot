@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2017 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,24 +20,32 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-import javax.annotation.Nullable;
-
 import com.google.common.base.Strings;
 import com.google.common.base.Ticker;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ListMultimap;
 import com.google.common.primitives.Ints;
+import org.checkerframework.checker.nullness.qual.EnsuresNonNullIf;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.checkerframework.checker.nullness.qual.RequiresNonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.glowroot.agent.model.AsyncTimerImpl;
+import org.glowroot.agent.bytecode.api.BytecodeServiceHolder;
+import org.glowroot.agent.bytecode.api.ThreadContextPlus;
+import org.glowroot.agent.bytecode.api.ThreadContextThreadLocal;
+import org.glowroot.agent.config.AdvancedConfig;
+import org.glowroot.agent.impl.NopTransactionService.NopTimer;
+import org.glowroot.agent.model.AsyncQueryData;
+import org.glowroot.agent.model.AsyncTimer;
 import org.glowroot.agent.model.ErrorMessage;
 import org.glowroot.agent.model.QueryCollector;
 import org.glowroot.agent.model.QueryData;
 import org.glowroot.agent.model.QueryDataMap;
 import org.glowroot.agent.model.QueryEntryBase;
-import org.glowroot.agent.model.ThreadContextPlus;
+import org.glowroot.agent.model.ServiceCallCollector;
+import org.glowroot.agent.model.SyncQueryData;
 import org.glowroot.agent.model.ThreadStats;
 import org.glowroot.agent.model.ThreadStatsComponent;
 import org.glowroot.agent.model.TimerNameImpl;
@@ -51,19 +59,19 @@ import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.Timer;
 import org.glowroot.agent.plugin.api.TimerName;
 import org.glowroot.agent.plugin.api.TraceEntry;
-import org.glowroot.agent.plugin.api.internal.NopTransactionService;
-import org.glowroot.agent.plugin.api.internal.NopTransactionService.NopTimer;
-import org.glowroot.agent.plugin.api.util.FastThreadLocal.Holder;
 import org.glowroot.agent.util.ThreadAllocatedBytes;
 import org.glowroot.agent.util.Tickers;
-import org.glowroot.common.model.ServiceCallCollector;
 import org.glowroot.common.util.NotAvailableAware;
-import org.glowroot.common.util.UsedByGeneratedBytecode;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.glowroot.agent.util.Checkers.castInitialized;
 
 public class ThreadContextImpl implements ThreadContextPlus {
+
+    private static final boolean CAPTURE_AUXILIARY_THREAD_LOCATION_STACK_TRACES =
+            Boolean.getBoolean("glowroot.debug.captureAuxiliaryThreadLocationStackTraces");
+
+    private static final String LIMIT_EXCEEDED_BUCKET = "LIMIT EXCEEDED BUCKET";
 
     private static final MessageSupplier DETACHED_MESSAGE_SUPPLIER = MessageSupplier
             .create("this auxiliary thread was still running when the transaction ended");
@@ -92,14 +100,20 @@ public class ThreadContextImpl implements ThreadContextPlus {
     // only accessed by the thread context's thread
     private boolean transactionAsyncComplete;
 
-    // linked lists of QueryData instances for safe concurrent access
-    private @MonotonicNonNull QueryData headQueryData;
-    private @MonotonicNonNull QueryData headServiceCallData;
+    // linked lists of SyncQueryData instances for safe concurrent access
+    private @MonotonicNonNull SyncQueryData headQueryData;
+    private @MonotonicNonNull SyncQueryData headServiceCallData;
     // these maps are only accessed by the thread context's thread
     private @MonotonicNonNull QueryDataMap queriesForFirstType;
     private @MonotonicNonNull Map<String, QueryDataMap> allQueryTypesMap;
     private @MonotonicNonNull QueryDataMap serviceCallsForFirstType;
     private @MonotonicNonNull Map<String, QueryDataMap> allServiceCallTypesMap;
+
+    private int queryAggregateCounter;
+    private int serviceCallAggregateCounter;
+
+    private final int maxQueryAggregates;
+    private final int maxServiceCallAggregates;
 
     private final long threadId;
 
@@ -107,9 +121,9 @@ public class ThreadContextImpl implements ThreadContextPlus {
 
     private final Ticker ticker;
 
-    private final Holder</*@Nullable*/ ThreadContextImpl> threadContextHolder;
+    private final ThreadContextThreadLocal.Holder threadContextHolder;
 
-    private @Nullable MessageSupplier servletMessageSupplier;
+    private @Nullable ServletRequestInfo servletRequestInfo;
 
     private volatile boolean mayHaveChildAuxThreadContext;
 
@@ -127,10 +141,12 @@ public class ThreadContextImpl implements ThreadContextPlus {
     ThreadContextImpl(Transaction transaction, @Nullable TraceEntryImpl parentTraceEntry,
             @Nullable TraceEntryImpl parentThreadContextPriorEntry, MessageSupplier messageSupplier,
             TimerName rootTimerName, long startTick, boolean captureThreadStats,
+            int maxQueryAggregates, int maxServiceCallAggregates,
             @Nullable ThreadAllocatedBytes threadAllocatedBytes,
             boolean limitExceededAuxThreadContext, Ticker ticker,
-            Holder</*@Nullable*/ ThreadContextImpl> threadContextHolder,
-            @Nullable MessageSupplier servletMessageSupplier) {
+            ThreadContextThreadLocal.Holder threadContextHolder,
+            @Nullable ServletRequestInfo servletRequestInfo, int rootNestingGroupId,
+            int rootSuppressionKeyId) {
         this.transaction = transaction;
         this.parentTraceEntry = parentTraceEntry;
         rootTimer = TimerImpl.createRootTimer(castInitialized(this), (TimerNameImpl) rootTimerName);
@@ -141,11 +157,15 @@ public class ThreadContextImpl implements ThreadContextPlus {
         threadId = Thread.currentThread().getId();
         threadStatsComponent =
                 captureThreadStats ? new ThreadStatsComponent(threadAllocatedBytes) : null;
+        this.maxQueryAggregates = maxQueryAggregates;
+        this.maxServiceCallAggregates = maxServiceCallAggregates;
         this.limitExceededAuxThreadContext = limitExceededAuxThreadContext;
         this.ticker = ticker;
         this.threadContextHolder = threadContextHolder;
-        this.servletMessageSupplier = servletMessageSupplier;
-        this.outerTransactionThreadContext = threadContextHolder.get();
+        this.servletRequestInfo = servletRequestInfo;
+        this.outerTransactionThreadContext = (ThreadContextImpl) threadContextHolder.get();
+        currentNestingGroupId = rootNestingGroupId;
+        currentSuppressionKeyId = rootSuppressionKeyId;
     }
 
     public Transaction getTransaction() {
@@ -176,11 +196,11 @@ public class ThreadContextImpl implements ThreadContextPlus {
         return threadStatsComponent.getThreadStats();
     }
 
-    long getTotalCpuNanos() {
+    long getCpuNanos() {
         if (threadStatsComponent == null) {
             return NotAvailableAware.NA;
         }
-        return threadStatsComponent.getTotalCpuNanos();
+        return threadStatsComponent.getCpuNanos();
     }
 
     public long getThreadId() {
@@ -206,49 +226,45 @@ public class ThreadContextImpl implements ThreadContextPlus {
     }
 
     @Override
-    @UsedByGeneratedBytecode
     public int getCurrentNestingGroupId() {
         return currentNestingGroupId;
     }
 
     @Override
-    @UsedByGeneratedBytecode
     public void setCurrentNestingGroupId(int nestingGroupId) {
         this.currentNestingGroupId = nestingGroupId;
     }
 
     @Override
-    @UsedByGeneratedBytecode
     public int getCurrentSuppressionKeyId() {
         return currentSuppressionKeyId;
     }
 
     @Override
-    @UsedByGeneratedBytecode
     public void setCurrentSuppressionKeyId(int suppressionKeyId) {
         this.currentSuppressionKeyId = suppressionKeyId;
     }
 
-    boolean isCompleteAndEmptyExceptForTimersAndThreadStats() {
-        return isCompleted() && !mayHaveChildAuxThreadContext && traceEntryComponent.isEmpty()
-                && headQueryData == null && headServiceCallData == null;
+    // FIXME why is this safe when called from another thread?
+    boolean isMergeable() {
+        return !mayHaveChildAuxThreadContext && traceEntryComponent.isEmpty();
     }
 
-    void mergeQueriesInto(QueryCollector queries) {
-        QueryData curr = headQueryData;
+    void mergeQueriesInto(QueryCollector collector) {
+        SyncQueryData curr = headQueryData;
         while (curr != null) {
-            queries.mergeQuery(curr.getQueryType(), curr.getQueryText(),
-                    curr.getTotalDurationNanos(), curr.getExecutionCount(), curr.hasTotalRows(),
-                    curr.getTotalRows());
+            collector.mergeQuery(curr.getQueryType(), curr.getQueryText(),
+                    curr.getTotalDurationNanos(ticker), curr.getExecutionCount(),
+                    curr.hasTotalRows(), curr.getTotalRows(), curr.isActive());
             curr = curr.getNextQueryData();
         }
     }
 
-    void mergeServiceCallsInto(ServiceCallCollector serviceCalls) {
-        QueryData curr = headServiceCallData;
+    void mergeServiceCallsInto(ServiceCallCollector collector) {
+        SyncQueryData curr = headServiceCallData;
         while (curr != null) {
-            serviceCalls.mergeServiceCall(curr.getQueryType(), curr.getQueryText(),
-                    curr.getTotalDurationNanos(), curr.getExecutionCount());
+            collector.mergeServiceCall(curr.getQueryType(), curr.getQueryText(),
+                    curr.getTotalDurationNanos(ticker), curr.getExecutionCount());
             curr = curr.getNextQueryData();
         }
     }
@@ -265,59 +281,103 @@ public class ThreadContextImpl implements ThreadContextPlus {
     }
 
     // only called by transaction thread
-    private QueryData getOrCreateQueryDataIfPossible(String queryType, String queryText,
+    private SyncQueryData getOrCreateQueryData(String queryType, String queryText,
             boolean bypassLimit) {
         if (headQueryData == null) {
-            // the call to allowAnotherAggregateQuery() is needed to increment the counter
-            if (!transaction.allowAnotherAggregateQuery(bypassLimit)) {
-                // maxAggregateQueriesPerType set to 0
-                return new QueryData(queryType, queryText, null);
-            }
-            QueryData queryData = new QueryData(queryType, queryText, null);
             queriesForFirstType = new QueryDataMap(queryType);
-            queriesForFirstType.put(queryText, queryData);
-            headQueryData = queryData;
-            return headQueryData;
+            return createQueryData(queriesForFirstType, queryType, queryText, bypassLimit);
         }
-        QueryDataMap queriesForCurrentType = checkNotNull(queriesForFirstType);
-        if (!queriesForCurrentType.getType().equals(queryType)) {
-            queriesForCurrentType = getOrCreateQueriesForType(queryType);
+        QueryDataMap queriesForType = checkNotNull(queriesForFirstType);
+        if (!queriesForType.getType().equals(queryType)) {
+            queriesForType = getOrCreateQueriesForType(queryType);
         }
-        QueryData queryData = queriesForCurrentType.get(queryText);
-        if (queryData == null && transaction.allowAnotherAggregateQuery(bypassLimit)) {
-            queryData = new QueryData(queryType, queryText, headQueryData);
-            queriesForCurrentType.put(queryText, queryData);
-            headQueryData = queryData;
-        }
+        SyncQueryData queryData = queriesForType.get(queryText);
         if (queryData == null) {
-            return new QueryData(queryType, queryText, null);
+            queryData = createQueryData(queriesForType, queryType, queryText, bypassLimit);
         }
         return queryData;
     }
 
-    // only called by transaction thread
-    private @Nullable QueryData getOrCreateServiceCallDataIfPossible(String type, String text) {
-        if (headServiceCallData == null) {
-            if (!transaction.allowAnotherAggregateServiceCall()) {
-                return null;
+    private SyncQueryData createQueryData(QueryDataMap queriesForType, String queryType,
+            String queryText, boolean bypassLimit) {
+        if (allowAnotherQueryAggregate(bypassLimit)) {
+            return createQueryData(queriesForType, queryType, queryText);
+        } else {
+            SyncQueryData limitExceededBucket = queriesForType.get(LIMIT_EXCEEDED_BUCKET);
+            if (limitExceededBucket == null) {
+                limitExceededBucket = createQueryData(queriesForType, queryType,
+                        LIMIT_EXCEEDED_BUCKET);
             }
-            QueryData serviceCallData = new QueryData(type, text, null);
-            serviceCallsForFirstType = new QueryDataMap(type);
-            serviceCallsForFirstType.put(text, serviceCallData);
-            headServiceCallData = serviceCallData;
-            return headServiceCallData;
+            return new SyncQueryData(queryType, queryText, null, limitExceededBucket);
         }
-        QueryDataMap serviceCallsForCurrentType = checkNotNull(serviceCallsForFirstType);
-        if (!serviceCallsForCurrentType.getType().equals(type)) {
-            serviceCallsForCurrentType = getOrCreateServiceCallsForType(type);
+    }
+
+    private SyncQueryData createQueryData(QueryDataMap queriesForType, String queryType,
+            String queryText) {
+        SyncQueryData queryData = new SyncQueryData(queryType, queryText, headQueryData, null);
+        queriesForType.put(queryText, queryData);
+        headQueryData = queryData;
+        return queryData;
+    }
+
+    // only called by transaction thread
+    private SyncQueryData getOrCreateServiceCallData(String serviceCallType, String serviceCallText,
+            boolean bypassLimit) {
+        if (headServiceCallData == null) {
+            serviceCallsForFirstType = new QueryDataMap(serviceCallType);
+            return createServiceCallData(serviceCallsForFirstType, serviceCallType, serviceCallText,
+                    bypassLimit);
         }
-        QueryData serviceCallData = serviceCallsForCurrentType.get(text);
-        if (serviceCallData == null && transaction.allowAnotherAggregateServiceCall()) {
-            serviceCallData = new QueryData(type, text, headServiceCallData);
-            serviceCallsForCurrentType.put(text, serviceCallData);
-            headServiceCallData = serviceCallData;
+        QueryDataMap serviceCallsForType = checkNotNull(serviceCallsForFirstType);
+        if (!serviceCallsForType.getType().equals(serviceCallType)) {
+            serviceCallsForType = getOrCreateServiceCallsForType(serviceCallType);
+        }
+        SyncQueryData serviceCallData = serviceCallsForType.get(serviceCallText);
+        if (serviceCallData == null) {
+            serviceCallData = createServiceCallData(serviceCallsForType, serviceCallType,
+                    serviceCallText, bypassLimit);
         }
         return serviceCallData;
+    }
+
+    private SyncQueryData createServiceCallData(QueryDataMap serviceCallsForType,
+            String serviceCallType, String serviceCallText, boolean bypassLimit) {
+        if (allowAnotherServiceCallAggregate(bypassLimit)) {
+            return createServiceCallData(serviceCallsForType, serviceCallType,
+                    serviceCallText);
+        } else {
+            SyncQueryData limitExceededBucket =
+                    serviceCallsForType.get(LIMIT_EXCEEDED_BUCKET);
+            if (limitExceededBucket == null) {
+                limitExceededBucket =
+                        createServiceCallData(serviceCallsForType, serviceCallType,
+                                LIMIT_EXCEEDED_BUCKET);
+            }
+            return new SyncQueryData(serviceCallType, serviceCallText, null, limitExceededBucket);
+        }
+    }
+
+    private SyncQueryData createServiceCallData(QueryDataMap serviceCallsForType,
+            String serviceCallType, String serviceCallText) {
+        SyncQueryData serviceCallData =
+                new SyncQueryData(serviceCallType, serviceCallText, headServiceCallData, null);
+        serviceCallsForType.put(serviceCallText, serviceCallData);
+        headServiceCallData = serviceCallData;
+        return serviceCallData;
+    }
+
+    // this method has side effect of incrementing counter
+    private boolean allowAnotherQueryAggregate(boolean bypassLimit) {
+        return queryAggregateCounter++ < maxQueryAggregates
+                * AdvancedConfig.OVERALL_AGGREGATE_QUERIES_HARD_LIMIT_MULTIPLIER
+                || bypassLimit;
+    }
+
+    // this method has side effect of incrementing counter
+    private boolean allowAnotherServiceCallAggregate(boolean bypassLimit) {
+        return serviceCallAggregateCounter++ < maxServiceCallAggregates
+                * AdvancedConfig.OVERALL_AGGREGATE_SERVICE_CALLS_HARD_LIMIT_MULTIPLIER
+                || bypassLimit;
     }
 
     private TraceEntryImpl addErrorEntry(long startTick, long endTick,
@@ -332,7 +392,7 @@ public class ThreadContextImpl implements ThreadContextPlus {
     }
 
     private TraceEntryImpl startAsyncTraceEntry(long startTick, MessageSupplier messageSupplier,
-            TimerImpl syncTimer, AsyncTimerImpl asyncTimer) {
+            TimerImpl syncTimer, AsyncTimer asyncTimer) {
         TraceEntryImpl entry = traceEntryComponent.pushEntry(startTick, messageSupplier, syncTimer,
                 asyncTimer, null, 0);
         // memory barrier write ensures partial trace capture will see data collected up to now
@@ -343,7 +403,7 @@ public class ThreadContextImpl implements ThreadContextPlus {
 
     private TraceEntryImpl startAsyncQueryEntry(long startTick,
             QueryMessageSupplier queryMessageSupplier, TimerImpl syncTimer,
-            AsyncTimerImpl asyncTimer, @Nullable QueryData queryData, long queryExecutionCount) {
+            AsyncTimer asyncTimer, @Nullable QueryData queryData, long queryExecutionCount) {
         TraceEntryImpl entry =
                 traceEntryComponent.pushEntry(startTick, queryMessageSupplier, syncTimer,
                         asyncTimer, queryData, queryExecutionCount);
@@ -354,7 +414,7 @@ public class ThreadContextImpl implements ThreadContextPlus {
     }
 
     private TraceEntryImpl startAsyncServiceCallEntry(long startTick,
-            MessageSupplier messageSupplier, TimerImpl syncTimer, AsyncTimerImpl asyncTimer,
+            MessageSupplier messageSupplier, TimerImpl syncTimer, AsyncTimer asyncTimer,
             @Nullable QueryData queryData) {
         TraceEntryImpl entry = traceEntryComponent.pushEntry(startTick, messageSupplier,
                 syncTimer, asyncTimer, queryData, 1);
@@ -364,23 +424,31 @@ public class ThreadContextImpl implements ThreadContextPlus {
         return entry;
     }
 
-    void captureStackTrace(ThreadInfo threadInfo, int limit) {
-        transaction.captureStackTrace(isAuxiliary(), threadInfo, limit);
+    void captureStackTrace(ThreadInfo threadInfo) {
+        transaction.captureStackTrace(isAuxiliary(), threadInfo);
         // memory barrier read ensures timely visibility of detach()
         transaction.memoryBarrierRead();
     }
 
     @Override
     public AuxThreadContext createAuxThreadContext() {
+        ImmutableList<StackTraceElement> locationStackTrace = null;
+        if (CAPTURE_AUXILIARY_THREAD_LOCATION_STACK_TRACES) {
+            StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+            // strip up through this method, plus 1 additional method (the plugin advice method)
+            int index = getNormalizedStartIndex(stackTrace, "createAuxThreadContext", 1);
+            locationStackTrace = ImmutableList.copyOf(stackTrace).subList(index, stackTrace.length);
+        }
         if (limitExceededAuxThreadContext) {
             // no auxiliary thread context hierarchy after limit exceeded in order to limit the
             // retention of auxiliary thread contexts
-            return new AuxThreadContextImpl(transaction, null, null, servletMessageSupplier,
-                    transaction.getTransactionRegistry(), transaction.getTransactionService());
+            return new AuxThreadContextImpl(transaction, null, null, servletRequestInfo,
+                    locationStackTrace, transaction.getTransactionRegistry(),
+                    transaction.getTransactionService());
         } else {
             mayHaveChildAuxThreadContext = true;
             return new AuxThreadContextImpl(transaction, traceEntryComponent.getActiveEntry(),
-                    traceEntryComponent.getTailEntry(), servletMessageSupplier,
+                    traceEntryComponent.getTailEntry(), servletRequestInfo, locationStackTrace,
                     transaction.getTransactionRegistry(), transaction.getTransactionService());
         }
     }
@@ -394,15 +462,15 @@ public class ThreadContextImpl implements ThreadContextPlus {
         // memory barrier read ensures timely visibility of detach()
         transaction.memoryBarrierReadWrite();
         if (traceEntryComponent.isCompleted()) {
+            if (threadStatsComponent != null) {
+                threadStatsComponent.onComplete();
+            }
             if (limitExceededAuxThreadContext) {
                 // this is a limit exceeded auxiliary thread context
                 transaction.mergeLimitExceededAuxThreadContext(this);
             }
             if (!isAuxiliary() || transactionAsyncComplete) {
                 transaction.end(endTick, transactionAsyncComplete);
-            }
-            if (threadStatsComponent != null) {
-                threadStatsComponent.onComplete();
             }
             threadContextHolder.set(outerTransactionThreadContext);
             if (outerTransactionThreadContext != null) {
@@ -441,36 +509,49 @@ public class ThreadContextImpl implements ThreadContextPlus {
     private QueryDataMap getOrCreateQueriesForType(String queryType) {
         if (allQueryTypesMap == null) {
             allQueryTypesMap = new HashMap<String, QueryDataMap>(2);
-            QueryDataMap queriesForCurrentType = new QueryDataMap(queryType);
-            allQueryTypesMap.put(queryType, queriesForCurrentType);
-            return queriesForCurrentType;
+            QueryDataMap queriesForType = new QueryDataMap(queryType);
+            allQueryTypesMap.put(queryType, queriesForType);
+            return queriesForType;
         }
-        QueryDataMap queriesForCurrentType = allQueryTypesMap.get(queryType);
-        if (queriesForCurrentType == null) {
-            queriesForCurrentType = new QueryDataMap(queryType);
-            allQueryTypesMap.put(queryType, queriesForCurrentType);
+        QueryDataMap queriesForType = allQueryTypesMap.get(queryType);
+        if (queriesForType == null) {
+            queriesForType = new QueryDataMap(queryType);
+            allQueryTypesMap.put(queryType, queriesForType);
         }
-        return queriesForCurrentType;
+        return queriesForType;
     }
 
     private QueryDataMap getOrCreateServiceCallsForType(String type) {
         if (allServiceCallTypesMap == null) {
             allServiceCallTypesMap = new HashMap<String, QueryDataMap>(2);
-            QueryDataMap serviceCallsForCurrentType = new QueryDataMap(type);
-            allServiceCallTypesMap.put(type, serviceCallsForCurrentType);
-            return serviceCallsForCurrentType;
+            QueryDataMap serviceCallsForType = new QueryDataMap(type);
+            allServiceCallTypesMap.put(type, serviceCallsForType);
+            return serviceCallsForType;
         }
-        QueryDataMap serviceCallsForCurrentType = allServiceCallTypesMap.get(type);
-        if (serviceCallsForCurrentType == null) {
-            serviceCallsForCurrentType = new QueryDataMap(type);
-            allServiceCallTypesMap.put(type, serviceCallsForCurrentType);
+        QueryDataMap serviceCallsForType = allServiceCallTypesMap.get(type);
+        if (serviceCallsForType == null) {
+            serviceCallsForType = new QueryDataMap(type);
+            allServiceCallTypesMap.put(type, serviceCallsForType);
         }
-        return serviceCallsForCurrentType;
+        return serviceCallsForType;
+    }
+
+    @Override
+    public boolean isInTransaction() {
+        return true;
     }
 
     @Override
     public TraceEntry startTransaction(String transactionType, String transactionName,
             MessageSupplier messageSupplier, TimerName timerName) {
+        return startTransaction(transactionType, transactionName, messageSupplier, timerName,
+                AlreadyInTransactionBehavior.CAPTURE_TRACE_ENTRY);
+    }
+
+    @Override
+    public TraceEntry startTransaction(String transactionType, String transactionName,
+            MessageSupplier messageSupplier, TimerName timerName,
+            AlreadyInTransactionBehavior alreadyInTransactionBehavior) {
         if (transactionType == null) {
             logger.error("startTransaction(): argument 'transactionType' must be non-null");
             return NopTransactionService.TRACE_ENTRY;
@@ -489,10 +570,13 @@ public class ThreadContextImpl implements ThreadContextPlus {
         }
         // ensure visibility of recent configuration updates
         transaction.getConfigService().readMemoryBarrier();
-        if (transaction.isOuter()) {
+        if (transaction.isOuter()
+                || alreadyInTransactionBehavior == AlreadyInTransactionBehavior.CAPTURE_NEW_TRANSACTION) {
             TraceEntryImpl traceEntry = transaction.startInnerTransaction(transactionType,
-                    transactionName, messageSupplier, timerName, threadContextHolder);
-            innerTransactionThreadContext = checkNotNull(threadContextHolder.get());
+                    transactionName, messageSupplier, timerName, threadContextHolder,
+                    currentNestingGroupId, currentSuppressionKeyId);
+            innerTransactionThreadContext =
+                    (ThreadContextImpl) checkNotNull(threadContextHolder.get());
             return traceEntry;
         }
         long startTick = ticker.read();
@@ -536,7 +620,7 @@ public class ThreadContextImpl implements ThreadContextPlus {
         }
         long startTick = ticker.read();
         TimerImpl syncTimer = startTimer(timerName, startTick);
-        AsyncTimerImpl asyncTimer = startAsyncTimer(timerName, startTick);
+        AsyncTimer asyncTimer = transaction.startAsyncTimer(timerName, startTick);
         if (transaction.allowAnotherEntry()) {
             return startAsyncTraceEntry(startTick, messageSupplier, syncTimer, asyncTimer);
         } else {
@@ -567,11 +651,11 @@ public class ThreadContextImpl implements ThreadContextPlus {
         long startTick = ticker.read();
         TimerImpl timer = startTimer(timerName, startTick);
         if (transaction.allowAnotherEntry()) {
-            QueryData queryData = getOrCreateQueryDataIfPossible(queryType, queryText, true);
+            SyncQueryData queryData = getOrCreateQueryData(queryType, queryText, true);
             return traceEntryComponent.pushEntry(startTick, queryMessageSupplier, timer, null,
                     queryData, 1);
         } else {
-            QueryData queryData = getOrCreateQueryDataIfPossible(queryType, queryText, false);
+            SyncQueryData queryData = getOrCreateQueryData(queryType, queryText, false);
             return new DummyTraceEntryOrQuery(timer, null, startTick, queryMessageSupplier,
                     queryData, 1);
         }
@@ -588,6 +672,10 @@ public class ThreadContextImpl implements ThreadContextPlus {
             logger.error("startQueryEntry(): argument 'queryText' must be non-null");
             return NopTransactionService.QUERY_ENTRY;
         }
+        if (queryExecutionCount <= 0) {
+            logger.error("startQueryEntry(): argument 'queryExecutionCount' must be positive");
+            return NopTransactionService.QUERY_ENTRY;
+        }
         if (queryMessageSupplier == null) {
             logger.error("startQueryEntry(): argument 'queryMessageSupplier' must be non-null");
             return NopTransactionService.QUERY_ENTRY;
@@ -599,11 +687,11 @@ public class ThreadContextImpl implements ThreadContextPlus {
         long startTick = ticker.read();
         TimerImpl timer = startTimer(timerName, startTick);
         if (transaction.allowAnotherEntry()) {
-            QueryData queryData = getOrCreateQueryDataIfPossible(queryType, queryText, true);
+            SyncQueryData queryData = getOrCreateQueryData(queryType, queryText, true);
             return traceEntryComponent.pushEntry(startTick, queryMessageSupplier, timer, null,
                     queryData, queryExecutionCount);
         } else {
-            QueryData queryData = getOrCreateQueryDataIfPossible(queryType, queryText, false);
+            SyncQueryData queryData = getOrCreateQueryData(queryType, queryText, false);
             return new DummyTraceEntryOrQuery(timer, null, startTick, queryMessageSupplier,
                     queryData, queryExecutionCount);
         }
@@ -631,27 +719,29 @@ public class ThreadContextImpl implements ThreadContextPlus {
         }
         long startTick = ticker.read();
         TimerImpl syncTimer = startTimer(timerName, startTick);
-        AsyncTimerImpl asyncTimer = startAsyncTimer(timerName, startTick);
+        AsyncTimer asyncTimer = transaction.startAsyncTimer(timerName, startTick);
         if (transaction.allowAnotherEntry()) {
-            QueryData queryData = getOrCreateQueryDataIfPossible(queryType, queryText, true);
+            AsyncQueryData queryData =
+                    transaction.getOrCreateAsyncQueryData(queryType, queryText, true);
             return startAsyncQueryEntry(startTick, queryMessageSupplier, syncTimer, asyncTimer,
                     queryData, 1);
         } else {
-            QueryData queryData = getOrCreateQueryDataIfPossible(queryType, queryText, false);
+            AsyncQueryData queryData =
+                    transaction.getOrCreateAsyncQueryData(queryType, queryText, false);
             return new DummyTraceEntryOrQuery(syncTimer, asyncTimer, startTick,
                     queryMessageSupplier, queryData, 1);
         }
     }
 
     @Override
-    public TraceEntry startServiceCallEntry(String type, String text,
+    public TraceEntry startServiceCallEntry(String serviceCallType, String serviceCallText,
             MessageSupplier messageSupplier, TimerName timerName) {
-        if (type == null) {
-            logger.error("startServiceCallEntry(): argument 'type' must be non-null");
+        if (serviceCallType == null) {
+            logger.error("startServiceCallEntry(): argument 'serviceCallType' must be non-null");
             return NopTransactionService.TRACE_ENTRY;
         }
-        if (text == null) {
-            logger.error("startServiceCallEntry(): argument 'text' must be non-null");
+        if (serviceCallText == null) {
+            logger.error("startServiceCallEntry(): argument 'serviceCallText' must be non-null");
             return NopTransactionService.TRACE_ENTRY;
         }
         if (messageSupplier == null) {
@@ -664,25 +754,30 @@ public class ThreadContextImpl implements ThreadContextPlus {
         }
         long startTick = ticker.read();
         TimerImpl timer = startTimer(timerName, startTick);
-        QueryData queryData = getOrCreateServiceCallDataIfPossible(type, text);
         if (transaction.allowAnotherEntry()) {
+            SyncQueryData queryData =
+                    getOrCreateServiceCallData(serviceCallType, serviceCallText, true);
             return traceEntryComponent.pushEntry(startTick, messageSupplier, timer, null, queryData,
                     1);
         } else {
+            SyncQueryData queryData =
+                    getOrCreateServiceCallData(serviceCallType, serviceCallText, false);
             return new DummyTraceEntryOrQuery(timer, null, startTick, messageSupplier, queryData,
                     1);
         }
     }
 
     @Override
-    public AsyncTraceEntry startAsyncServiceCallEntry(String type, String text,
-            MessageSupplier messageSupplier, TimerName timerName) {
-        if (type == null) {
-            logger.error("startAsyncServiceCallEntry(): argument 'type' must be non-null");
+    public AsyncTraceEntry startAsyncServiceCallEntry(String serviceCallType,
+            String serviceCallText, MessageSupplier messageSupplier, TimerName timerName) {
+        if (serviceCallType == null) {
+            logger.error(
+                    "startAsyncServiceCallEntry(): argument 'serviceCallType' must be non-null");
             return NopTransactionService.ASYNC_TRACE_ENTRY;
         }
-        if (text == null) {
-            logger.error("startAsyncServiceCallEntry(): argument 'text' must be non-null");
+        if (serviceCallText == null) {
+            logger.error(
+                    "startAsyncServiceCallEntry(): argument 'serviceCallText' must be non-null");
             return NopTransactionService.ASYNC_TRACE_ENTRY;
         }
         if (messageSupplier == null) {
@@ -696,12 +791,15 @@ public class ThreadContextImpl implements ThreadContextPlus {
         }
         long startTick = ticker.read();
         TimerImpl syncTimer = startTimer(timerName, startTick);
-        AsyncTimerImpl asyncTimer = startAsyncTimer(timerName, startTick);
-        QueryData queryData = getOrCreateServiceCallDataIfPossible(type, text);
+        AsyncTimer asyncTimer = transaction.startAsyncTimer(timerName, startTick);
         if (transaction.allowAnotherEntry()) {
+            AsyncQueryData queryData = transaction.getOrCreateAsyncServiceCallData(serviceCallType,
+                    serviceCallText, true);
             return startAsyncServiceCallEntry(startTick, messageSupplier, syncTimer, asyncTimer,
                     queryData);
         } else {
+            AsyncQueryData queryData = transaction.getOrCreateAsyncServiceCallData(serviceCallType,
+                    serviceCallText, false);
             return new DummyTraceEntryOrQuery(syncTimer, asyncTimer, startTick, messageSupplier,
                     queryData, 1);
         }
@@ -724,6 +822,16 @@ public class ThreadContextImpl implements ThreadContextPlus {
     public void setTransactionAsync() {
         if (innerTransactionThreadContext == null) {
             transaction.setAsync();
+            if (logger.isDebugEnabled() && AuxThreadContextImpl.inAuxDebugLogging.get() == null) {
+                AuxThreadContextImpl.inAuxDebugLogging.set(Boolean.TRUE);
+                try {
+                    logger.debug("set async transaction, thread context: {}, parent thread context:"
+                            + " {}, thread name: {}", hashCode(), getParentThreadContextDisplay(),
+                            Thread.currentThread().getName(), new Exception());
+                } finally {
+                    AuxThreadContextImpl.inAuxDebugLogging.remove();
+                }
+            }
         } else {
             innerTransactionThreadContext.setTransactionAsync();
         }
@@ -733,6 +841,17 @@ public class ThreadContextImpl implements ThreadContextPlus {
     public void setTransactionAsyncComplete() {
         if (innerTransactionThreadContext == null) {
             transactionAsyncComplete = true;
+            if (logger.isDebugEnabled() && AuxThreadContextImpl.inAuxDebugLogging.get() == null) {
+                AuxThreadContextImpl.inAuxDebugLogging.set(Boolean.TRUE);
+                try {
+                    logger.debug("set async transaction complete, thread context: {},"
+                            + " parent thread context: {}, thread name: {}", hashCode(),
+                            getParentThreadContextDisplay(), Thread.currentThread().getName(),
+                            new Exception());
+                } finally {
+                    AuxThreadContextImpl.inAuxDebugLogging.remove();
+                }
+            }
         } else {
             innerTransactionThreadContext.setTransactionAsyncComplete();
         }
@@ -861,72 +980,17 @@ public class ThreadContextImpl implements ThreadContextPlus {
     }
 
     @Override
-    public @Nullable MessageSupplier getServletMessageSupplier() {
-        return servletMessageSupplier;
+    public @Nullable ServletRequestInfo getServletRequestInfo() {
+        return servletRequestInfo;
     }
 
     @Override
-    public void setServletMessageSupplier(@Nullable MessageSupplier messageSupplier) {
-        this.servletMessageSupplier = messageSupplier;
-    }
-
-    @Override
-    @Deprecated
-    public void setAsyncTransaction() {
-        setTransactionAsync();
-    }
-
-    @Override
-    @Deprecated
-    public void completeAsyncTransaction() {
-        setTransactionAsyncComplete();
-    }
-
-    @Override
-    @Deprecated
-    public void setOuterTransaction() {
-        setTransactionOuter();
+    public void setServletRequestInfo(@Nullable ServletRequestInfo servletRequestInfo) {
+        this.servletRequestInfo = servletRequestInfo;
     }
 
     boolean hasTraceEntries() {
         return !traceEntryComponent.isEmpty();
-    }
-
-    private boolean isAuxiliary() {
-        return parentTraceEntry != null;
-    }
-
-    private void addErrorEntryInternal(@Nullable String message, @Nullable Throwable t) {
-        // use higher entry limit when adding errors, but still need some kind of cap
-        if (transaction.allowAnotherErrorEntry()) {
-            long currTick = ticker.read();
-            ErrorMessage errorMessage =
-                    ErrorMessage.create(message, t, transaction.getThrowableFrameLimitCounter());
-            org.glowroot.agent.impl.TraceEntryImpl entry =
-                    addErrorEntry(currTick, currTick, null, null, errorMessage);
-            if (t == null) {
-                StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
-                // need to strip back a few stack calls:
-                // skip i=0 which is "java.lang.Thread.getStackTrace()"
-                // skip i=1 which is "...TransactionServiceImpl.addErrorEntryInternal()"
-                // skip i=2 which is "...TransactionServiceImpl.addErrorEntry()"
-                // skip i=3 which is the plugin advice
-                entry.setStackTrace(ImmutableList.copyOf(stackTrace).subList(4, stackTrace.length));
-            }
-        }
-    }
-
-    private TimerImpl startTimer(TimerName timerName, long startTick) {
-        if (currentTimer == null) {
-            // this really shouldn't happen as current timer should be non-null unless transaction
-            // has completed
-            return TimerImpl.createRootTimer(this, (TimerNameImpl) timerName);
-        }
-        return currentTimer.startNestedTimer(timerName, startTick);
-    }
-
-    private AsyncTimerImpl startAsyncTimer(TimerName asyncTimerName, long startTick) {
-        return transaction.startAsyncTimer(asyncTimerName, startTick);
     }
 
     void populateParentChildMap(ListMultimap<TraceEntryImpl, TraceEntryImpl> parentChildMap,
@@ -973,32 +1037,70 @@ public class ThreadContextImpl implements ThreadContextPlus {
         }
     }
 
+    private boolean isAuxiliary() {
+        return parentTraceEntry != null;
+    }
+
+    private void addErrorEntryInternal(@Nullable String message, @Nullable Throwable t) {
+        // use higher entry limit when adding errors, but still need some kind of cap
+        if (transaction.allowAnotherErrorEntry()) {
+            long currTick = ticker.read();
+            ErrorMessage errorMessage =
+                    ErrorMessage.create(message, t, transaction.getThrowableFrameLimitCounter());
+            addErrorEntry(currTick, currTick, null, null, errorMessage);
+        }
+    }
+
+    private TimerImpl startTimer(TimerName timerName, long startTick) {
+        if (currentTimer == null) {
+            // this really shouldn't happen as current timer should be non-null unless transaction
+            // has completed
+            return TimerImpl.createRootTimer(this, (TimerNameImpl) timerName);
+        }
+        return currentTimer.startNestedTimer(timerName, startTick);
+    }
+
+    private @Nullable Object getParentThreadContextDisplay() {
+        if (parentTraceEntry == null) {
+            return null;
+        } else {
+            return parentTraceEntry.getThreadContext().hashCode();
+        }
+    }
+
+    static int getNormalizedStartIndex(StackTraceElement[] locationStackTrace, String methodName,
+            int additionalMethodsToSkip) {
+        for (int i = 0; i < locationStackTrace.length; i++) {
+            if (methodName.equals(locationStackTrace[i].getMethodName())) {
+                return i + 1 + additionalMethodsToSkip;
+            }
+        }
+        return 0;
+    }
+
     // this does not include the root trace entry
     private class DummyTraceEntryOrQuery extends QueryEntryBase implements AsyncQueryEntry, Timer {
 
         private final TimerImpl syncTimer;
-        private final @Nullable AsyncTimerImpl asyncTimer;
+        private final @Nullable AsyncTimer asyncTimer;
         private final long startTick;
         private final Object messageSupplier;
 
         // not volatile, so depends on memory barrier in Transaction for visibility
         private int selfNestingLevel;
         // only used by transaction thread
-        private @MonotonicNonNull TimerImpl extendedTimer;
+        private @Nullable TimerImpl extendedTimer;
 
         private boolean initialComplete;
 
-        public DummyTraceEntryOrQuery(TimerImpl syncTimer, @Nullable AsyncTimerImpl asyncTimer,
+        public DummyTraceEntryOrQuery(TimerImpl syncTimer, @Nullable AsyncTimer asyncTimer,
                 long startTick, Object messageSupplier, @Nullable QueryData queryData,
                 long queryExecutionCount) {
-            super(queryData);
+            super(queryData, startTick, queryExecutionCount);
             this.syncTimer = syncTimer;
             this.asyncTimer = asyncTimer;
             this.startTick = startTick;
             this.messageSupplier = messageSupplier;
-            if (queryData != null) {
-                queryData.start(startTick, queryExecutionCount);
-            }
         }
 
         @Override
@@ -1007,9 +1109,10 @@ public class ThreadContextImpl implements ThreadContextPlus {
         }
 
         @Override
-        public void endWithStackTrace(long threshold, TimeUnit unit) {
+        public void endWithLocationStackTrace(long threshold, TimeUnit unit) {
             if (threshold < 0) {
-                logger.error("endWithStackTrace(): argument 'threshold' must be non-negative");
+                logger.error(
+                        "endWithLocationStackTrace(): argument 'threshold' must be non-negative");
             }
             endInternal(ticker.read());
         }
@@ -1045,18 +1148,7 @@ public class ThreadContextImpl implements ThreadContextPlus {
                 ErrorMessage errorMessage = ErrorMessage.create(message, t,
                         transaction.getThrowableFrameLimitCounter());
                 // entry won't be nested properly, but at least the error will get captured
-                org.glowroot.agent.impl.TraceEntryImpl entry = addErrorEntry(startTick, endTick,
-                        messageSupplier, getQueryData(), errorMessage);
-                if (t == null) {
-                    StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
-                    // need to strip back a few stack calls:
-                    // skip i=0 which is "java.lang.Thread.getStackTrace()"
-                    // skip i=1 which is "...DummyTraceEntryOrQuery.endWithErrorInternal()"
-                    // skip i=2 which is "...DummyTraceEntryOrQuery.endWithError()"
-                    // skip i=3 which is the plugin advice
-                    entry.setStackTrace(
-                            ImmutableList.copyOf(stackTrace).subList(4, stackTrace.length));
-                }
+                addErrorEntry(startTick, endTick, messageSupplier, getQueryData(), errorMessage);
             }
         }
 
@@ -1077,11 +1169,43 @@ public class ThreadContextImpl implements ThreadContextPlus {
         @Override
         public Timer extend() {
             if (selfNestingLevel++ == 0) {
-                long currTick = ticker.read();
-                extendedTimer = syncTimer.extend(currTick);
-                extendQueryData(currTick);
+                if (isAsync()) {
+                    extendAsync();
+                } else {
+                    TimerImpl currentTimerLocal = currentTimer;
+                    if (currentTimerLocal == null) {
+                        // thread context has ended, cannot extend sync timer
+                        // (this is ok, see https://github.com/glowroot/glowroot/issues/418)
+                        selfNestingLevel--;
+                        return NopTimer.INSTANCE;
+                    }
+                    extendSync(ticker.read(), currentTimerLocal);
+                }
             }
             return this;
+        }
+
+        private void extendSync(long currTick, TimerImpl currentTimer) {
+            extendedTimer = syncTimer.extend(currTick, currentTimer);
+            extendQueryData(currTick);
+        }
+
+        @RequiresNonNull("asyncTimer")
+        private void extendAsync() {
+            ThreadContextThreadLocal.Holder holder =
+                    BytecodeServiceHolder.get().getCurrentThreadContextHolder();
+            ThreadContextPlus currThreadContext = holder.get();
+            long currTick = ticker.read();
+            if (currThreadContext == ThreadContextImpl.this) {
+                // this thread context was found in ThreadContextThreadLocal.Holder, so it is still
+                // active, and so current timer must be non-null
+                extendSync(currTick, checkNotNull(getCurrentTimer()));
+            } else {
+                // set to null since its value is checked in stopAsync()
+                extendedTimer = null;
+                extendQueryData(currTick);
+            }
+            asyncTimer.extend(currTick);
         }
 
         // this is called for stopping an extension
@@ -1089,11 +1213,32 @@ public class ThreadContextImpl implements ThreadContextPlus {
         public void stop() {
             // the timer interface for this class is only expose through return value of extend()
             if (--selfNestingLevel == 0) {
-                long stopTick = ticker.read();
-                checkNotNull(extendedTimer);
-                extendedTimer.end(stopTick);
-                endQueryData(stopTick);
+                if (isAsync()) {
+                    stopAsync();
+                } else {
+                    stopSync(ticker.read());
+                }
             }
+        }
+
+        private void stopSync(long endTick) {
+            // the timer interface for this class is only expose through return value of extend()
+            checkNotNull(extendedTimer).end(endTick);
+            endQueryData(endTick);
+        }
+
+        @RequiresNonNull("asyncTimer")
+        private void stopAsync() {
+            long endTick = ticker.read();
+            if (extendedTimer == null) {
+                endQueryData(endTick);
+                // it is not helpful to capture stack trace at end of async trace entry since it is
+                // ended by a different thread (and by not capturing, it reduces thread safety
+                // needs)
+            } else {
+                stopSync(endTick);
+            }
+            asyncTimer.end(endTick);
         }
 
         @Override
@@ -1111,7 +1256,14 @@ public class ThreadContextImpl implements ThreadContextPlus {
             if (currThreadContext != this) {
                 return NopTimer.INSTANCE;
             }
-            return syncTimer.extend();
+            // this thread context was passed in from plugin, so it is still active, and so current
+            // timer must be non-null
+            return syncTimer.extend(checkNotNull(getCurrentTimer()));
+        }
+
+        @EnsuresNonNullIf(expression = "asyncTimer", result = true)
+        private boolean isAsync() {
+            return asyncTimer != null;
         }
     }
 }

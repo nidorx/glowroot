@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,14 +15,13 @@
  */
 package org.glowroot.agent.plugin.jdbc;
 
-import javax.annotation.Nullable;
-
 import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.MessageSupplier;
 import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.Timer;
 import org.glowroot.agent.plugin.api.TimerName;
 import org.glowroot.agent.plugin.api.TraceEntry;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.config.BooleanProperty;
 import org.glowroot.agent.plugin.api.config.ConfigService;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
@@ -69,9 +68,9 @@ public class ConnectionAspect {
             }
         }
         @OnReturn
-        public static void onReturn(@BindReturn HasStatementMirror preparedStatement,
+        public static void onReturn(@BindReturn @Nullable HasStatementMirror preparedStatement,
                 @BindParameter @Nullable String sql) {
-            if (sql == null) {
+            if (preparedStatement == null || sql == null) {
                 // seems nothing sensible to do here other than ignore
                 return;
             }
@@ -89,7 +88,11 @@ public class ConnectionAspect {
             methodParameterTypes = {".."})
     public static class CreateStatementAdvice {
         @OnReturn
-        public static void onReturn(@BindReturn HasStatementMirror statement) {
+        public static void onReturn(@BindReturn @Nullable HasStatementMirror statement) {
+            if (statement == null) {
+                // seems nothing sensible to do here other than ignore
+                return;
+            }
             statement.glowroot$setStatementMirror(new StatementMirror());
         }
     }
@@ -104,7 +107,7 @@ public class ConnectionAspect {
         }
         @OnReturn
         public static void onReturn(@BindTraveler TraceEntry traceEntry) {
-            traceEntry.endWithStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
+            traceEntry.endWithLocationStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
                     MILLISECONDS);
         }
         @OnThrow
@@ -124,7 +127,7 @@ public class ConnectionAspect {
         }
         @OnReturn
         public static void onReturn(@BindTraveler TraceEntry traceEntry) {
-            traceEntry.endWithStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
+            traceEntry.endWithLocationStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
                     MILLISECONDS);
         }
         @OnThrow
@@ -154,7 +157,7 @@ public class ConnectionAspect {
         @OnReturn
         public static void onReturn(@BindTraveler Object entryOrTimer) {
             if (entryOrTimer instanceof TraceEntry) {
-                ((TraceEntry) entryOrTimer).endWithStackTrace(
+                ((TraceEntry) entryOrTimer).endWithLocationStackTrace(
                         JdbcPluginProperties.stackTraceThresholdMillis(), MILLISECONDS);
             } else {
                 ((Timer) entryOrTimer).stop();
@@ -188,7 +191,7 @@ public class ConnectionAspect {
         }
         @OnReturn
         public static void onReturn(@BindTraveler TraceEntry traceEntry) {
-            traceEntry.endWithStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
+            traceEntry.endWithLocationStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
                     MILLISECONDS);
         }
         @OnThrow

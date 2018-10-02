@@ -3,7 +3,7 @@
   <strong style="font-size: 18px;">{{headline}}</strong>
   {{#if showExport}}
     <button class="gt-flat-btn gt-flat-btn-big gt-link-color download-trace"
-            style="font-size: 16px; margin: -6px 0;">
+            style="font-size: 1rem; margin: -6px 0;">
       export
     </button>
   {{/if}}
@@ -34,26 +34,50 @@
     <strong>{{agent}}</strong>
   </div>
 {{/if}}
-<div class="gt-trace-attr-name">Transaction type:&nbsp;</div>
-<div class="gt-trace-attr-value">{{transactionType}}</div>
-<div class="gt-trace-attr-name">Transaction name:&nbsp;</div>
-<div class="gt-trace-attr-value">{{transactionName}}</div>
-{{#if error}}
-  <div class="gt-trace-attr-name">Error:&nbsp;</div>
-  <div class="gt-trace-attr-value">{{error.message}}</div>
-  {{#if error.exception}}
-    <div class="gt-trace-exception-indent">
-      <span class="gt-inline-block gt-unexpanded-content gt-link-color">exception</span>
+<div>
+  <div class="gt-trace-attr-name">Transaction type:&nbsp;</div>
+  <div class="gt-trace-attr-value">{{transactionType}}</div>
+</div>
+<div>
+  <div class="gt-trace-attr-name">Transaction name:&nbsp;</div>
+  <div class="gt-trace-attr-value">{{transactionName}}</div>
+</div>
+{{#if locationStackTraceElements}}
+  <div>
+    <div class="gt-trace-attr-name">Location stack trace:&nbsp;</div>
+    <div style="display: table-cell; vertical-align: bottom;">
+      <div class="d-inline-block gt-unexpanded-content gt-link-color gt-opensans"
+           style="margin-top: -2px; margin-bottom: -2px;">
+        {{firstLocationStackTraceElementHtml locationStackTraceElements}}</div>
       {{! using span so background will stretch beyond page border if needed }}
-      <div class="gt-inline-block gt-expanded-content gt-nowrap gt-with-clip hide">
-        <div class="gt-link-color">exception</div>
-        <div class="gt-monospace gt-clip-text">
-          {{{exceptionHtml error.exception}}}
+      <div class="d-inline-block gt-expanded-content gt-nowrap gt-with-clip d-none"
+           style="overflow-x: auto;">
+        <div class="gt-clip-text">
+          {{{locationStackTraceHtml locationStackTraceElements}}}
         </div>
-        <i class="fa fa-clipboard gt-clip"></i>
+        <i class="fas fa-clipboard gt-clip"></i>
       </div>
     </div>
-  {{/if}}
+  </div>
+{{/if}}
+{{#if error}}
+  <div>
+    <div class="gt-trace-attr-name">Error:&nbsp;</div>
+    <div class="gt-trace-attr-value">{{error.message}}</div>
+    {{#if error.exception}}
+      <div class="gt-trace-exception-indent">
+        <span class="d-inline-block gt-unexpanded-content gt-link-color">exception</span>
+        {{! using span so background will stretch beyond page border if needed }}
+        <div class="d-inline-block gt-expanded-content gt-nowrap gt-with-clip d-none">
+          <div class="gt-link-color">exception</div>
+          <div class="gt-monospace gt-clip-text">
+            {{{exceptionHtml error.exception}}}
+          </div>
+          <i class="fas fa-clipboard gt-clip"></i>
+        </div>
+      </div>
+    {{/if}}
+  </div>
 {{/if}}
 <div>
   <div class="gt-trace-attr-name">Start:&nbsp;</div>
@@ -67,12 +91,17 @@
 --></div>
 </div>
 {{#if user}}
-  <div class="gt-trace-attr-name">User:&nbsp;</div>
-  <div class="gt-trace-attr-value">{{user}}</div>
+  <div>
+    <div class="gt-trace-attr-name">User:&nbsp;</div>
+    <div class="gt-trace-attr-value">{{user}}</div>
+  </div>
 {{/if}}
 {{#eachKeyValuePair attributes}}
-  <div class="gt-trace-attr-name">{{key}}:&nbsp;</div>
-  <div class="gt-trace-attr-value">{{value}}</div>
+  <div>
+    <!-- note: surrounding div is for nicer copy paste result -->
+    <div class="gt-trace-attr-name">{{key}}:&nbsp;</div>
+    <div class="gt-trace-attr-value">{{value}}</div>
+  </div>
 {{/eachKeyValuePair}}
 {{#if detail}}
   {{{headerDetailHtml detail}}}
@@ -80,7 +109,7 @@
 {{#if mainThreadRootTimer}}
   <div class="gt-timers">
     <div class="gt-timers-table">
-      <table class="gt-inline-block gt-trace-timer-table" style="border-spacing: 0;">
+      <table class="d-inline-block gt-trace-timer-table" style="border-spacing: 0;">
         <thead>
         <tr>
           <td class="gt-bold gt-breakdown-header" style="text-align: left;">
@@ -92,9 +121,9 @@
         </thead>
         <tbody>
         {{#each mainBreakdown.flattenedTimers}}
-          <tr class="align-top" id="mft{{id}}"{{#unless show}} style="display: none;"{{/unless}}>
+          <tr class="align-top{{#unless show}} d-none{{/unless}}" id="mft{{id}}">
             <td style="text-align: left;">
-              <div class="gt-indent2 gt-break-word gt-break-word-plus gt-second-line-indent">
+              <div class="gt-indent2 gt-break-word gt-second-line-indent">
                 {{name}}
               </div>
             </td>
@@ -107,17 +136,16 @@
             <div class="gt-indent2">
               <div style="margin-left: -6px;">
                 <span tabindex="-1" id="mftForFocus"></span>
-                <button class="gt-flat-btn gt-link-color"
-                        id="mftShowMore"{{#unless mainBreakdown.ftShowMore}} style="display: none;"{{/unless}}>
+                <button class="gt-flat-btn gt-link-color{{#unless mainBreakdown.ftShowMore}} d-none{{/unless}}"
+                        id="mftShowMore">
                   show more
                 </button>
-                <span id="mftShowMoreAndLess" style="display: none;">/</span>
-                <button class="gt-flat-btn gt-link-color"
-                        id="mftShowLess"
-                        style="display: none;">
+                <span class="d-none" id="mftShowMoreAndLess">/</span>
+                <button class="gt-flat-btn gt-link-color d-none"
+                        id="mftShowLess">
                   show less
                 </button>
-                <span id="mftShowAll"{{#unless mainBreakdown.ftShowMore}} style="display: none;"{{/unless}}>
+                <span{{#unless mainBreakdown.ftShowMore}} class="d-none"{{/unless}} id="mftShowAll">
                   /
                   <button class="gt-flat-btn gt-link-color">
                     show all
@@ -135,8 +163,8 @@
         </button>
       </div>
     </div>
-    <div class="hide gt-timers-table">
-      <table class="gt-inline-block gt-trace-timer-table" style="border-spacing: 0;">
+    <div class="d-none gt-timers-table">
+      <table class="d-inline-block gt-trace-timer-table" style="border-spacing: 0;">
         <thead>
         <tr>
           <td class="gt-bold gt-breakdown-header" style="text-align: left;">
@@ -148,10 +176,10 @@
         </thead>
         <tbody>
         {{#each mainBreakdown.timers}}
-          <tr class="align-top" id="mtt{{id}}"{{#unless show}} style="display: none;"{{/unless}}>
+          <tr class="align-top{{#unless show}} d-none{{/unless}}" id="mtt{{id}}">
             <td style="text-align: left;">
               <div class="gt-indent2">
-                <div class="gt-break-word gt-break-word-plus gt-second-line-indent" style="margin-left: {{timerIndent .}}px;">
+                <div class="gt-break-word gt-second-line-indent" style="margin-left: {{timerIndent .}}px;">
                   {{name}}{{#if extended}} (extended){{/if}}
                 </div>
               </div>
@@ -165,17 +193,16 @@
             <div class="gt-indent2">
               <div style="margin-left: -6px;">
                 <span tabindex="-1" id="mttForFocus"></span>
-                <button class="gt-flat-btn gt-link-color"
-                        id="mttShowMore"{{#unless mainBreakdown.ttShowMore}} style="display: none;"{{/unless}}>
+                <button class="gt-flat-btn gt-link-color{{#unless mainBreakdown.ttShowMore}} d-none{{/unless}}"
+                        id="mttShowMore">
                   show more
                 </button>
-                <span id="mttShowMoreAndLess" style="display: none;">/</span>
-                <button class="gt-flat-btn gt-link-color"
-                        id="mttShowLess"
-                        style="display: none;">
+                <span class="d-none" id="mttShowMoreAndLess">/</span>
+                <button class="gt-flat-btn gt-link-color d-none"
+                        id="mttShowLess">
                   show less
                 </button>
-                <span id="mttShowAll"{{#unless mainBreakdown.ttShowMore}} style="display: none;"{{/unless}}>
+                <span{{#unless mainBreakdown.ttShowMore}} class="d-none"{{/unless}} id="mttShowAll">
                   /
                   <button class="gt-flat-btn gt-link-color">
                     show all
@@ -197,7 +224,7 @@
 {{#if auxThreadRootTimers}}
   <div class="gt-timers">
     <div class="gt-timers-table">
-      <table class="gt-inline-block gt-trace-timer-table" style="border-spacing: 0;">
+      <table class="d-inline-block gt-trace-timer-table" style="border-spacing: 0;">
         <thead>
         <tr>
           <td class="gt-bold gt-breakdown-header" style="text-align: left;">
@@ -209,9 +236,9 @@
         </thead>
         <tbody>
         {{#each auxBreakdown.flattenedTimers}}
-          <tr class="align-top" id="aft{{id}}"{{#unless show}} style="display: none;"{{/unless}}>
+          <tr class="align-top{{#unless show}} d-none{{/unless}}" id="aft{{id}}">
             <td style="text-align: left;">
-              <div class="gt-indent2 gt-break-word gt-break-word-plus gt-second-line-indent">
+              <div class="gt-indent2 gt-break-word gt-second-line-indent">
                 {{name}}
               </div>
             </td>
@@ -224,17 +251,16 @@
             <div class="gt-indent2">
               <div style="margin-left: -6px;">
                 <span tabindex="-1" id="aftForFocus"></span>
-                <button class="gt-flat-btn gt-link-color"
-                        id="aftShowMore"{{#unless auxBreakdown.ftShowMore}} style="display: none;"{{/unless}}>
+                <button class="gt-flat-btn gt-link-color{{#unless auxBreakdown.ftShowMore}} d-none{{/unless}}"
+                        id="aftShowMore">
                   show more
                 </button>
-                <span id="aftShowMoreAndLess" style="display: none;">/</span>
-                <button class="gt-flat-btn gt-link-color"
-                        id="aftShowLess"
-                        style="display: none;">
+                <span class="d-none" id="aftShowMoreAndLess">/</span>
+                <button class="gt-flat-btn gt-link-color d-none"
+                        id="aftShowLess">
                   show less
                 </button>
-                <span id="aftShowAll"{{#unless auxBreakdown.ftShowMore}} style="display: none;"{{/unless}}>
+                <span{{#unless auxBreakdown.ftShowMore}} class="d-none"{{/unless}} id="aftShowAll">
                   /
                   <button class="gt-flat-btn gt-link-color">
                     show all
@@ -251,8 +277,8 @@
         switch to tree view
       </button>
     </div>
-    <div class="hide gt-timers-table">
-      <table class="gt-inline-block gt-trace-timer-table" style="border-spacing: 0;">
+    <div class="d-none gt-timers-table">
+      <table class="d-inline-block gt-trace-timer-table" style="border-spacing: 0;">
         <thead>
         <tr>
           <td class="gt-bold gt-breakdown-header" style="text-align: left;">
@@ -264,10 +290,10 @@
         </thead>
         <tbody>
         {{#each auxBreakdown.timers}}
-          <tr class="align-top" id="att{{id}}"{{#unless show}} style="display: none;"{{/unless}}>
+          <tr class="align-top {{#unless show}} d-none{{/unless}}" id="att{{id}}">
             <td style="text-align: left;">
               <div class="gt-indent2">
-                <div class="gt-break-word gt-break-word-plus gt-second-line-indent" style="margin-left: {{timerIndent .}}px;">
+                <div class="gt-break-word gt-second-line-indent" style="margin-left: {{timerIndent .}}px;">
                   {{name}}{{#if extended}} (extended){{/if}}
                 </div>
               </div>
@@ -281,17 +307,16 @@
             <div class="gt-indent2">
               <div style="margin-left: -6px;">
                 <span tabindex="-1" id="attForFocus"></span>
-                <button class="gt-flat-btn gt-link-color"
-                        id="attShowMore"{{#unless auxBreakdown.ttShowMore}} style="display: none;"{{/unless}}>
+                <button class="gt-flat-btn gt-link-color{{#unless auxBreakdown.ttShowMore}} d-none{{/unless}}"
+                        id="attShowMore">
                   show more
                 </button>
-                <span id="attShowMoreAndLess" style="display: none;">/</span>
-                <button class="gt-flat-btn gt-link-color"
-                        id="attShowLess"
-                        style="display: none;">
+                <span class="d-none" id="attShowMoreAndLess">/</span>
+                <button class="gt-flat-btn gt-link-color d-none"
+                        id="attShowLess">
                   show less
                 </button>
-                <span id="attShowAll"{{#unless auxBreakdown.ttShowMore}} style="display: none;"{{/unless}}>
+                <span{{#unless auxBreakdown.ttShowMore}} class="d-none"{{/unless}} id="attShowAll">
                   /
                   <button class="gt-flat-btn gt-link-color">
                     show all
@@ -313,7 +338,7 @@
 {{#if asyncTimers}}
   <div class="gt-timers">
     <div class="gt-timers-table">
-      <table class="gt-inline-block" style="border-spacing: 0;">
+      <table class="d-inline-block" style="border-spacing: 0;">
         <thead>
         <tr>
           <td class="gt-bold gt-breakdown-header" style="text-align: left;">
@@ -327,7 +352,7 @@
         {{#each asyncTimers}}
           <tr class="align-top">
             <td style="text-align: left;">
-              <div class="gt-indent2 gt-break-word gt-break-word-plus gt-second-line-indent">
+              <div class="gt-indent2 gt-break-word gt-second-line-indent">
                 {{name}}
               </div>
             </td>
@@ -340,7 +365,7 @@
     </div>
   </div>
 {{/if}}
-{{#if mainThreadStats}}
+{{#ifNotAllNA mainThreadStats}}
   <div class="gt-bold gt-breakdown-header">
     JVM Thread Stats{{#if auxThreadStats}} (Main Thread){{/if}}
   </div>
@@ -368,35 +393,37 @@
       {{formatAllocatedBytes mainThreadStats/totalAllocatedBytes}}
     </div>
   {{/ifNotNA}}
-{{/if}}
+{{/ifNotAllNA}}
 {{#if auxThreadStats}}
-  <div class="gt-bold gt-breakdown-header">
-    JVM Thread Stats{{#if mainThreadStats}} (Auxiliary Threads){{/if}}
-  </div>
-  {{#ifNotNA auxThreadStats/totalCpuNanos}}
-    <div class="gt-indent2">
-      <span>CPU time:</span>
-      {{nanosToMillis auxThreadStats/totalCpuNanos}} milliseconds
+  {{#ifNotAllNA auxThreadStats}}
+    <div class="gt-bold gt-breakdown-header">
+      JVM Thread Stats{{#if mainThreadStats}} (Auxiliary Threads){{/if}}
     </div>
-  {{/ifNotNA}}
-  {{#ifNotNA auxThreadStats/totalBlockedNanos}}
-    <div class="gt-indent2">
-      <span>Blocked time:</span>
-      {{nanosToMillis auxThreadStats/totalBlockedNanos}} milliseconds
-    </div>
-  {{/ifNotNA}}
-  {{#ifNotNA auxThreadStats/totalWaitedNanos}}
-    <div class="gt-indent2">
-      <span>Waited time:</span>
-      {{nanosToMillis auxThreadStats/totalWaitedNanos}} milliseconds
-    </div>
-  {{/ifNotNA}}
-  {{#ifNotNA auxThreadStats/totalAllocatedBytes}}
-    <div class="gt-indent2">
-      <span>Allocated memory:</span>
-      {{formatAllocatedBytes auxThreadStats/totalAllocatedBytes}}
-    </div>
-  {{/ifNotNA}}
+    {{#ifNotNA auxThreadStats/totalCpuNanos}}
+      <div class="gt-indent2">
+        <span>CPU time:</span>
+        {{nanosToMillis auxThreadStats/totalCpuNanos}} milliseconds
+      </div>
+    {{/ifNotNA}}
+    {{#ifNotNA auxThreadStats/totalBlockedNanos}}
+      <div class="gt-indent2">
+        <span>Blocked time:</span>
+        {{nanosToMillis auxThreadStats/totalBlockedNanos}} milliseconds
+      </div>
+    {{/ifNotNA}}
+    {{#ifNotNA auxThreadStats/totalWaitedNanos}}
+      <div class="gt-indent2">
+        <span>Waited time:</span>
+        {{nanosToMillis auxThreadStats/totalWaitedNanos}} milliseconds
+      </div>
+    {{/ifNotNA}}
+    {{#ifNotNA auxThreadStats/totalAllocatedBytes}}
+      <div class="gt-indent2">
+        <span>Allocated memory:</span>
+        {{formatAllocatedBytes auxThreadStats/totalAllocatedBytes}}
+      </div>
+    {{/ifNotNA}}
+  {{/ifNotAllNA}}
 {{/if}}
 <br>
 {{#ifExistenceYes entriesExistence}}
@@ -406,11 +433,71 @@
     </button>
     {{! spinner is not used in export file }}
     <div>
-      <div class="hide gt-trace-detail-spinner"></div>
+      <div class="d-none gt-trace-detail-spinner"></div>
+    </div>
+  </div>
+  <div id="checkThisForWidth" style="margin: 10px 0 0 1em;">
+    <div id="entries" class="d-none" style="font-family: Cousine, monospace;"></div>
+  </div>
+{{/ifExistenceYes}}
+{{#ifExistenceYes queriesExistence}}
+  <div style="margin-top: 10px;">
+    <button class="gt-flat-btn gt-flat-btn-big-pad1aligned gt-queries-toggle">
+      <span class="gt-link-color">Query stats ({{queryCount}})</span>
+    </button>
+    {{! spinner is not used in export file }}
+    <div>
+      <div class="d-none gt-trace-detail-spinner"></div>
     </div>
   </div>
   <div style="margin: 10px 0 0 1em;">
-    <div id="entries" style="font-family: Cousine, monospace;"></div>
+    <div id="queries" class="d-none"
+         style="margin-top: -40px;">
+      <table class="table gt-query-table"
+             data-curr-sort-property="totalDurationNanos"
+             data-curr-sort-direction="1">
+        <thead>
+        <tr>
+          <th></th>
+          <th class="gt-trace-query-total-column">
+            <button class="gt-trace-query-sort-button"
+                    data-sort-property="totalDurationNanos">
+              Total<br>
+              time<br>
+              <span class="gt-caret"></span>
+              (ms)
+            </button>
+          </th>
+          <th class="gt-trace-query-other-column">
+            <button class="gt-trace-query-sort-button"
+                    data-sort-property="executionCount">
+              Execution<br>
+              <span class="gt-caret d-none"></span>
+              count
+            </button>
+          </th>
+          <th class="gt-trace-query-other-column">
+            <button class="gt-trace-query-sort-button"
+                    data-sort-property="timePerExecution">
+              Time per<br>
+              execution<br>
+              <span class="gt-caret d-none"></span>
+              (ms)
+            </button>
+          </th>
+          <th class="gt-trace-query-rows-column">
+            <button class="gt-trace-query-sort-button"
+                    data-sort-property="rowsPerExecution">
+              Rows per<br>
+              <span class="gt-caret d-none"></span>
+              execution
+            </button>
+          </th>
+        </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 {{/ifExistenceYes}}
 {{#ifExistenceYes profileExistence}}
@@ -421,15 +508,16 @@
       </button>
       {{! spinner is not used in export file }}
       <div>
-        <div class="hide gt-trace-detail-spinner"></div>
+        <div class="d-none gt-trace-detail-spinner"></div>
       </div>
     </div>
     <div style="margin: 10px 0;">
-      <div class="gt-indent2 gt-nowrap hide" id="mainThreadProfileOuter">
+      <div class="gt-indent2 gt-nowrap d-none" id="mainThreadProfileOuter">
         <div style="padding-bottom: 10px;">
           <input class="form-control gt-profile-text-filter"
                  style="display: inline-block; width: 25em;"
-                 placeholder="filter the profile tree">
+                 placeholder="filter the profile tree"
+                 aria-label="Profile tree filter">
         </div>
 
         <div class="gt-profile"></div>
@@ -443,15 +531,16 @@
       </button>
       {{! spinner is not used in export file }}
       <div>
-        <div class="hide gt-trace-detail-spinner"></div>
+        <div class="d-none gt-trace-detail-spinner"></div>
       </div>
     </div>
     <div style="margin: 10px 0;">
-      <div class="gt-indent2 gt-nowrap hide" id="auxThreadProfileOuter">
+      <div class="gt-indent2 gt-nowrap d-none" id="auxThreadProfileOuter">
         <div style="padding-bottom: 10px;">
           <input class="form-control gt-profile-text-filter"
                  style="display: inline-block; width: 25em;"
-                 placeholder="filter the profile tree">
+                 placeholder="filter the profile tree"
+                 aria-label="Profile tree filter">
         </div>
 
         <div class="gt-profile"></div>
@@ -459,35 +548,13 @@
     </div>
   {{/if}}
 {{/ifExistenceYes}}
-{{#ifExistenceExpired entriesExistence}}
-  {{#ifExistenceExpired profileExistence}}
-    <div style="margin: 10px 0;">
-      <strong>
-        Entries and profile for this trace have expired
-      </strong>
-      <em>
-        (see <a href="admin/storage#trace-capped-database-size">Configuration &gt; Storage &gt; Trace detail data</a>)
-      </em>
-    </div>
-  {{^}}
-    <div style="margin: 10px 0;">
-      <strong>
-        Entries for this trace have expired
-      </strong>
-      <em>
-        (see <a href="admin/storage#trace-capped-database-size">Configuration &gt; Storage &gt; Trace detail data</a>)
-      </em>
-    </div>
-  {{/ifExistenceExpired}}
-{{^}}
-  {{#ifExistenceExpired profileExistence}}
-    <div style="margin: 10px 0;">
-      <strong>
-        Profile for this trace has expired
-      </strong>
-      <em>
-        (see <a href="admin/storage#trace-capped-database-size">Configuration &gt; Storage &gt; Trace detail data</a>)
-      </em>
-    </div>
-  {{/ifExistenceExpired}}
-{{/ifExistenceExpired}}
+{{#ifAnyExistenceExpired .}}
+  <div style="margin: 10px 0;">
+    <strong>
+      {{#theExpiredDetails .}}{{/theExpiredDetails}} for this trace have expired
+    </strong>
+    <em>
+      (see <a href="admin/storage#trace-capped-database-size">Configuration &gt; Storage &gt; Trace detail data</a>)
+    </em>
+  </div>
+{{/ifAnyExistenceExpired}}

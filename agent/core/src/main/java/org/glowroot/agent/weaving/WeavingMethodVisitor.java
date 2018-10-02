@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2017 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,29 +24,24 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import javax.annotation.Nullable;
-
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.checkerframework.checker.nullness.qual.RequiresNonNull;
 import org.immutables.value.Value;
-import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.commons.Method;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.glowroot.agent.impl.OptionalThreadContextImpl;
-import org.glowroot.agent.impl.TransactionRegistry;
-import org.glowroot.agent.impl.TransactionRegistry.TransactionRegistryHolder;
-import org.glowroot.agent.impl.TransactionServiceImpl;
-import org.glowroot.agent.impl.TransactionServiceImpl.TransactionServiceHolder;
-import org.glowroot.agent.model.ThreadContextPlus;
-import org.glowroot.agent.plugin.api.util.FastThreadLocal;
+import org.glowroot.agent.bytecode.api.Bytecode;
+import org.glowroot.agent.bytecode.api.ThreadContextPlus;
+import org.glowroot.agent.bytecode.api.ThreadContextThreadLocal;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
 import org.glowroot.agent.plugin.api.weaving.BindTraveler;
 import org.glowroot.agent.plugin.api.weaving.IsEnabled;
@@ -59,6 +54,7 @@ import org.glowroot.agent.weaving.Advice.ParameterKind;
 import org.glowroot.common.util.Styles;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
 
 class WeavingMethodVisitor extends AdviceAdapter {
 
@@ -66,19 +62,11 @@ class WeavingMethodVisitor extends AdviceAdapter {
 
     private static final Type objectType = Type.getType(Object.class);
 
-    private static final Type transactionRegistryHolderType =
-            Type.getType(TransactionRegistryHolder.class);
-    private static final Type transactionRegistryType = Type.getType(TransactionRegistry.class);
-    private static final Type fastThreadLocalHolderType =
-            Type.getType(FastThreadLocal.Holder.class);
-    private static final Type transactionServiceHolderType =
-            Type.getType(TransactionServiceHolder.class);
-    private static final Type transactionServiceImplType =
-            Type.getType(TransactionServiceImpl.class);
-    private static final Type optionalThreadContextImplType =
-            Type.getType(OptionalThreadContextImpl.class);
-
+    private static final Type fastThreadContextThreadLocalHolderType =
+            Type.getType(ThreadContextThreadLocal.Holder.class);
     private static final Type threadContextPlusType = Type.getType(ThreadContextPlus.class);
+
+    private static final Type bytecodeType = Type.getType(Bytecode.class);
 
     // starts at 1 since 0 is used for "no nesting group"
     private static final AtomicInteger nestingGroupIdCounter = new AtomicInteger(1);
@@ -90,6 +78,7 @@ class WeavingMethodVisitor extends AdviceAdapter {
     private static final ConcurrentMap<String, Integer> suppressionKeyIds =
             new ConcurrentHashMap<String, Integer>();
 
+    private final boolean frames;
     private final int access;
     private final String name;
     private final Type owner;
@@ -101,7 +90,7 @@ class WeavingMethodVisitor extends AdviceAdapter {
     private final boolean bootstrapClassLoader;
     private final boolean needsOnReturn;
     private final boolean needsOnThrow;
-    private final @Nullable MethodVisitor outerMethodVisitor;
+    private final Object[] implicitFrameLocals;
 
     private final Map<Advice, Integer> enabledLocals = Maps.newHashMap();
     private final Map<Advice, Integer> travelerLocals = Maps.newHashMap();
@@ -124,11 +113,11 @@ class WeavingMethodVisitor extends AdviceAdapter {
 
     private int[] savedArgLocals = new int[0];
 
-    WeavingMethodVisitor(MethodVisitor mv, int access, String name, String desc, Type owner,
-            Iterable<Advice> advisors, @Nullable String metaHolderInternalName,
-            @Nullable Integer methodMetaGroupUniqueNum, boolean bootstrapClassLoader,
-            @Nullable MethodVisitor outerMethodVisitor) {
-        super(ASM5, mv, access, name, desc);
+    WeavingMethodVisitor(MethodVisitor mv, boolean frames, int access, String name, String desc,
+            Type owner, Iterable<Advice> advisors, @Nullable String metaHolderInternalName,
+            @Nullable Integer methodMetaGroupUniqueNum, boolean bootstrapClassLoader) {
+        super(ASM6, new FrameDeduppingMethodVisitor(mv), access, name, desc);
+        this.frames = frames;
         this.access = access;
         this.name = name;
         this.owner = owner;
@@ -157,21 +146,45 @@ class WeavingMethodVisitor extends AdviceAdapter {
         }
         this.needsOnReturn = needsOnReturn;
         this.needsOnThrow = needsOnThrow;
-        this.outerMethodVisitor = outerMethodVisitor;
+
+        int nImplicitFrameLocals = argumentTypes.length;
+        boolean needsReceiver = !Modifier.isStatic(access);
+        if (needsReceiver) {
+            nImplicitFrameLocals++;
+        }
+        Object[] implicitFrameLocals = new Object[nImplicitFrameLocals];
+        int i = 0;
+        if (needsReceiver) {
+            if (name.equals("<init>")) {
+                // need explicit import due to same static variable name in super class
+                implicitFrameLocals[i++] = Opcodes.UNINITIALIZED_THIS;
+            } else {
+                implicitFrameLocals[i++] = owner.getInternalName();
+            }
+        }
+        for (Type argumentType : argumentTypes) {
+            implicitFrameLocals[i++] = convert(argumentType);
+        }
+        this.implicitFrameLocals = implicitFrameLocals;
     }
 
     @Override
-    public @Nullable AnnotationVisitor visitAnnotation(String desc, boolean visible) {
-        if (outerMethodVisitor != null) {
-            return outerMethodVisitor.visitAnnotation(desc, visible);
+    protected void onMethodPreEnter() {
+        stackFrameTracking = false;
+        try {
+            onMethodPreEnterInternal();
+        } finally {
+            stackFrameTracking = true;
         }
-        return super.visitAnnotation(desc, visible);
     }
 
     @Override
     protected void onMethodEnter() {
         stackFrameTracking = false;
         try {
+            if (name.equals("<init>")) {
+                implicitFrameLocals[0] = owner.getInternalName();
+            }
             onMethodEnterInternal();
         } finally {
             stackFrameTracking = true;
@@ -256,11 +269,16 @@ class WeavingMethodVisitor extends AdviceAdapter {
         if (needsOnReturn && returnOpcode != null) {
             checkNotNull(onReturnLabel, "Call to onMethodEnter() is required");
             visitLabel(onReturnLabel);
+            if (returnType.getSort() == Type.VOID) {
+                visitImplicitFrame();
+            } else {
+                visitImplicitFrame(convert(returnType));
+            }
             for (Advice advice : Lists.reverse(advisors)) {
                 visitOnReturnAdvice(advice, returnOpcode);
-                visitOnAfterAdvice(advice);
+                visitOnAfterAdvice(advice, false);
             }
-            resetCurrentNestingGroupIfNeeded();
+            resetCurrentNestingGroupIfNeeded(false);
             // need to call super.visitInsn() in order to avoid infinite loop
             // could call mv.visitInsn(), but that would bypass special constructor handling in
             // AdviceAdapter.visitInsn()
@@ -272,18 +290,34 @@ class WeavingMethodVisitor extends AdviceAdapter {
         super.visitMaxs(maxStack, maxLocals);
     }
 
-    private void onMethodEnterInternal() {
+    private void onMethodPreEnterInternal() {
         methodStartLabel = new Label();
         visitLabel(methodStartLabel);
         // enabled and traveler locals must be defined outside of the try block so they will be
         // accessible in the catch block
         for (Advice advice : advisors) {
-            defineAndEvaluateEnabledLocalVar(advice);
+            defineLocalVars(advice);
             defineTravelerLocalVar(advice);
         }
+        if (name.equals("<init>")) {
+            // this is to solve a super special case with advice on constructors that have local
+            // variables defined before calling super (which is only possible in bytecode, e.g.
+            // jacoco does this)
+            // see WeaverTest.shouldExecuteSingleJumpAdviceOnHackedConstructorBytecode()
+            for (Advice advice : advisors) {
+                evaluateLocalVars(advice);
+            }
+        }
         saveArgsForMethodExit();
+    }
+
+    private void onMethodEnterInternal() {
         for (int i = 0; i < advisors.size(); i++) {
             Advice advice = advisors.get(i);
+            if (!name.equals("<init>")) {
+                // see comment above in onMethodPreEnterInternal() why this is skipped for <init>
+                evaluateLocalVars(advice);
+            }
             invokeOnBefore(advice, travelerLocals.get(advice));
             if (advice.onAfterAdvice() != null || advice.onThrowAdvice() != null) {
                 Label catchStartLabel = new Label();
@@ -309,7 +343,8 @@ class WeavingMethodVisitor extends AdviceAdapter {
             visitTryCatchBlock(catchStartLabel, catchEndLabel, catchHandlerLabel,
                     "java/lang/Throwable");
             visitLabel(catchHandlerLabel);
-            resetCurrentNestingGroupIfNeeded();
+            visitImplicitFrame("java/lang/Throwable");
+            resetCurrentNestingGroupIfNeeded(true);
             visitInsn(ATHROW);
         } else {
             for (CatchHandler catchHandler : Lists.reverse(catchHandlers)) {
@@ -317,39 +352,40 @@ class WeavingMethodVisitor extends AdviceAdapter {
                 visitTryCatchBlock(catchHandler.catchStartLabel(), catchEndLabel, catchHandlerLabel,
                         "java/lang/Throwable");
                 visitLabel(catchHandlerLabel);
+                visitImplicitFrame("java/lang/Throwable");
                 for (Advice advice : Lists.reverse(catchHandler.advisors())) {
                     visitOnThrowAdvice(advice);
                 }
                 for (Advice advice : Lists.reverse(catchHandler.advisors())) {
-                    visitOnAfterAdvice(advice);
+                    visitOnAfterAdvice(advice, true);
                 }
-                resetCurrentNestingGroupIfNeeded();
+                resetCurrentNestingGroupIfNeeded(true);
                 visitInsn(ATHROW);
             }
         }
     }
 
-    private void defineAndEvaluateEnabledLocalVar(Advice advice) {
+    private void defineLocalVars(Advice advice) {
         Integer enabledLocal = null;
         Method isEnabledAdvice = advice.isEnabledAdvice();
-        if (isEnabledAdvice != null) {
-            loadMethodParameters(advice.isEnabledParameters(), 0, -1, advice.adviceType(),
-                    IsEnabled.class, false);
-            visitMethodInsn(INVOKESTATIC, advice.adviceType().getInternalName(),
-                    isEnabledAdvice.getName(), isEnabledAdvice.getDescriptor(), false);
+        String nestingGroup = advice.pointcut().nestingGroup();
+        String suppressibleUsingKey = advice.pointcut().suppressibleUsingKey();
+        if (isEnabledAdvice != null
+                || hasOtherEnabledFactors(advice, nestingGroup, suppressibleUsingKey)) {
             enabledLocal = newLocal(Type.BOOLEAN_TYPE);
             enabledLocals.put(advice, enabledLocal);
+            // temporary initial value needed for Java 7 stack map frames
+            visitInsn(ICONST_0);
             storeLocal(enabledLocal);
         }
-        String nestingGroup = advice.pointcut().nestingGroup();
         String suppressionKey = advice.pointcut().suppressionKey();
-        String suppressibleUsingKey = advice.pointcut().suppressibleUsingKey();
-        if ((!nestingGroup.isEmpty() || !suppressionKey.isEmpty()
-                || advice.hasBindThreadContext() || advice.hasBindOptionalThreadContext())
-                && threadContextHolderLocal == null) {
+        boolean needThreadContextHolderLocal = !nestingGroup.isEmpty() || !suppressionKey.isEmpty()
+                || !suppressibleUsingKey.isEmpty() || advice.hasBindThreadContext()
+                || advice.hasBindOptionalThreadContext();
+        if (needThreadContextHolderLocal && threadContextHolderLocal == null) {
             // need to define thread context local var outside of any branches,
             // but also don't want to load ThreadContext if enabledLocal exists and is false
-            threadContextHolderLocal = newLocal(fastThreadLocalHolderType);
+            threadContextHolderLocal = newLocal(fastThreadContextThreadLocalHolderType);
             visitInsn(ACONST_NULL);
             storeLocal(threadContextHolderLocal);
             threadContextLocal = newLocal(threadContextPlusType);
@@ -362,7 +398,7 @@ class WeavingMethodVisitor extends AdviceAdapter {
             // but also don't want to load ThreadContext if enabledLocal exists and is false
             prevNestingGroupIdLocal = newLocal(Type.INT_TYPE);
             prevNestingGroupIdLocals.put(advice, prevNestingGroupIdLocal);
-            visitIntInsn(BIPUSH, -1);
+            visitInsn(ICONST_M1);
             storeLocal(prevNestingGroupIdLocal);
         }
         Integer prevSuppressionKeyIdLocal = null;
@@ -371,94 +407,103 @@ class WeavingMethodVisitor extends AdviceAdapter {
             // but also don't want to load ThreadContext if enabledLocal exists and is false
             prevSuppressionKeyIdLocal = newLocal(Type.INT_TYPE);
             prevSuppressionKeyIdLocals.put(advice, prevSuppressionKeyIdLocal);
-            visitIntInsn(BIPUSH, -1);
+            visitInsn(ICONST_M1);
             storeLocal(prevSuppressionKeyIdLocal);
-        }
-        // need to load ThreadContext
-        if (!nestingGroup.isEmpty() || !suppressibleUsingKey.isEmpty() || !suppressionKey.isEmpty()
-                || (advice.hasBindThreadContext() && !advice.hasBindOptionalThreadContext())) {
-            Label disabledLabel = new Label();
-            if (enabledLocal != null) {
-                loadLocal(enabledLocal);
-                visitJumpInsn(IFEQ, disabledLabel);
-            } else {
-                enabledLocal = newLocal(Type.BOOLEAN_TYPE);
-                enabledLocals.put(advice, enabledLocal);
-                // temporary initial value to help with Java 7 stack frames
-                visitInsn(ICONST_0);
-                storeLocal(enabledLocal);
-            }
-            loadThreadContextHolder();
-            dup();
-            checkNotNull(threadContextHolderLocal);
-            storeLocal(threadContextHolderLocal);
-            visitMethodInsn(INVOKEVIRTUAL, fastThreadLocalHolderType.getInternalName(), "get",
-                    "()" + objectType.getDescriptor(), false);
-            dup();
-            checkNotNull(threadContextLocal);
-            storeLocal(threadContextLocal);
-            if (advice.hasBindThreadContext() && !advice.hasBindOptionalThreadContext()) {
-                visitJumpInsn(IFNULL, disabledLabel);
-                if (!suppressibleUsingKey.isEmpty()) {
-                    checkSuppressibleUsingKey(suppressibleUsingKey, disabledLabel);
-                }
-                if (!nestingGroup.isEmpty()) {
-                    checkNotNull(prevNestingGroupIdLocal);
-                    checkAndUpdateNestingGroupId(prevNestingGroupIdLocal, nestingGroup,
-                            disabledLabel);
-                }
-                if (!suppressionKey.isEmpty()) {
-                    checkNotNull(prevSuppressionKeyIdLocal);
-                    updateSuppressionKeyId(prevSuppressionKeyIdLocal, suppressionKey);
-                }
-            } else {
-                if (!suppressibleUsingKey.isEmpty()) {
-                    Label enabledLabel = new Label();
-                    // if thread context == null, then not suppressible
-                    visitJumpInsn(IFNULL, enabledLabel);
-                    checkSuppressibleUsingKey(suppressibleUsingKey, disabledLabel);
-                    visitLabel(enabledLabel);
-                }
-                if (!nestingGroup.isEmpty()) {
-                    Label enabledLabel = new Label();
-                    // if thread context == null, then not in nesting group
-                    visitJumpInsn(IFNULL, enabledLabel);
-                    checkNotNull(prevNestingGroupIdLocal);
-                    checkAndUpdateNestingGroupId(prevNestingGroupIdLocal, nestingGroup,
-                            disabledLabel);
-                    visitLabel(enabledLabel);
-                }
-                if (!suppressionKey.isEmpty()) {
-                    Label enabledLabel = new Label();
-                    // if thread context == null, then not in nesting group
-                    visitJumpInsn(IFNULL, enabledLabel);
-                    checkNotNull(prevSuppressionKeyIdLocal);
-                    updateSuppressionKeyId(prevSuppressionKeyIdLocal, suppressionKey);
-                    visitLabel(enabledLabel);
-                }
-            }
-            visitInsn(ICONST_1);
-            Label endLabel = new Label();
-            goTo(endLabel);
-            visitLabel(disabledLabel);
-            visitInsn(ICONST_0);
-            visitLabel(endLabel);
-            storeLocal(enabledLocal);
         }
     }
 
-    private void loadThreadContextHolder() {
-        // TODO optimize, don't need to look up ThreadContext thread local each time
-        visitMethodInsn(INVOKESTATIC, transactionRegistryHolderType.getInternalName(),
-                "getTransactionRegistry", "()" + transactionRegistryType.getDescriptor(), false);
-        visitMethodInsn(INVOKEVIRTUAL, transactionRegistryType.getInternalName(),
-                "getCurrentThreadContextHolder", "()" + fastThreadLocalHolderType.getDescriptor(),
-                false);
+    private void evaluateLocalVars(Advice advice) {
+        Method isEnabledAdvice = advice.isEnabledAdvice();
+        String nestingGroup = advice.pointcut().nestingGroup();
+        String suppressionKey = advice.pointcut().suppressionKey();
+        String suppressibleUsingKey = advice.pointcut().suppressibleUsingKey();
+        Label otherEnabledFactorsDisabledEnd = null;
+        if (hasOtherEnabledFactors(advice, nestingGroup, suppressibleUsingKey)) {
+            otherEnabledFactorsDisabledEnd = new Label();
+        }
+        if (isEnabledAdvice != null) {
+            loadMethodParameters(advice.isEnabledParameters(), 0, null, advice.adviceType(),
+                    IsEnabled.class, false, nestingGroup, suppressionKey);
+            visitMethodInsn(INVOKESTATIC, advice.adviceType().getInternalName(),
+                    isEnabledAdvice.getName(), isEnabledAdvice.getDescriptor(), false);
+            if (otherEnabledFactorsDisabledEnd == null) {
+                // guaranteed to be non-null via defineLocalVars() above
+                int enabledLocal = checkNotNull(enabledLocals.get(advice));
+                storeLocal(enabledLocal);
+            } else {
+                visitJumpInsn(IFEQ, otherEnabledFactorsDisabledEnd);
+            }
+        }
+        if (otherEnabledFactorsDisabledEnd != null) {
+            checkNotNull(threadContextHolderLocal);
+            checkNotNull(threadContextLocal);
+            loadMaybeNullThreadContext();
+            if (advice.hasBindThreadContext() && !advice.hasBindOptionalThreadContext()) {
+                // if thread context == null, then nothing to check or update, go to disabled
+                visitJumpInsn(IFNULL, otherEnabledFactorsDisabledEnd);
+                if (!nestingGroup.isEmpty()) {
+                    int prevNestingGroupIdLocal =
+                            checkNotNull(prevNestingGroupIdLocals.get(advice));
+                    checkAndUpdateNestingGroupId(prevNestingGroupIdLocal, nestingGroup,
+                            otherEnabledFactorsDisabledEnd);
+                }
+                if (!suppressibleUsingKey.isEmpty()) {
+                    checkSuppressibleUsingKey(suppressibleUsingKey, otherEnabledFactorsDisabledEnd);
+                }
+                if (!suppressionKey.isEmpty()) {
+                    int prevSuppressionKeyIdLocal =
+                            checkNotNull(prevSuppressionKeyIdLocals.get(advice));
+                    updateSuppressionKeyId(prevSuppressionKeyIdLocal, suppressionKey);
+                }
+            } else {
+                Label label = new Label();
+                // if thread context == null, then nothing to check or update, go to enabled
+                visitJumpInsn(IFNULL, label);
+                if (!nestingGroup.isEmpty()) {
+                    int prevNestingGroupIdLocal =
+                            checkNotNull(prevNestingGroupIdLocals.get(advice));
+                    checkAndUpdateNestingGroupId(prevNestingGroupIdLocal, nestingGroup,
+                            otherEnabledFactorsDisabledEnd);
+                }
+                if (!suppressibleUsingKey.isEmpty()) {
+                    checkSuppressibleUsingKey(suppressibleUsingKey, otherEnabledFactorsDisabledEnd);
+                }
+                if (!suppressionKey.isEmpty()) {
+                    int prevSuppressionKeyIdLocal =
+                            checkNotNull(prevSuppressionKeyIdLocals.get(advice));
+                    updateSuppressionKeyId(prevSuppressionKeyIdLocal, suppressionKey);
+                }
+                visitLabel(label);
+                visitImplicitFrame();
+            }
+            visitInsn(ICONST_1);
+            Label otherEnabledFactorsStoreLabel = new Label();
+            goTo(otherEnabledFactorsStoreLabel);
+            visitLabel(otherEnabledFactorsDisabledEnd);
+            visitImplicitFrame();
+            visitInsn(ICONST_0);
+            visitLabel(otherEnabledFactorsStoreLabel);
+            visitImplicitFrame(INTEGER);
+            // guaranteed to be non-null via defineLocalVars() above
+            int enabledLocal = checkNotNull(enabledLocals.get(advice));
+            storeLocal(enabledLocal);
+        } else if (!suppressionKey.isEmpty()) {
+            checkNotNull(threadContextHolderLocal);
+            checkNotNull(threadContextLocal);
+            loadMaybeNullThreadContext();
+            Label label = new Label();
+            // if thread context == null, then nothing to update
+            visitJumpInsn(IFNULL, label);
+            int prevSuppressionKeyIdLocal = checkNotNull(prevSuppressionKeyIdLocals.get(advice));
+            updateSuppressionKeyId(prevSuppressionKeyIdLocal, suppressionKey);
+            visitLabel(label);
+            visitImplicitFrame();
+        }
     }
 
     @RequiresNonNull("threadContextLocal")
     private void checkAndUpdateNestingGroupId(int prevNestingGroupIdLocal, String nestingGroup,
-            Label disabledLabel) {
+            Label otherEnabledFactorsDisabledEnd) {
         loadLocal(threadContextLocal);
         visitMethodInsn(INVOKEINTERFACE, threadContextPlusType.getInternalName(),
                 "getCurrentNestingGroupId", "()I", true);
@@ -466,7 +511,7 @@ class WeavingMethodVisitor extends AdviceAdapter {
         storeLocal(prevNestingGroupIdLocal);
         int nestingGroupId = getNestingGroupId(nestingGroup);
         mv.visitLdcInsn(nestingGroupId);
-        visitJumpInsn(IF_ICMPEQ, disabledLabel);
+        visitJumpInsn(IF_ICMPEQ, otherEnabledFactorsDisabledEnd);
         loadLocal(threadContextLocal);
         mv.visitLdcInsn(nestingGroupId);
         visitMethodInsn(INVOKEINTERFACE, threadContextPlusType.getInternalName(),
@@ -474,13 +519,14 @@ class WeavingMethodVisitor extends AdviceAdapter {
     }
 
     @RequiresNonNull("threadContextLocal")
-    private void checkSuppressibleUsingKey(String suppressibleUsingKey, Label disabledLabel) {
+    private void checkSuppressibleUsingKey(String suppressibleUsingKey,
+            Label otherEnabledFactorsDisabledEnd) {
         loadLocal(threadContextLocal);
         visitMethodInsn(INVOKEINTERFACE, threadContextPlusType.getInternalName(),
                 "getCurrentSuppressionKeyId", "()I", true);
         int suppressionKeyId = getSuppressionKeyId(suppressibleUsingKey);
         mv.visitLdcInsn(suppressionKeyId);
-        visitJumpInsn(IF_ICMPEQ, disabledLabel);
+        visitJumpInsn(IF_ICMPEQ, otherEnabledFactorsDisabledEnd);
     }
 
     @RequiresNonNull("threadContextLocal")
@@ -520,69 +566,31 @@ class WeavingMethodVisitor extends AdviceAdapter {
         Integer enabledLocal = enabledLocals.get(advice);
         Label onBeforeBlockEnd = null;
         if (enabledLocal != null) {
-            onBeforeBlockEnd = new Label();
-            loadLocal(enabledLocal);
-            visitJumpInsn(IFEQ, onBeforeBlockEnd);
+            if (name.equals("<init>")) {
+                loadLocal(enabledLocal);
+            } else {
+                onBeforeBlockEnd = new Label();
+                loadLocal(enabledLocal);
+                visitJumpInsn(IFEQ, onBeforeBlockEnd);
+            }
         }
-        loadMethodParameters(advice.onBeforeParameters(), 0, -1, advice.adviceType(),
-                OnBefore.class, false);
-        visitMethodInsn(INVOKESTATIC, advice.adviceType().getInternalName(),
-                onBeforeAdvice.getName(), onBeforeAdvice.getDescriptor(), false);
+        loadMethodParameters(advice.onBeforeParameters(), 0, null, advice.adviceType(),
+                OnBefore.class, false, advice.pointcut().nestingGroup(),
+                advice.pointcut().suppressionKey());
+        if (enabledLocal != null && name.equals("<init>")) {
+            String desc = "(Z" + onBeforeAdvice.getDescriptor().substring(1);
+            visitMethodInsn(INVOKESTATIC, advice.adviceType().getInternalName(),
+                    onBeforeAdvice.getName(), desc, false);
+        } else {
+            visitMethodInsn(INVOKESTATIC, advice.adviceType().getInternalName(),
+                    onBeforeAdvice.getName(), onBeforeAdvice.getDescriptor(), false);
+        }
         if (travelerLocal != null) {
             storeLocal(travelerLocal);
         }
-        String nestingGroup = advice.pointcut().nestingGroup();
-        if (advice.hasBindOptionalThreadContext() && !nestingGroup.isEmpty()) {
-            // need to check if transaction was just started in @OnBefore and update its
-            // currentNestingGroupId
-
-            Integer prevNestingGroupIdLocal = prevNestingGroupIdLocals.get(advice);
-            checkNotNull(prevNestingGroupIdLocal);
-            loadLocal(prevNestingGroupIdLocal);
-            visitIntInsn(BIPUSH, -1);
-            Label label = new Label();
-            visitJumpInsn(IF_ICMPNE, label);
-            // the only reason prevNestingGroupId is -1 here is because no thread context at the
-            // start of the method
-            checkNotNull(threadContextLocal);
-            loadLocal(threadContextLocal);
-            visitMethodInsn(INVOKEINTERFACE, threadContextPlusType.getInternalName(),
-                    "getCurrentNestingGroupId", "()I", true);
-            storeLocal(prevNestingGroupIdLocal);
-            loadLocal(threadContextLocal);
-            int nestingGroupId = getNestingGroupId(nestingGroup);
-            mv.visitLdcInsn(nestingGroupId);
-            visitMethodInsn(INVOKEINTERFACE, threadContextPlusType.getInternalName(),
-                    "setCurrentNestingGroupId", "(I)V", true);
-            visitLabel(label);
-        }
-        String suppressionKey = advice.pointcut().suppressionKey();
-        if (advice.hasBindOptionalThreadContext() && !suppressionKey.isEmpty()) {
-            // need to check if transaction was just started in @OnBefore and update its
-            // currentSuppressionKeyId
-
-            Integer prevSuppressionKeyIdLocal = prevSuppressionKeyIdLocals.get(advice);
-            checkNotNull(prevSuppressionKeyIdLocal);
-            loadLocal(prevSuppressionKeyIdLocal);
-            visitIntInsn(BIPUSH, -1);
-            Label label = new Label();
-            visitJumpInsn(IF_ICMPNE, label);
-            // the only reason prevSuppressionKeyId is -1 here is because no thread context at the
-            // start of the method
-            checkNotNull(threadContextLocal);
-            loadLocal(threadContextLocal);
-            visitMethodInsn(INVOKEINTERFACE, threadContextPlusType.getInternalName(),
-                    "getCurrentSuppressionKeyId", "()I", true);
-            storeLocal(prevSuppressionKeyIdLocal);
-            loadLocal(threadContextLocal);
-            int suppressionKeyId = getSuppressionKeyId(suppressionKey);
-            mv.visitLdcInsn(suppressionKeyId);
-            visitMethodInsn(INVOKEINTERFACE, threadContextPlusType.getInternalName(),
-                    "setCurrentSuppressionKeyId", "(I)V", true);
-            visitLabel(label);
-        }
         if (onBeforeBlockEnd != null) {
             visitLabel(onBeforeBlockEnd);
+            visitImplicitFrame();
         }
     }
 
@@ -636,33 +644,66 @@ class WeavingMethodVisitor extends AdviceAdapter {
         weaveOnReturnAdvice(opcode, advice, onReturnAdvice);
         if (onReturnBlockEnd != null) {
             visitLabel(onReturnBlockEnd);
+            if (returnType.getSort() == Type.VOID) {
+                visitImplicitFrame();
+            } else {
+                visitImplicitFrame(convert(returnType));
+            }
         }
     }
 
     private void weaveOnReturnAdvice(int opcode, Advice advice, Method onReturnAdvice) {
-        boolean leaveReturnValueOnStack = onReturnAdvice.getReturnType().getSort() == Type.VOID;
         if (onReturnAdvice.getArgumentTypes().length > 0) {
             // @BindReturn must be the first argument to @OnReturn (if present)
-            int startIndex = 0;
+            int startIndex;
+            Object[] stack;
             AdviceParameter parameter = advice.onReturnParameters().get(0);
+            boolean leaveReturnValueOnStack = onReturnAdvice.getReturnType().getSort() == Type.VOID;
             switch (parameter.kind()) {
                 case RETURN:
                     loadNonOptionalReturnValue(opcode, parameter, leaveReturnValueOnStack);
                     startIndex = 1;
+                    if (leaveReturnValueOnStack && opcode != RETURN) {
+                        stack = new Object[] {convert(returnType), convert(parameter.type())};
+                    } else {
+                        stack = new Object[] {convert(parameter.type())};
+                    }
                     break;
                 case OPTIONAL_RETURN:
                     loadOptionalReturnValue(opcode, leaveReturnValueOnStack);
                     startIndex = 1;
+                    if (leaveReturnValueOnStack && opcode != RETURN) {
+                        stack = new Object[] {convert(returnType), convert(parameter.type())};
+                    } else {
+                        stack = new Object[] {convert(parameter.type())};
+                    }
                     break;
                 default:
-                    // first argument is not @BindReturn
+                    // first argument is not @BindReturn (which means there is no @BindReturn)
+                    startIndex = 0;
+                    if (opcode == RETURN) {
+                        stack = new Object[] {};
+                    } else {
+                        if (onReturnAdvice.getReturnType().getSort() == Type.VOID) {
+                            stack = new Object[] {convert(returnType)};
+                        } else {
+                            pop();
+                            stack = new Object[] {};
+                        }
+                    }
                     break;
             }
             loadMethodParameters(advice.onReturnParameters(), startIndex,
-                    travelerLocals.get(advice), advice.adviceType(), OnReturn.class, true);
+                    travelerLocals.get(advice), advice.adviceType(), OnReturn.class, true,
+                    advice.pointcut().nestingGroup(), advice.pointcut().suppressionKey(), stack);
+        } else if (onReturnAdvice.getReturnType().getSort() != Type.VOID && opcode != RETURN) {
+            pop();
         }
         visitMethodInsn(INVOKESTATIC, advice.adviceType().getInternalName(),
                 onReturnAdvice.getName(), onReturnAdvice.getDescriptor(), false);
+        if (onReturnAdvice.getReturnType().getSort() != Type.VOID && opcode == RETURN) {
+            pop();
+        }
     }
 
     private void loadNonOptionalReturnValue(int opcode, AdviceParameter parameter, boolean dup) {
@@ -678,11 +719,12 @@ class WeavingMethodVisitor extends AdviceAdapter {
     private void loadOptionalReturnValue(int opcode, boolean dup) {
         if (opcode == RETURN) {
             // void
-            visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/VoidReturn", "getInstance",
-                    "()Lorg/glowroot/agent/plugin/api/weaving/OptionalReturn;", false);
+            visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/bytecode/api/VoidReturn",
+                    "getInstance", "()Lorg/glowroot/agent/plugin/api/weaving/OptionalReturn;",
+                    false);
         } else {
             loadReturnValue(opcode, dup, true);
-            visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/NonVoidReturn", "create",
+            visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/bytecode/api/NonVoidReturn", "create",
                     "(Ljava/lang/Object;)Lorg/glowroot/agent/plugin/api/weaving/OptionalReturn;",
                     false);
         }
@@ -713,27 +755,31 @@ class WeavingMethodVisitor extends AdviceAdapter {
             loadLocal(enabledLocal);
             visitJumpInsn(IFEQ, onThrowBlockEnd);
         }
-        if (onThrowAdvice.getArgumentTypes().length == 0) {
-            visitMethodInsn(INVOKESTATIC, advice.adviceType().getInternalName(),
-                    onThrowAdvice.getName(), onThrowAdvice.getDescriptor(), false);
-        } else {
-            int startIndex = 0;
+        if (onThrowAdvice.getArgumentTypes().length > 0) {
+            int startIndex;
+            Object[] stack;
             if (advice.onThrowParameters().get(0).kind() == ParameterKind.THROWABLE) {
                 // @BindThrowable must be the first argument to @OnThrow (if present)
                 visitInsn(DUP);
-                startIndex++;
+                startIndex = 1;
+                stack = new Object[] {"java/lang/Throwable", "java/lang/Throwable"};
+            } else {
+                startIndex = 0;
+                stack = new Object[] {"java/lang/Throwable"};
             }
             loadMethodParameters(advice.onThrowParameters(), startIndex, travelerLocals.get(advice),
-                    advice.adviceType(), OnThrow.class, true);
-            visitMethodInsn(INVOKESTATIC, advice.adviceType().getInternalName(),
-                    onThrowAdvice.getName(), onThrowAdvice.getDescriptor(), false);
+                    advice.adviceType(), OnThrow.class, true, advice.pointcut().nestingGroup(),
+                    advice.pointcut().suppressionKey(), stack);
         }
+        visitMethodInsn(INVOKESTATIC, advice.adviceType().getInternalName(),
+                onThrowAdvice.getName(), onThrowAdvice.getDescriptor(), false);
         if (onThrowBlockEnd != null) {
             visitLabel(onThrowBlockEnd);
+            visitImplicitFrame("java/lang/Throwable");
         }
     }
 
-    private void visitOnAfterAdvice(Advice advice) {
+    private void visitOnAfterAdvice(Advice advice, boolean insideCatchHandler) {
         Method onAfterAdvice = advice.onAfterAdvice();
         if (onAfterAdvice == null) {
             return;
@@ -746,22 +792,32 @@ class WeavingMethodVisitor extends AdviceAdapter {
             visitJumpInsn(IFEQ, onAfterBlockEnd);
         }
         loadMethodParameters(advice.onAfterParameters(), 0, travelerLocals.get(advice),
-                advice.adviceType(), OnAfter.class, true);
+                advice.adviceType(), OnAfter.class, true, advice.pointcut().nestingGroup(),
+                advice.pointcut().suppressionKey());
         visitMethodInsn(INVOKESTATIC, advice.adviceType().getInternalName(),
                 onAfterAdvice.getName(), onAfterAdvice.getDescriptor(), false);
         if (onAfterBlockEnd != null) {
             visitLabel(onAfterBlockEnd);
+            // either inside catch handler or inside on return block
+            if (insideCatchHandler) {
+                visitImplicitFrame("java/lang/Throwable");
+            } else if (returnType.getSort() == Type.VOID) {
+                visitImplicitFrame();
+            } else {
+                visitImplicitFrame(convert(returnType));
+            }
         }
     }
 
-    private void resetCurrentNestingGroupIfNeeded() {
+    // only called from inside catch handler or inside on return block
+    private void resetCurrentNestingGroupIfNeeded(boolean insideCatchHandler) {
         ListIterator<Advice> i = advisors.listIterator(advisors.size());
         while (i.hasPrevious()) {
             Advice advice = i.previous();
             Integer prevNestingGroupIdLocal = prevNestingGroupIdLocals.get(advice);
             if (prevNestingGroupIdLocal != null) {
                 loadLocal(prevNestingGroupIdLocal);
-                visitIntInsn(BIPUSH, -1);
+                visitInsn(ICONST_M1);
                 Label label = new Label();
                 visitJumpInsn(IF_ICMPEQ, label);
                 checkNotNull(threadContextLocal);
@@ -770,11 +826,19 @@ class WeavingMethodVisitor extends AdviceAdapter {
                 visitMethodInsn(INVOKEINTERFACE, threadContextPlusType.getInternalName(),
                         "setCurrentNestingGroupId", "(I)V", true);
                 visitLabel(label);
+                // either inside catch handler or inside on return block
+                if (insideCatchHandler) {
+                    visitImplicitFrame("java/lang/Throwable");
+                } else if (returnType.getSort() == Type.VOID) {
+                    visitImplicitFrame();
+                } else {
+                    visitImplicitFrame(convert(returnType));
+                }
             }
             Integer prevSuppressionKeyIdLocal = prevSuppressionKeyIdLocals.get(advice);
             if (prevSuppressionKeyIdLocal != null) {
                 loadLocal(prevSuppressionKeyIdLocal);
-                visitIntInsn(BIPUSH, -1);
+                visitInsn(ICONST_M1);
                 Label label = new Label();
                 visitJumpInsn(IF_ICMPEQ, label);
                 checkNotNull(threadContextLocal);
@@ -783,13 +847,22 @@ class WeavingMethodVisitor extends AdviceAdapter {
                 visitMethodInsn(INVOKEINTERFACE, threadContextPlusType.getInternalName(),
                         "setCurrentSuppressionKeyId", "(I)V", true);
                 visitLabel(label);
+                // either inside catch handler or inside on return block
+                if (insideCatchHandler) {
+                    visitImplicitFrame("java/lang/Throwable");
+                } else if (returnType.getSort() == Type.VOID) {
+                    visitImplicitFrame();
+                } else {
+                    visitImplicitFrame(convert(returnType));
+                }
             }
         }
     }
 
     private void loadMethodParameters(List<AdviceParameter> parameters, int startIndex,
             @Nullable Integer travelerLocal, Type adviceType,
-            Class<? extends Annotation> annotationType, boolean useSavedArgs) {
+            Class<? extends Annotation> annotationType, boolean useSavedArgs, String nestingGroup,
+            String suppressionKey, Object... stack) {
 
         int argIndex = 0;
         for (int i = startIndex; i < parameters.size(); i++) {
@@ -827,7 +900,7 @@ class WeavingMethodVisitor extends AdviceAdapter {
                 case OPTIONAL_THREAD_CONTEXT:
                     checkNotNull(threadContextHolderLocal);
                     checkNotNull(threadContextLocal);
-                    loadOptionalThreadContext();
+                    loadOptionalThreadContext(nestingGroup, suppressionKey, stack);
                     break;
                 default:
                     // this should have been caught during Advice construction, but just in case:
@@ -893,12 +966,7 @@ class WeavingMethodVisitor extends AdviceAdapter {
     }
 
     private void loadMethodName() {
-        if (name.contains("$glowroot$timer$")) {
-            // strip off internal timer identifier from method name
-            visitLdcInsn(name.substring(0, name.indexOf("$glowroot$timer$")));
-        } else {
-            visitLdcInsn(name);
-        }
+        visitLdcInsn(name);
     }
 
     private void loadTraveler(@Nullable Integer travelerLocal, Type adviceType,
@@ -922,8 +990,9 @@ class WeavingMethodVisitor extends AdviceAdapter {
             int index = BootstrapMetaHolders.reserveClassMetaHolderIndex(metaHolderInternalName,
                     classMetaFieldName);
             push(index);
-            visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/BootstrapMetaHolders",
-                    "getClassMeta", "(I)Ljava/lang/Object;", false);
+            visitMethodInsn(INVOKESTATIC, bytecodeType.getInternalName(), "getClassMeta",
+                    "(I)Ljava/lang/Object;", false);
+            mv.visitTypeInsn(CHECKCAST, classMetaFieldType.getInternalName());
         } else {
             visitFieldInsn(GETSTATIC, metaHolderInternalName, classMetaFieldName,
                     classMetaFieldType.getDescriptor());
@@ -939,8 +1008,9 @@ class WeavingMethodVisitor extends AdviceAdapter {
             int index = BootstrapMetaHolders.reserveMethodMetaHolderIndex(metaHolderInternalName,
                     methodMetaFieldName);
             push(index);
-            visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/BootstrapMetaHolders",
-                    "getMethodMeta", "(I)Ljava/lang/Object;", false);
+            visitMethodInsn(INVOKESTATIC, bytecodeType.getInternalName(), "getMethodMeta",
+                    "(I)Ljava/lang/Object;", false);
+            mv.visitTypeInsn(CHECKCAST, methodMetaFieldType.getInternalName());
         } else {
             visitFieldInsn(GETSTATIC, metaHolderInternalName, methodMetaFieldName,
                     methodMetaFieldType.getDescriptor());
@@ -948,55 +1018,114 @@ class WeavingMethodVisitor extends AdviceAdapter {
     }
 
     @RequiresNonNull({"threadContextHolderLocal", "threadContextLocal"})
-    private void loadOptionalThreadContext() {
-        loadLocal(threadContextHolderLocal);
+    private void loadOptionalThreadContext(String nestingGroup, String suppressionKey,
+            Object... stack) {
+        loadMaybeNullThreadContext(stack);
         Label label = new Label();
         visitJumpInsn(IFNONNULL, label);
-        loadThreadContextHolder();
-        storeLocal(threadContextHolderLocal);
-        visitLabel(label);
         loadLocal(threadContextHolderLocal);
-        visitMethodInsn(INVOKEVIRTUAL, fastThreadLocalHolderType.getInternalName(), "get",
-                "()" + objectType.getDescriptor(), false);
-        dup();
-        storeLocal(threadContextLocal);
-        Label label2 = new Label();
-        visitJumpInsn(IFNONNULL, label2);
-        visitMethodInsn(INVOKESTATIC, transactionServiceHolderType.getInternalName(),
-                "getTransactionService", "()" + transactionServiceImplType.getDescriptor(), false);
-        loadLocal(threadContextHolderLocal);
-        visitMethodInsn(INVOKESTATIC, optionalThreadContextImplType.getInternalName(), "create",
-                "(" + transactionServiceImplType.getDescriptor()
-                        + fastThreadLocalHolderType.getDescriptor() + ")"
-                        + optionalThreadContextImplType.getDescriptor(),
+        if (nestingGroup.isEmpty()) {
+            mv.visitLdcInsn(0);
+        } else {
+            mv.visitLdcInsn(getNestingGroupId(nestingGroup));
+        }
+        if (suppressionKey.isEmpty()) {
+            mv.visitLdcInsn(0);
+        } else {
+            mv.visitLdcInsn(getSuppressionKeyId(suppressionKey));
+        }
+        visitMethodInsn(INVOKESTATIC, bytecodeType.getInternalName(), "createOptionalThreadContext",
+                "(" + fastThreadContextThreadLocalHolderType.getDescriptor() + "II)"
+                        + threadContextPlusType.getDescriptor(),
                 false);
         storeLocal(threadContextLocal);
-        visitLabel(label2);
+        visitLabel(label);
+        visitImplicitFrame(stack);
         loadLocal(threadContextLocal);
     }
 
+    @RequiresNonNull({"threadContextHolderLocal", "threadContextLocal"})
+    private void loadMaybeNullThreadContext(Object... stack) {
+        loadLocal(threadContextHolderLocal);
+        Label label = new Label();
+        visitJumpInsn(IFNONNULL, label);
+        visitMethodInsn(INVOKESTATIC, bytecodeType.getInternalName(),
+                "getCurrentThreadContextHolder",
+                "()" + fastThreadContextThreadLocalHolderType.getDescriptor(), false);
+        storeLocal(threadContextHolderLocal);
+        visitLabel(label);
+        visitImplicitFrame(stack);
+        loadLocal(threadContextHolderLocal);
+        visitMethodInsn(INVOKEVIRTUAL, fastThreadContextThreadLocalHolderType.getInternalName(),
+                "get", "()" + threadContextPlusType.getDescriptor(), false);
+        dup();
+        storeLocal(threadContextLocal);
+    }
+
+    private void visitImplicitFrame(Object... stack) {
+        if (frames) {
+            super.visitFrame(F_NEW, implicitFrameLocals.length, implicitFrameLocals, stack.length,
+                    stack);
+        }
+    }
+
+    @Override
+    public void visitFrame(int type, int nLocal, Object /*@Nullable*/ [] local, int nStack,
+            Object /*@Nullable*/ [] stack) {
+        checkState(type == F_NEW, "Unexpected frame type: " + type);
+        int nExtraLocal = nLocal - implicitFrameLocals.length;
+        if (implicitFrameLocals.length >= nLocal) {
+            nExtraLocal = 0;
+        } else {
+            int i = 0;
+            int j = 0;
+            while (i < nLocal && j < implicitFrameLocals.length) {
+                Object currLocal = checkNotNull(local)[i++];
+                Object currImplicitFrameLocal = implicitFrameLocals[j++];
+                if (currLocal == TOP
+                        && (currImplicitFrameLocal == LONG || currImplicitFrameLocal == DOUBLE)) {
+                    i++;
+                }
+            }
+            nExtraLocal = nLocal - i;
+        }
+        if (nExtraLocal > 0) {
+            Object[] overlay = new Object[implicitFrameLocals.length + nExtraLocal];
+            System.arraycopy(implicitFrameLocals, 0, overlay, 0, implicitFrameLocals.length);
+            System.arraycopy(checkNotNull(local), nLocal - nExtraLocal, overlay,
+                    implicitFrameLocals.length, nExtraLocal);
+            super.visitFrame(type, overlay.length, overlay, nStack, stack);
+        } else {
+            super.visitFrame(type, implicitFrameLocals.length, implicitFrameLocals, nStack, stack);
+        }
+    }
+
     private void pushDefault(Type type) {
+        pushDefault(this, type);
+    }
+
+    static void pushDefault(MethodVisitor mv, Type type) {
         switch (type.getSort()) {
             case Type.BOOLEAN:
-                push(false);
+                mv.visitInsn(ICONST_0);
                 break;
             case Type.CHAR:
             case Type.BYTE:
             case Type.SHORT:
             case Type.INT:
-                visitInsn(ICONST_0);
+                mv.visitInsn(ICONST_0);
                 break;
             case Type.FLOAT:
-                visitInsn(FCONST_0);
+                mv.visitInsn(FCONST_0);
                 break;
             case Type.LONG:
-                visitInsn(LCONST_0);
+                mv.visitInsn(LCONST_0);
                 break;
             case Type.DOUBLE:
-                visitInsn(DCONST_0);
+                mv.visitInsn(DCONST_0);
                 break;
             default:
-                visitInsn(ACONST_NULL);
+                mv.visitInsn(ACONST_NULL);
                 break;
         }
     }
@@ -1071,6 +1200,37 @@ class WeavingMethodVisitor extends AdviceAdapter {
                 pop();
             }
         }
+    }
+
+    private static Object convert(Type type) {
+        switch (type.getSort()) {
+            case Type.BOOLEAN:
+            case Type.CHAR:
+            case Type.BYTE:
+            case Type.SHORT:
+            case Type.INT:
+                return INTEGER;
+            case Type.FLOAT:
+                return FLOAT;
+            case Type.LONG:
+                return LONG;
+            case Type.DOUBLE:
+                return DOUBLE;
+            case Type.ARRAY:
+                return type.getDescriptor();
+            case Type.OBJECT:
+                return type.getInternalName();
+            case Type.METHOD:
+                return type.getDescriptor();
+            default:
+                throw new IllegalStateException("Unexpected type: " + type.getDescriptor());
+        }
+    }
+
+    private static boolean hasOtherEnabledFactors(Advice advice, String nestingGroup,
+            String suppressibleUsingKey) {
+        return !nestingGroup.isEmpty() || !suppressibleUsingKey.isEmpty()
+                || (advice.hasBindThreadContext() && !advice.hasBindOptionalThreadContext());
     }
 
     private static int getNestingGroupId(String nestingGroup) {

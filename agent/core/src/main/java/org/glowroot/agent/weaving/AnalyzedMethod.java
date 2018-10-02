@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,9 @@ package org.glowroot.agent.weaving;
 import java.lang.reflect.Modifier;
 import java.util.List;
 
-import javax.annotation.Nullable;
-
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 import org.objectweb.asm.Type;
 
@@ -40,9 +39,8 @@ abstract class AnalyzedMethod {
     abstract ImmutableList<String> exceptions();
 
     abstract ImmutableList<Advice> advisors();
-    // this is for advisors which match using @Pointcut methodDeclaringClassName but do not match
-    // using @Pointcut className
-    abstract ImmutableList<Advice> declaredOnlyAdvisors();
+    // this is for advisors that match everything except for @Pointcut subTypeRestriction
+    abstract ImmutableList<Advice> subTypeRestrictedAdvisors();
 
     // this is only used for the rare case of WeavingClassVisitor.overrideAndWeaveInheritedMethod()
     String getDesc() {
@@ -57,6 +55,9 @@ abstract class AnalyzedMethod {
     // TODO there is a bit more to overriding, see
     // https://docs.oracle.com/javase/specs/jvms/se7/html/jvms-5.html#jvms-5.4.5
     boolean isOverriddenBy(String methodName, List<Type> parameterTypes) {
+        if (Modifier.isStatic(modifiers())) {
+            return false;
+        }
         if (Modifier.isPrivate(modifiers())) {
             return false;
         }

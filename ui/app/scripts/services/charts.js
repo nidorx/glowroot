@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2017 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@ glowroot.factory('charts', [
       };
 
       $scope.refresh = function () {
-        $scope.applyLast();
+        applyLast($scope);
         $scope.range.chartRefresh++;
       };
     }
@@ -82,7 +82,7 @@ glowroot.factory('charts', [
 
       if (zoomingOut && $scope.range.last) {
         $scope.range.last = roundUpLast($scope.range.last * 2);
-        $scope.applyLast();
+        applyLast($scope);
         return;
       }
 
@@ -129,25 +129,24 @@ glowroot.factory('charts', [
           // due to shrinking the zoom to data point interval, which could result in strange 2 days --> 22 hours
           // instead of the more obvious 2 days --> 1 day
           $scope.range.last = roundUpLast($scope.range.last / 2);
-          $scope.applyLast();
+          applyLast($scope);
           return;
         }
         if (tracePoints && revisedTo - revisedFrom === 120000) {
           $scope.range.last = 60000;
-          $scope.applyLast();
+          applyLast($scope);
           return;
         }
         if (tracePoints && now < revisedFrom) {
           // this can happen after zooming in on RHS of chart until 1 second total chart width, then zooming out on LHS
           $scope.range.last = 60000;
-          $scope.applyLast();
           return;
         }
         var last = roundUpLast(now - revisedFrom, selection);
         if (last > 0) {
           $scope.range.last = last;
         }
-        $scope.applyLast();
+        applyLast($scope);
       } else {
         $scope.range.chartFrom = revisedFrom;
         $scope.range.chartTo = revisedTo;
@@ -230,7 +229,11 @@ glowroot.factory('charts', [
           min: 0,
           // 10 second yaxis max just for initial empty chart rendering
           max: 10,
-          label: 'milliseconds'
+          label: 'milliseconds',
+          labelPadding: 7,
+          tickFormatter: function (val) {
+            return val.toLocaleString(undefined, {maximumSignificantDigits: 15});
+          }
         },
         zoom: {
           interactive: true,
@@ -259,6 +262,9 @@ glowroot.factory('charts', [
       chartState.plot.getAxes().yaxis.options.max = undefined;
       $(document).off('touchstart.chart');
       $(document).on('touchstart.chart', function () {
+        chartState.plot.hideTooltip();
+      });
+      $scope.$on('$destroy',function () {
         chartState.plot.hideTooltip();
       });
     }
@@ -305,8 +311,7 @@ glowroot.factory('charts', [
             chartState.plot.getAxes().xaxis.options.max = chartTo;
             // data point interval calculation must match server-side calculation, so based on query.from/query.to
             // instead of chartFrom/chartTo
-            chartState.dataPointIntervalMillis =
-                getDataPointIntervalMillis(query.from, query.to, $scope.useGaugeViewThresholdMultiplier);
+            chartState.dataPointIntervalMillis = data.dataPointIntervalMillis;
             var plotData = [];
             var labels = [];
             angular.forEach(data.dataSeries, function (dataSeries) {
@@ -317,6 +322,7 @@ glowroot.factory('charts', [
               var label = labels[index];
               var plotDataItem = {
                 data: dataSeries.data,
+                name: dataSeries.name,
                 label: label,
                 shortLabel: dataSeries.shortLabel,
                 color: chartState.keyedColorPool.get(label),
@@ -330,6 +336,25 @@ glowroot.factory('charts', [
               chartState.plot.setData(plotData);
             } else {
               chartState.plot.setData([[]]);
+            }
+            if (data.markings) {
+              var markings = [];
+              angular.forEach(data.markings, function (marking) {
+                var from = marking.from;
+                var to = marking.to;
+                var minMarkingWidth = Math.max((query.to - query.from) / 200, 2000);
+                var padding = minMarkingWidth - (to - from);
+                if (padding > 0) {
+                  from -= padding / 2;
+                  to += padding / 2;
+                }
+                markings.push({
+                  xaxis: {from: from, to: to},
+                  color: '#ffcccc',
+                  data: marking
+                });
+              });
+              chartState.plot.getOptions().grid.markings = markings;
             }
             chartState.plot.setupGrid();
             chartState.plot.draw();
@@ -353,7 +378,8 @@ glowroot.factory('charts', [
       for (seriesIndex = 0; seriesIndex < plotData.length; seriesIndex++) {
         $scope.seriesLabels.push({
           color: plotData[seriesIndex].color,
-          text: plotData[seriesIndex].label
+          text: plotData[seriesIndex].label,
+          name: plotData[seriesIndex].name
         });
       }
     }
@@ -418,7 +444,7 @@ glowroot.factory('charts', [
           html += ' style="background-color: #eee;"';
         }
         html += '>'
-            + '<td class="legendColorBox" width="16">'
+            + '<td class="legendColorBox" style="width: 16px;">'
             + '<div style="border: 1px solid rgb(204, 204, 204); padding: 1px;">'
             + '<div style="width: 4px; height: 0px; border: 5px solid ' + dataSeries.color + '; overflow: hidden;">'
             + '</div></div></td>'
@@ -438,7 +464,7 @@ glowroot.factory('charts', [
 
       function onVisible() {
         $scope.$apply(function () {
-          $scope.range.chartAutoRefresh++;
+          // intentionally not marking this autoRefresh
           $scope.refresh();
         });
         document.removeEventListener('visibilitychange', onVisible);
@@ -447,8 +473,6 @@ glowroot.factory('charts', [
       function scheduleNextRefresh() {
         timer = $timeout(function () {
           if ($scope.range.last) {
-            // document.hidden is not supported by IE9 but that's ok, the condition will just evaluate to false
-            // and auto refresh will continue even while hidden under IE9
             if (document.hidden) {
               document.addEventListener('visibilitychange', onVisible);
             } else {
@@ -468,6 +492,28 @@ glowroot.factory('charts', [
       });
     }
 
+    function applyLast($scope) {
+      if (!$scope.range.last) {
+        return;
+      }
+      var now = moment().startOf('second').valueOf();
+      var from = now - $scope.range.last;
+      var to = now + $scope.range.last / 10;
+      var dataPointIntervalMillis = getDataPointIntervalMillis(from, to, $scope.useGaugeViewThresholdMultiplier);
+      var revisedFrom = Math.floor(from / dataPointIntervalMillis) * dataPointIntervalMillis;
+      var revisedTo = Math.ceil(to / dataPointIntervalMillis) * dataPointIntervalMillis;
+      var revisedDataPointIntervalMillis =
+          getDataPointIntervalMillis(revisedFrom, revisedTo, $scope.useGaugeViewThresholdMultiplier);
+      if (revisedDataPointIntervalMillis !== dataPointIntervalMillis) {
+        // expanded out to larger rollup threshold so need to re-adjust
+        // ok to use original from/to instead of revisedFrom/revisedTo
+        revisedFrom = Math.floor(from / revisedDataPointIntervalMillis) * revisedDataPointIntervalMillis;
+        revisedTo = Math.ceil(to / revisedDataPointIntervalMillis) * revisedDataPointIntervalMillis;
+      }
+      $scope.range.chartFrom = revisedFrom;
+      $scope.range.chartTo = revisedTo;
+    }
+
     return {
       createState: createState,
       init: init,
@@ -477,7 +523,8 @@ glowroot.factory('charts', [
       renderTooltipHtml: renderTooltipHtml,
       updateRange: updateRange,
       getDataPointIntervalMillis: getDataPointIntervalMillis,
-      startAutoRefresh: startAutoRefresh
+      startAutoRefresh: startAutoRefresh,
+      applyLast: applyLast
     };
   }
 ]);

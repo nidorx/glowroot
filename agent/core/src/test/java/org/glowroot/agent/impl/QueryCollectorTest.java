@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,14 @@
 package org.glowroot.agent.impl;
 
 import java.util.List;
+import java.util.Map;
 
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import org.junit.Test;
 
 import org.glowroot.agent.model.QueryCollector;
-import org.glowroot.agent.model.QueryCollector.SharedQueryTextCollector;
+import org.glowroot.agent.model.SharedQueryTextCollection;
 import org.glowroot.wire.api.model.AggregateOuterClass.Aggregate;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,38 +31,58 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class QueryCollectorTest {
 
     @Test
-    public void testAddInAscendingOrder() {
-        // given
-        QueryCollector queries = new QueryCollector(100, 2, false);
+    public void testAddInAscendingOrder() throws Exception {
+        QueryCollector queries = new QueryCollector(100, 4);
         for (int i = 1; i <= 300; i++) {
-            queries.mergeQuery("SQL", Integer.toString(i), i, 1, true, 1);
+            queries.mergeQuery("SQL", Integer.toString(i), i, 1, true, 1, false);
         }
-        // when
-        List<Aggregate.QueriesByType> queriesByTypeList =
-                queries.toAggregateProto(new SharedQueryTextCollector());
-        // then
-        assertThat(queriesByTypeList).hasSize(1);
-        Aggregate.QueriesByType queriesByType = queriesByTypeList.get(0);
-        assertThat(queriesByType.getQueryList()).hasSize(100);
-        assertThat(queriesByType.getQueryList().get(0).getTotalDurationNanos()).isEqualTo(300);
-        assertThat(queriesByType.getQueryList().get(99).getTotalDurationNanos()).isEqualTo(201);
+        test(queries);
     }
 
     @Test
-    public void testAddInDescendingOrder() {
-        // given
-        QueryCollector queries = new QueryCollector(100, 2, false);
+    public void testAddInDescendingOrder() throws Exception {
+        QueryCollector queries = new QueryCollector(100, 4);
         for (int i = 300; i > 0; i--) {
-            queries.mergeQuery("SQL", Integer.toString(i), i, 1, true, 1);
+            queries.mergeQuery("SQL", Integer.toString(i), i, 1, true, 1, false);
         }
+        test(queries);
+    }
+
+    private void test(QueryCollector collector) throws Exception {
         // when
-        List<Aggregate.QueriesByType> queriesByTypeList =
-                queries.toAggregateProto(new SharedQueryTextCollector());
+        SharedQueryTextCollectionImpl sharedQueryTextCollection =
+                new SharedQueryTextCollectionImpl();
+        List<Aggregate.Query> queries =
+                collector.toAggregateProto(sharedQueryTextCollection, false);
         // then
-        assertThat(queriesByTypeList).hasSize(1);
-        Aggregate.QueriesByType queriesByType = queriesByTypeList.get(0);
-        assertThat(queriesByType.getQueryList()).hasSize(100);
-        assertThat(queriesByType.getQueryList().get(0).getTotalDurationNanos()).isEqualTo(300);
-        assertThat(queriesByType.getQueryList().get(99).getTotalDurationNanos()).isEqualTo(201);
+        assertThat(queries).hasSize(101);
+        Aggregate.Query topQuery = queries.get(0);
+        assertThat(
+                sharedQueryTextCollection.sharedQueryTexts.get(topQuery.getSharedQueryTextIndex()))
+                        .isEqualTo("LIMIT EXCEEDED BUCKET");
+        int limitExceededBucketTotalNanos = 0;
+        for (int i = 1; i <= 200; i++) {
+            limitExceededBucketTotalNanos += i;
+        }
+        assertThat(topQuery.getTotalDurationNanos()).isEqualTo(limitExceededBucketTotalNanos);
+        assertThat(queries.get(1).getTotalDurationNanos()).isEqualTo(300);
+        assertThat(queries.get(100).getTotalDurationNanos()).isEqualTo(201);
+    }
+
+    private static class SharedQueryTextCollectionImpl implements SharedQueryTextCollection {
+
+        private final Map<String, Integer> sharedQueryTextIndexes = Maps.newHashMap();
+        private List<String> sharedQueryTexts = Lists.newArrayList();
+
+        @Override
+        public int getSharedQueryTextIndex(String queryText) {
+            Integer sharedQueryTextIndex = sharedQueryTextIndexes.get(queryText);
+            if (sharedQueryTextIndex == null) {
+                sharedQueryTextIndex = sharedQueryTextIndexes.size();
+                sharedQueryTextIndexes.put(queryText, sharedQueryTextIndex);
+                sharedQueryTexts.add(queryText);
+            }
+            return sharedQueryTextIndex;
+        }
     }
 }

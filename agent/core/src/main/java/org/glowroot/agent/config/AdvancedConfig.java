@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2016 the original author or authors.
+ * Copyright 2013-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import org.immutables.value.Value;
 
-import org.glowroot.common.config.ConfigDefaults;
+import org.glowroot.common.ConfigDefaults;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig;
 import org.glowroot.wire.api.model.Proto.OptionalInt32;
 
@@ -33,34 +33,28 @@ public abstract class AdvancedConfig {
     public static final int TRANSACTION_AGGREGATE_SERVICE_CALLS_HARD_LIMIT_MULTIPLIER = 2;
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
-    public boolean weavingTimer() {
-        return false;
-    }
-
-    @Value.Default
     public int immediatePartialStoreThresholdSeconds() {
         return 60;
     }
 
     // used to limit memory requirement
     @Value.Default
-    public int maxAggregateTransactionsPerType() {
-        return ConfigDefaults.MAX_AGGREGATE_TRANSACTIONS_PER_TYPE;
+    public int maxTransactionAggregates() {
+        return ConfigDefaults.ADVANCED_MAX_TRANSACTION_AGGREGATES;
     }
 
     // used to limit memory requirement
     // applied to individual traces, transaction aggregates and overall aggregates
     @Value.Default
-    public int maxAggregateQueriesPerType() {
-        return ConfigDefaults.MAX_AGGREGATE_QUERIES_PER_TYPE;
+    public int maxQueryAggregates() {
+        return ConfigDefaults.ADVANCED_MAX_QUERY_AGGREGATES;
     }
 
     // used to limit memory requirement
     // applied to individual traces, transaction aggregates and overall aggregates
     @Value.Default
-    public int maxAggregateServiceCallsPerType() {
-        return ConfigDefaults.MAX_AGGREGATE_SERVICE_CALLS_PER_TYPE;
+    public int maxServiceCallAggregates() {
+        return ConfigDefaults.ADVANCED_MAX_QUERY_AGGREGATES;
     }
 
     // used to limit memory requirement, also used to help limit trace capture size
@@ -71,7 +65,7 @@ public abstract class AdvancedConfig {
 
     // used to limit memory requirement, also used to help limit trace capture size
     @Value.Default
-    public int maxStackTraceSamplesPerTransaction() {
+    public int maxProfileSamplesPerTransaction() {
         return 50000;
     }
 
@@ -80,51 +74,55 @@ public abstract class AdvancedConfig {
         return 60;
     }
 
+    @Value.Default
+    @JsonInclude(Include.NON_EMPTY)
+    public boolean weavingTimer() {
+        return false;
+    }
+
     public AgentConfig.AdvancedConfig toProto() {
         return AgentConfig.AdvancedConfig.newBuilder()
-                .setWeavingTimer(weavingTimer())
                 .setImmediatePartialStoreThresholdSeconds(
                         of(immediatePartialStoreThresholdSeconds()))
-                .setMaxAggregateTransactionsPerType(of(maxAggregateTransactionsPerType()))
-                .setMaxAggregateQueriesPerType(of(maxAggregateQueriesPerType()))
-                .setMaxAggregateServiceCallsPerType(of(maxAggregateServiceCallsPerType()))
+                .setMaxTransactionAggregates(of(maxTransactionAggregates()))
+                .setMaxQueryAggregates(of(maxQueryAggregates()))
+                .setMaxServiceCallAggregates(of(maxServiceCallAggregates()))
                 .setMaxTraceEntriesPerTransaction(of(maxTraceEntriesPerTransaction()))
-                .setMaxStackTraceSamplesPerTransaction(of(maxStackTraceSamplesPerTransaction()))
+                .setMaxProfileSamplesPerTransaction(of(maxProfileSamplesPerTransaction()))
                 .setMbeanGaugeNotFoundDelaySeconds(of(mbeanGaugeNotFoundDelaySeconds()))
+                .setWeavingTimer(weavingTimer())
                 .build();
     }
 
     public static AdvancedConfig create(AgentConfig.AdvancedConfig config) {
-        ImmutableAdvancedConfig.Builder builder = ImmutableAdvancedConfig.builder()
-                .weavingTimer(config.getWeavingTimer());
+        ImmutableAdvancedConfig.Builder builder = ImmutableAdvancedConfig.builder();
         if (config.hasImmediatePartialStoreThresholdSeconds()) {
             builder.immediatePartialStoreThresholdSeconds(
                     config.getImmediatePartialStoreThresholdSeconds().getValue());
         }
-        if (config.hasMaxAggregateTransactionsPerType()) {
-            builder.maxAggregateTransactionsPerType(
-                    config.getMaxAggregateTransactionsPerType().getValue());
+        if (config.hasMaxTransactionAggregates()) {
+            builder.maxTransactionAggregates(config.getMaxTransactionAggregates().getValue());
         }
-        if (config.hasMaxAggregateQueriesPerType()) {
-            builder.maxAggregateQueriesPerType(config.getMaxAggregateQueriesPerType().getValue());
+        if (config.hasMaxQueryAggregates()) {
+            builder.maxQueryAggregates(config.getMaxQueryAggregates().getValue());
         }
-        if (config.hasMaxAggregateServiceCallsPerType()) {
-            builder.maxAggregateServiceCallsPerType(
-                    config.getMaxAggregateServiceCallsPerType().getValue());
+        if (config.hasMaxServiceCallAggregates()) {
+            builder.maxServiceCallAggregates(config.getMaxServiceCallAggregates().getValue());
         }
         if (config.hasMaxTraceEntriesPerTransaction()) {
             builder.maxTraceEntriesPerTransaction(
                     config.getMaxTraceEntriesPerTransaction().getValue());
         }
-        if (config.hasMaxStackTraceSamplesPerTransaction()) {
-            builder.maxStackTraceSamplesPerTransaction(
-                    config.getMaxStackTraceSamplesPerTransaction().getValue());
+        if (config.hasMaxProfileSamplesPerTransaction()) {
+            builder.maxProfileSamplesPerTransaction(
+                    config.getMaxProfileSamplesPerTransaction().getValue());
         }
         if (config.hasMbeanGaugeNotFoundDelaySeconds()) {
             builder.mbeanGaugeNotFoundDelaySeconds(
                     config.getMbeanGaugeNotFoundDelaySeconds().getValue());
         }
-        return builder.build();
+        return builder.weavingTimer(config.getWeavingTimer())
+                .build();
     }
 
     private static OptionalInt32 of(int value) {

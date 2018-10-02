@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2016 the original author or authors.
+ * Copyright 2013-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,9 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.URL;
 
-import javax.annotation.Nullable;
-
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.Resources;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 import org.objectweb.asm.Type;
 import org.slf4j.Logger;
@@ -41,7 +40,6 @@ abstract class MixinType {
     static MixinType create(Mixin mixin, Class<?> implementation) throws IOException {
         ImmutableMixinType.Builder builder = ImmutableMixinType.builder();
         builder.addTargets(mixin.value());
-        builder.implementation(Type.getType(implementation));
         for (Class<?> iface : implementation.getInterfaces()) {
             builder.addInterfaces(Type.getType(iface));
         }
@@ -79,7 +77,6 @@ abstract class MixinType {
         return builder.build();
     }
 
-    abstract Type implementation();
     abstract ImmutableList<String> targets();
     abstract ImmutableList<Type> interfaces();
     abstract @Nullable String initMethodName();

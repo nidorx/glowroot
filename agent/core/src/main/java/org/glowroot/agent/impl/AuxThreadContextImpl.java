@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2017 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,16 +15,15 @@
  */
 package org.glowroot.agent.impl;
 
-import javax.annotation.Nullable;
-
+import com.google.common.collect.ImmutableList;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.glowroot.agent.bytecode.api.ThreadContextThreadLocal;
 import org.glowroot.agent.plugin.api.AuxThreadContext;
-import org.glowroot.agent.plugin.api.MessageSupplier;
+import org.glowroot.agent.plugin.api.ThreadContext.ServletRequestInfo;
 import org.glowroot.agent.plugin.api.TraceEntry;
-import org.glowroot.agent.plugin.api.internal.NopTransactionService;
-import org.glowroot.agent.plugin.api.util.FastThreadLocal.Holder;
 
 import static org.glowroot.agent.util.Checkers.castInitialized;
 
@@ -36,30 +35,43 @@ class AuxThreadContextImpl implements AuxThreadContext {
 
     private static final Logger logger = LoggerFactory.getLogger(AuxThreadContextImpl.class);
 
+    static final ThreadLocal</*@Nullable*/ Boolean> inAuxDebugLogging =
+            new ThreadLocal</*@Nullable*/ Boolean>();
+
     private final Transaction transaction;
     // null when parent is a limit exceeded auxiliary thread context, to prevent retaining parent
     private final @Nullable TraceEntryImpl parentTraceEntry;
     // null when parent is a limit exceeded auxiliary thread context, to prevent retaining parent
     private final @Nullable TraceEntryImpl parentThreadContextPriorEntry;
-    private final @Nullable MessageSupplier servletMessageSupplier;
+    private final @Nullable ServletRequestInfo servletRequestInfo;
+    private final @Nullable ImmutableList<StackTraceElement> locationStackTrace;
     private final TransactionRegistry transactionRegistry;
-    private final TransactionServiceImpl transactionService;
+    private final TransactionService transactionService;
 
     AuxThreadContextImpl(Transaction transaction, @Nullable TraceEntryImpl parentTraceEntry,
             @Nullable TraceEntryImpl parentThreadContextPriorEntry,
-            @Nullable MessageSupplier servletMessageSupplier,
-            TransactionRegistry transactionRegistry, TransactionServiceImpl transactionService) {
+            @Nullable ServletRequestInfo servletRequestInfo,
+            @Nullable ImmutableList<StackTraceElement> locationStackTrace,
+            TransactionRegistry transactionRegistry, TransactionService transactionService) {
         this.transaction = transaction;
         this.parentTraceEntry = parentTraceEntry;
         this.parentThreadContextPriorEntry = parentThreadContextPriorEntry;
-        this.servletMessageSupplier = servletMessageSupplier;
+        this.servletRequestInfo = servletRequestInfo;
+        this.locationStackTrace = locationStackTrace;
         this.transactionRegistry = transactionRegistry;
         this.transactionService = transactionService;
-        if (logger.isDebugEnabled() && parentTraceEntry != null) {
-            logger.debug("new AUX thread context: {}, parent thread context: {}, thread name: {}",
-                    castInitialized(this).hashCode(),
-                    parentTraceEntry.getThreadContext().hashCode(),
-                    Thread.currentThread().getName(), new Exception());
+        if (logger.isDebugEnabled()
+                && !Thread.currentThread().getName().startsWith("Glowroot-GRPC-")
+                && inAuxDebugLogging.get() == null) {
+            inAuxDebugLogging.set(Boolean.TRUE);
+            try {
+                logger.debug(
+                        "new AUX thread context: {}, parent thread context: {}, thread name: {}",
+                        castInitialized(this).hashCode(), getThreadContextDisplay(parentTraceEntry),
+                        Thread.currentThread().getName(), new Exception());
+            } finally {
+                inAuxDebugLogging.remove();
+            }
         }
     }
 
@@ -74,9 +86,9 @@ class AuxThreadContextImpl implements AuxThreadContext {
     }
 
     private TraceEntry start(boolean completeAsyncTransaction) {
-        Holder</*@Nullable*/ ThreadContextImpl> threadContextHolder =
+        ThreadContextThreadLocal.Holder threadContextHolder =
                 transactionRegistry.getCurrentThreadContextHolder();
-        ThreadContextImpl context = threadContextHolder.get();
+        ThreadContextImpl context = (ThreadContextImpl) threadContextHolder.get();
         if (context != null) {
             if (completeAsyncTransaction) {
                 context.setTransactionAsyncComplete();
@@ -84,20 +96,39 @@ class AuxThreadContextImpl implements AuxThreadContext {
             return NopTransactionService.TRACE_ENTRY;
         }
         context = transactionService.startAuxThreadContextInternal(transaction, parentTraceEntry,
-                parentThreadContextPriorEntry, servletMessageSupplier, threadContextHolder);
+                parentThreadContextPriorEntry, servletRequestInfo, threadContextHolder);
         if (context == null) {
             // transaction is already complete or auxiliary thread context limit exceeded
             return NopTransactionService.TRACE_ENTRY;
         }
-        if (logger.isDebugEnabled() && parentTraceEntry != null) {
-            logger.debug("start AUX thread context: {}, thread context: {},"
-                    + " parent thread context: {}, thread name: {}", hashCode(), context.hashCode(),
-                    parentTraceEntry.getThreadContext().hashCode(),
-                    Thread.currentThread().getName(), new Exception());
+        if (logger.isDebugEnabled()
+                && !Thread.currentThread().getName().startsWith("Glowroot-GRPC-")
+                && inAuxDebugLogging.get() == null) {
+            inAuxDebugLogging.set(Boolean.TRUE);
+            try {
+                logger.debug("start AUX thread context: {}, thread context: {},"
+                        + " parent thread context: {}, thread name: {}", hashCode(),
+                        context.hashCode(), getThreadContextDisplay(parentTraceEntry),
+                        Thread.currentThread().getName(), new Exception());
+            } finally {
+                inAuxDebugLogging.remove();
+            }
         }
         if (completeAsyncTransaction) {
             context.setTransactionAsyncComplete();
         }
-        return context.getRootEntry();
+        TraceEntryImpl rootEntry = context.getRootEntry();
+        if (locationStackTrace != null) {
+            rootEntry.setLocationStackTrace(locationStackTrace);
+        }
+        return rootEntry;
+    }
+
+    private static Object getThreadContextDisplay(@Nullable TraceEntryImpl parentTraceEntry) {
+        if (parentTraceEntry == null) {
+            return "null (aux thread context limit exceeded)";
+        } else {
+            return parentTraceEntry.getThreadContext().hashCode();
+        }
     }
 }

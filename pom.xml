@@ -5,7 +5,7 @@
 
   <groupId>org.glowroot</groupId>
   <artifactId>glowroot-parent</artifactId>
-  <version>0.9.9</version>
+  <version>0.11.1</version>
   <packaging>pom</packaging>
 
   <name>Glowroot Parent Project</name>
@@ -30,28 +30,39 @@
     </developer>
   </developers>
 
-  <prerequisites>
-    <maven>3.2.2</maven>
-  </prerequisites>
-
   <modules>
     <module>build/license-bundle</module>
+    <module>build/immutables-jdk6</module>
     <module>build/checker-jdk6</module>
+    <module>build/error-prone-jdk6</module>
     <module>build/multi-lib-tests</module>
     <module>common</module>
+    <module>common2</module>
     <module>wire-api</module>
     <module>ui</module>
     <module>agent/api</module>
     <module>agent/plugin-api</module>
+    <module>agent/bytecode-api</module>
     <module>agent/core</module>
+    <module>agent/embedded</module>
     <module>agent/it-harness</module>
+    <module>agent/shaded/embedded</module>
+    <module>agent/shaded/core</module>
+    <module>agent/shaded/it-harness</module>
+    <module>agent/shaded/central-https-linux</module>
+    <module>agent/shaded/central-https-windows</module>
+    <module>agent/shaded/central-https-osx</module>
     <module>agent/integration-tests</module>
     <module>agent/plugins/cassandra-plugin</module>
+    <module>agent/plugins/ejb-plugin</module>
+    <module>agent/plugins/elasticsearch-plugin</module>
     <module>agent/plugins/executor-plugin</module>
     <module>agent/plugins/grails-plugin</module>
     <module>agent/plugins/hibernate-plugin</module>
     <module>agent/plugins/http-client-plugin</module>
+    <module>agent/plugins/java-http-server-plugin</module>
     <module>agent/plugins/jaxrs-plugin</module>
+    <module>agent/plugins/jaxws-plugin</module>
     <module>agent/plugins/jdbc-plugin</module>
     <module>agent/plugins/jms-plugin</module>
     <module>agent/plugins/jsf-plugin</module>
@@ -62,7 +73,6 @@
     <module>agent/plugins/quartz-plugin</module>
     <module>agent/plugins/redis-plugin</module>
     <module>agent/plugins/servlet-plugin</module>
-    <module>agent/plugins/spray-plugin</module>
     <module>agent/plugins/spring-plugin</module>
     <module>agent/plugins/struts-plugin</module>
     <module>agent/benchmarks</module>
@@ -78,23 +88,22 @@
   </scm>
 
   <properties>
-    <grpc.version>1.0.3</grpc.version>
-    <protobuf.version>3.1.0</protobuf.version>
-    <netty.version>4.1.6.Final</netty.version>
-    <!-- jackson 2.7 requires JDK 7+ -->
+    <!-- grpc 1.15.0+ requires Java 7+ -->
+    <grpc.version>1.14.0</grpc.version>
+    <!-- protobuf 3.6.0+ requires Java 7+ -->
+    <protobuf.version>3.5.1</protobuf.version>
+    <protoc.version>3.5.1</protoc.version>
+    <!-- need to stick to netty version that is used by grpc version above -->
+    <netty.version>4.1.27.Final</netty.version>
+    <!-- jackson 2.7.0+ requires Java 7+ -->
     <jackson.version>2.6.7</jackson.version>
-    <logback.version>1.1.8</logback.version>
-    <immutables.version>2.3.10</immutables.version>
-    <javax.mail.version>1.5.6</javax.mail.version>
-    <jmh.version>1.17.3</jmh.version>
+    <logback.version>1.2.3</logback.version>
+    <slf4j.version>1.7.25</slf4j.version>
+    <immutables.version>2.7.1</immutables.version>
+    <jmh.version>1.21</jmh.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <maven.build.timestamp.format>yyyy-MM-dd HH:mm:ss Z</maven.build.timestamp.format>
-    <!-- use custom-built jdk6 compatible checker framework annotations by default except when
-      actually running checker framework code quality tests -->
-    <checker.qual.group.id>org.glowroot.build</checker.qual.group.id>
-    <checker.qual.artifact.id>glowroot-build-checker-jdk6</checker.qual.artifact.id>
-    <checker.qual.version>${project.version}</checker.qual.version>
     <!-- the sonar.login system property is set here instead of on the command line so it is
       not visible to ps -->
     <sonar.login>${env.SONAR_LOGIN}</sonar.login>
@@ -111,6 +120,12 @@
       <dependency>
         <groupId>org.immutables</groupId>
         <artifactId>builder</artifactId>
+        <version>${immutables.version}</version>
+      </dependency>
+      <dependency>
+        <!-- the presence of this dependency triggers generation of Java 6 compatible classes -->
+        <groupId>org.immutables</groupId>
+        <artifactId>android-stub</artifactId>
         <version>${immutables.version}</version>
       </dependency>
       <dependency>
@@ -146,7 +161,7 @@
       <dependency>
         <groupId>com.google.code.gson</groupId>
         <artifactId>gson</artifactId>
-        <version>2.8.0</version>
+        <version>2.8.5</version>
       </dependency>
       <dependency>
         <groupId>io.netty</groupId>
@@ -174,14 +189,25 @@
         <version>${netty.version}</version>
       </dependency>
       <dependency>
+        <groupId>io.netty</groupId>
+        <artifactId>netty-handler-proxy</artifactId>
+        <version>${netty.version}</version>
+      </dependency>
+      <dependency>
+        <!-- optional netty dependency that is required by HttpContentCompressor -->
+        <groupId>com.jcraft</groupId>
+        <artifactId>jzlib</artifactId>
+        <version>1.1.3</version>
+      </dependency>
+      <dependency>
         <groupId>com.google.code.findbugs</groupId>
         <artifactId>jsr305</artifactId>
-        <version>3.0.1</version>
+        <version>3.0.2</version>
       </dependency>
       <dependency>
         <groupId>org.slf4j</groupId>
         <artifactId>slf4j-api</artifactId>
-        <version>1.7.22</version>
+        <version>${slf4j.version}</version>
       </dependency>
       <dependency>
         <groupId>ch.qos.logback</groupId>
@@ -201,13 +227,7 @@
       <dependency>
         <groupId>com.google.guava</groupId>
         <artifactId>guava</artifactId>
-        <!-- cannot upgrade to 20.0 due to https://datastax-oss.atlassian.net/browse/JAVA-1328 -->
-        <version>19.0</version>
-      </dependency>
-      <dependency>
-        <groupId>org.hdrhistogram</groupId>
-        <artifactId>HdrHistogram</artifactId>
-        <version>2.1.9</version>
+        <version>20.0</version>
       </dependency>
       <dependency>
         <groupId>com.fasterxml.jackson.core</groupId>
@@ -230,50 +250,27 @@
         <version>${jackson.version}</version>
       </dependency>
       <dependency>
-        <groupId>com.sun.mail</groupId>
-        <artifactId>mailapi</artifactId>
-        <version>${javax.mail.version}</version>
-        <exclusions>
-          <exclusion>
-            <!-- JAF included in Java SE 6+ -->
-            <groupId>javax.activation</groupId>
-            <artifactId>activation</artifactId>
-          </exclusion>
-        </exclusions>
-      </dependency>
-      <dependency>
-        <groupId>com.sun.mail</groupId>
-        <artifactId>smtp</artifactId>
-        <version>${javax.mail.version}</version>
-        <exclusions>
-          <exclusion>
-            <!-- JAF included in Java SE 6+ -->
-            <groupId>javax.activation</groupId>
-            <artifactId>activation</artifactId>
-          </exclusion>
-        </exclusions>
-      </dependency>
-      <dependency>
         <groupId>org.assertj</groupId>
         <artifactId>assertj-core</artifactId>
-        <!-- assertj 2.0.0 requires JDK 7+ -->
+        <!-- assertj 2.0.0+ requires Java 7+ -->
         <version>1.7.1</version>
       </dependency>
       <dependency>
         <groupId>org.mockito</groupId>
         <artifactId>mockito-core</artifactId>
-        <version>2.5.0</version>
+        <version>2.22.0</version>
       </dependency>
       <dependency>
         <groupId>com.ning</groupId>
         <artifactId>async-http-client</artifactId>
-        <!-- async-http-client 1.9.0 requires JDK 7+ -->
+        <!-- async-http-client 1.9.0+ requires Java 7+ -->
         <version>1.8.17</version>
       </dependency>
       <dependency>
         <groupId>org.hsqldb</groupId>
         <artifactId>hsqldb</artifactId>
-        <version>2.3.4</version>
+        <!-- hsqldb 2.4.0+ requires Java 8+ (2.3.x supports Java 6+) -->
+        <version>2.3.6</version>
       </dependency>
       <dependency>
         <groupId>org.openjdk.jmh</groupId>
@@ -288,20 +285,26 @@
       <dependency>
         <groupId>org.apache.tomcat.embed</groupId>
         <artifactId>tomcat-embed-core</artifactId>
-        <!-- tomcat 8 requires JDK 7+ -->
-        <version>7.0.73</version>
+        <!-- tomcat 8.0.0+ requires Java 7+ -->
+        <version>7.0.88</version>
       </dependency>
       <dependency>
         <groupId>org.apache.tomcat.embed</groupId>
         <artifactId>tomcat-embed-jasper</artifactId>
-        <!-- tomcat 8 requires JDK 7+ -->
-        <version>7.0.73</version>
+        <!-- tomcat 8.0.0+ requires Java 7+ -->
+        <version>7.0.88</version>
       </dependency>
       <dependency>
         <groupId>org.apache.tomcat.embed</groupId>
         <artifactId>tomcat-embed-logging-juli</artifactId>
-        <!-- tomcat 8 requires JDK 7+ -->
-        <version>7.0.73</version>
+        <!-- tomcat 8.0.0+ requires Java 7+ -->
+        <version>7.0.88</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.tomcat.embed</groupId>
+        <artifactId>tomcat-embed-websocket</artifactId>
+        <!-- tomcat 8.0.0+ requires Java 7+ -->
+        <version>7.0.88</version>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -314,13 +317,6 @@
   </distributionManagement>
 
   <build>
-    <extensions>
-      <extension>
-        <groupId>kr.motd.maven</groupId>
-        <artifactId>os-maven-plugin</artifactId>
-        <version>1.5.0.Final</version>
-      </extension>
-    </extensions>
     <plugins>
       <plugin>
         <artifactId>maven-enforcer-plugin</artifactId>
@@ -332,11 +328,11 @@
             <configuration>
               <rules>
                 <requireJavaVersion>
-                  <!-- immutables annotations processors require java 7 -->
+                  <!-- immutables annotation processors require java 7+ -->
                   <version>[1.7,)</version>
                 </requireJavaVersion>
                 <requireMavenVersion>
-                  <version>[3.0,)</version>
+                  <version>[3.3.1,)</version>
                 </requireMavenVersion>
                 <requireUpperBoundDeps />
               </rules>
@@ -359,7 +355,7 @@
           recent jdk -->
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>animal-sniffer-maven-plugin</artifactId>
-        <version>1.15</version>
+        <version>1.17</version>
         <configuration>
           <signature>
             <groupId>org.codehaus.mojo.signature</groupId>
@@ -379,7 +375,7 @@
       <plugin>
         <groupId>org.sonatype.plugins</groupId>
         <artifactId>nexus-staging-maven-plugin</artifactId>
-        <version>1.6.7</version>
+        <version>1.6.8</version>
         <extensions>true</extensions>
         <configuration>
           <serverId>ossrh</serverId>
@@ -395,15 +391,15 @@
         </plugin>
         <plugin>
           <artifactId>maven-assembly-plugin</artifactId>
-          <version>2.6</version>
+          <version>3.1.0</version>
         </plugin>
         <plugin>
           <artifactId>maven-clean-plugin</artifactId>
-          <version>3.0.0</version>
+          <version>3.1.0</version>
         </plugin>
         <plugin>
           <artifactId>maven-compiler-plugin</artifactId>
-          <version>3.5.1</version>
+          <version>3.8.0</version>
           <configuration>
             <source>1.6</source>
             <target>1.6</target>
@@ -411,42 +407,25 @@
               see http://immutables.github.io/getstarted.html -->
             <useIncrementalCompilation>false</useIncrementalCompilation>
           </configuration>
-          <dependencies>
-            <dependency>
-              <!-- need latest version for https://github.com/codehaus-plexus/plexus-compiler/issues/20 -->
-              <groupId>org.codehaus.plexus</groupId>
-              <artifactId>plexus-compiler-api</artifactId>
-              <version>2.8</version>
-            </dependency>
-            <dependency>
-              <!-- need latest version for https://github.com/codehaus-plexus/plexus-compiler/issues/20 -->
-              <groupId>org.codehaus.plexus</groupId>
-              <artifactId>plexus-compiler-manager</artifactId>
-              <version>2.8</version>
-            </dependency>
-            <dependency>
-              <!-- need latest version for https://github.com/codehaus-plexus/plexus-compiler/issues/20 -->
-              <groupId>org.codehaus.plexus</groupId>
-              <artifactId>plexus-compiler-javac</artifactId>
-              <version>2.8</version>
-            </dependency>
-          </dependencies>
         </plugin>
         <plugin>
           <artifactId>maven-dependency-plugin</artifactId>
-          <version>2.10</version>
+          <version>3.1.1</version>
         </plugin>
         <plugin>
           <artifactId>maven-deploy-plugin</artifactId>
           <version>2.8.2</version>
+          <configuration>
+            <deployAtEnd>true</deployAtEnd>
+          </configuration>
         </plugin>
         <plugin>
           <artifactId>maven-enforcer-plugin</artifactId>
-          <version>1.4.1</version>
+          <version>3.0.0-M2</version>
         </plugin>
         <plugin>
           <artifactId>maven-failsafe-plugin</artifactId>
-          <version>2.19.1</version>
+          <version>2.22.0</version>
           <configuration>
             <systemPropertyVariables>
               <glowroot.test.fileLoggingOnly>true</glowroot.test.fileLoggingOnly>
@@ -462,9 +441,7 @@
         </plugin>
         <plugin>
           <artifactId>maven-jar-plugin</artifactId>
-          <!-- not upgrading to later version currently due to
-            https://bugs.eclipse.org/bugs/show_bug.cgi?id=494583 -->
-          <version>2.6</version>
+          <version>3.1.0</version>
           <configuration>
             <archive>
               <manifestEntries>
@@ -472,28 +449,33 @@
                 <Implementation-Version>${project.version}</Implementation-Version>
                 <Build-Commit>${glowroot.build.commit}</Build-Commit>
               </manifestEntries>
+              <addMavenDescriptor>false</addMavenDescriptor>
             </archive>
           </configuration>
         </plugin>
         <plugin>
           <artifactId>maven-javadoc-plugin</artifactId>
-          <version>2.10.4</version>
-        </plugin>
-        <plugin>
-          <artifactId>maven-plugin-plugin</artifactId>
-          <version>3.4</version>
-        </plugin>
-        <plugin>
-          <artifactId>maven-resources-plugin</artifactId>
           <version>3.0.1</version>
         </plugin>
         <plugin>
+          <artifactId>maven-plugin-plugin</artifactId>
+          <version>3.5.2</version>
+        </plugin>
+        <plugin>
+          <artifactId>maven-remote-resources-plugin</artifactId>
+          <version>1.5</version>
+        </plugin>
+        <plugin>
+          <artifactId>maven-resources-plugin</artifactId>
+          <version>3.1.0</version>
+        </plugin>
+        <plugin>
           <artifactId>maven-shade-plugin</artifactId>
-          <version>2.4.3</version>
+          <version>3.2.0</version>
         </plugin>
         <plugin>
           <artifactId>maven-site-plugin</artifactId>
-          <version>3.5.1</version>
+          <version>3.7.1</version>
         </plugin>
         <plugin>
           <artifactId>maven-source-plugin</artifactId>
@@ -501,7 +483,7 @@
         </plugin>
         <plugin>
           <artifactId>maven-surefire-plugin</artifactId>
-          <version>2.19.1</version>
+          <version>2.22.0</version>
           <configuration>
             <systemPropertyVariables>
               <glowroot.test.fileLoggingOnly>true</glowroot.test.fileLoggingOnly>
@@ -512,19 +494,36 @@
           </configuration>
         </plugin>
         <plugin>
+          <groupId>com.github.wvengen</groupId>
+          <artifactId>proguard-maven-plugin</artifactId>
+          <version>2.0.14</version>
+          <dependencies>
+            <dependency>
+              <groupId>net.sf.proguard</groupId>
+              <artifactId>proguard-base</artifactId>
+              <version>6.0.3</version>
+            </dependency>
+          </dependencies>
+        </plugin>
+        <plugin>
+          <groupId>com.github.os72</groupId>
+          <artifactId>protoc-jar-maven-plugin</artifactId>
+          <version>3.6.0.1</version>
+        </plugin>
+        <plugin>
           <groupId>org.sonarsource.scanner.maven</groupId>
           <artifactId>sonar-maven-plugin</artifactId>
-          <version>3.2</version>
+          <version>3.5.0.1254</version>
         </plugin>
         <plugin>
           <groupId>org.codehaus.mojo</groupId>
           <artifactId>build-helper-maven-plugin</artifactId>
-          <version>1.12</version>
+          <version>3.0.0</version>
         </plugin>
         <plugin>
           <groupId>org.jacoco</groupId>
           <artifactId>jacoco-maven-plugin</artifactId>
-          <version>0.7.8</version>
+          <version>0.8.2</version>
         </plugin>
         <plugin>
           <groupId>org.eclipse.m2e</groupId>
@@ -587,19 +586,6 @@
                 </pluginExecution>
                 <pluginExecution>
                   <pluginExecutionFilter>
-                    <groupId>org.codehaus.mojo</groupId>
-                    <artifactId>exec-maven-plugin</artifactId>
-                    <versionRange>[1.0.0,)</versionRange>
-                    <goals>
-                      <goal>exec</goal>
-                    </goals>
-                  </pluginExecutionFilter>
-                  <action>
-                    <ignore />
-                  </action>
-                </pluginExecution>
-                <pluginExecution>
-                  <pluginExecutionFilter>
                     <groupId>net.alchim31.maven</groupId>
                     <artifactId>scala-maven-plugin</artifactId>
                     <versionRange>[1.0.0,)</versionRange>
@@ -634,14 +620,89 @@
 
   <profiles>
     <profile>
+      <id>include-central-https-linux-alpine</id>
+      <modules>
+        <module>agent/shaded/central-https-linux-alpine</module>
+      </modules>
+    </profile>
+    <profile>
       <activation>
-        <jdk>1.8</jdk>
+        <jdk>[1.8,)</jdk>
       </activation>
       <modules>
         <module>central</module>
-        <!-- selenium 3.0+ requires Java 8+ -->
+        <!-- selenium 3.0.0+ requires Java 8+ -->
         <module>webdriver-tests</module>
       </modules>
+    </profile>
+    <profile>
+      <id>auto-activated-java-9</id>
+      <activation>
+        <jdk>[9,)</jdk>
+      </activation>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <groupId>com.github.wvengen</groupId>
+              <artifactId>proguard-maven-plugin</artifactId>
+              <configuration>
+                <libs>
+                  <lib>${java.home}/jmods/java.base.jmod</lib>
+                  <!-- java.sql.jmod is needed for glowroot-agent-embedded -->
+                  <lib>${java.home}/jmods/java.sql.jmod</lib>
+                </libs>
+              </configuration>
+            </plugin>
+          </plugins>
+        </pluginManagement>
+      </build>
+    </profile>
+    <profile>
+      <id>auto-activated-not-apple-jdk</id>
+      <activation>
+        <file>
+          <exists>${java.home}/lib/rt.jar</exists>
+        </file>
+      </activation>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <groupId>com.github.wvengen</groupId>
+              <artifactId>proguard-maven-plugin</artifactId>
+              <configuration>
+                <libs>
+                  <lib>${java.home}/lib/rt.jar</lib>
+                </libs>
+              </configuration>
+            </plugin>
+          </plugins>
+        </pluginManagement>
+      </build>
+    </profile>
+    <profile>
+      <id>auto-activated-apple-jdk</id>
+      <activation>
+        <file>
+          <exists>${java.home}/../Classes/classes.jar</exists>
+        </file>
+      </activation>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <groupId>com.github.wvengen</groupId>
+              <artifactId>proguard-maven-plugin</artifactId>
+              <configuration>
+                <libs>
+                  <lib>${java.home}/../Classes/classes.jar</lib>
+                </libs>
+              </configuration>
+            </plugin>
+          </plugins>
+        </pluginManagement>
+      </build>
     </profile>
     <profile>
       <id>auto-actived-add-license-jar-bundle</id>
@@ -655,7 +716,6 @@
         <plugins>
           <plugin>
             <artifactId>maven-remote-resources-plugin</artifactId>
-            <version>1.5</version>
             <executions>
               <execution>
                 <phase>generate-resources</phase>
@@ -688,6 +748,10 @@
         <plugins>
           <plugin>
             <artifactId>maven-javadoc-plugin</artifactId>
+            <configuration>
+              <!-- exclude deprecated api from javadoc -->
+              <nodeprecated>true</nodeprecated>
+            </configuration>
             <executions>
               <execution>
                 <goals>
@@ -739,24 +803,23 @@
               <forceJavacCompilerUse>true</forceJavacCompilerUse>
               <showWarnings>true</showWarnings>
               <compilerArgs>
-                <!-- DepAnn OFF until immutables resolves warnings in generated code -->
-                <arg>-Xep:DepAnn:OFF</arg>
-                <arg>-Xep:GuardedByChecker:WARN</arg>
-                <arg>-XepDisableWarningsInGeneratedCode</arg>
+                <arg>-XepExcludedPaths:.*/target/generated-sources/.*</arg>
+                <!-- needed to suppress "bootstrap class path not set in conjunction with -source 1.6" -->
+                <arg>-Xlint:-options</arg>
               </compilerArgs>
             </configuration>
             <dependencies>
               <dependency>
                 <groupId>org.codehaus.plexus</groupId>
                 <artifactId>plexus-compiler-javac-errorprone</artifactId>
-                <version>2.5</version>
+                <version>2.8.4</version>
               </dependency>
               <!-- override plexus-compiler-javac-errorprone's dependency on
                    Error Prone with the latest version -->
               <dependency>
                 <groupId>com.google.errorprone</groupId>
                 <artifactId>error_prone_core</artifactId>
-                <version>2.0.15</version>
+                <version>2.3.1</version>
               </dependency>
             </dependencies>
           </plugin>
@@ -765,28 +828,32 @@
     </profile>
     <profile>
       <!-- use "travis-build/travis-build.sh checker" to execute this profile -->
-      <id>checker</id>
+      <id>the-checker-build</id>
+      <activation>
+        <property>
+          <name>glowroot.checker.build</name>
+        </property>
+      </activation>
       <properties>
-        <checker.qual.group.id>org.checkerframework</checker.qual.group.id>
-        <checker.qual.artifact.id>checker-qual</checker.qual.artifact.id>
-        <checker.qual.version>2.1.6</checker.qual.version>
+        <checker.version>2.5.5</checker.version>
       </properties>
       <dependencies>
         <dependency>
           <groupId>org.checkerframework</groupId>
-          <artifactId>checker</artifactId>
-          <version>${checker.qual.version}</version>
+          <artifactId>checker-qual</artifactId>
+          <version>${checker.version}</version>
           <optional>true</optional>
         </dependency>
         <dependency>
           <groupId>org.checkerframework</groupId>
-          <artifactId>compiler</artifactId>
-          <version>${checker.qual.version}</version>
+          <artifactId>checker</artifactId>
+          <version>${checker.version}</version>
+          <optional>true</optional>
         </dependency>
         <dependency>
           <groupId>org.checkerframework</groupId>
           <artifactId>jdk8</artifactId>
-          <version>${checker.qual.version}</version>
+          <version>${checker.version}</version>
           <optional>true</optional>
         </dependency>
         <dependency>
@@ -831,8 +898,6 @@
             <configuration>
               <source>1.8</source>
               <target>1.8</target>
-              <verbose>true</verbose>
-              <fork>true</fork>
               <maxmem>512m</maxmem>
               <annotationProcessors>
                 <annotationProcessor>
@@ -846,13 +911,11 @@
                 </annotationProcessor>
               </annotationProcessors>
               <compilerArgs>
-                <arg>-J-Xbootclasspath/p:${org.checkerframework:compiler:jar}</arg>
                 <arg>-Xbootclasspath/p:${org.checkerframework:jdk8:jar}</arg>
                 <!-- checker.stubs.dir needs to be absolute path since relative path will be
                   interpreted from each module directory -->
                 <arg>-Astubs=${checker.stubs.dir}</arg>
-                <!-- not sure why, but \. doesn't work below in place of [.] -->
-                <arg>-AskipDefs=^org[.]glowroot[.]agent[.]embedded[.]repo[.]model[.]|^org[.]glowroot[.]agent[.]it[.]harness[.]grpc[.]</arg>
+                <arg>-AskipDefs=^org\.glowroot\.agent\.embedded\.repo\.model\.|^org\.glowroot\.agent\.it\.harness\.grpc\.|^org\.glowroot\.central\.repo\.model\.</arg>
               </compilerArgs>
             </configuration>
           </plugin>

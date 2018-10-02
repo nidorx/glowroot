@@ -1,5 +1,5 @@
 <!--
-  Copyright 2012-2016 the original author or authors.
+  Copyright 2012-2018 the original author or authors.
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -13,29 +13,29 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<div class="panel panel-default">
-  <div class="panel-heading">
+<div class="card">
+  <div class="card-header">
     <h2>Alerts</h2>
   </div>
-  <div class="panel-body">
+  <div class="card-body">
     <div ng-hide="hideMainContent()">
       <div ng-include src="'template/gt-loading-overlay.html'"></div>
       <div ng-include src="'template/gt-http-error-overlay.html'"></div>
       <div style="margin: 15px;">
-        <div ng-if="!alerts.length"
+        <div ng-if="!configs.length"
              style="font-style: italic;">
           There are no configured alerts
         </div>
-        <div ng-repeat="alert in alerts"
+        <div ng-repeat="config in configs"
              class="gt-second-line-indent"
              style="padding-bottom: 8px;">
-          <a ng-href="config/alert{{alertQueryString(alert)}}">
-            {{alertText(alert)}}
+          <a ng-href="config/alert{{configQueryString(config)}}">
+            {{config.display}}
           </a>
         </div>
         <!-- ng-if="loaded" is used to prevent jitter of seeing this section very briefly
              before it gets pushed down by existing alerts -->
-        <div ng-if="loaded && agentPermissions.config.edit.alert"
+        <div ng-if="loaded && agentRollup.permissions.config.edit.alerts"
              style="margin-top: 30px;">
           <a class="btn btn-primary"
              href="config/alert{{newQueryString()}}">

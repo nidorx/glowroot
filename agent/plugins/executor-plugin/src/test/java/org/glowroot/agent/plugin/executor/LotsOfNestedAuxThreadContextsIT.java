@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package org.glowroot.agent.plugin.executor;
 
 import java.util.Iterator;
-import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -70,9 +69,8 @@ public class LotsOfNestedAuxThreadContextsIT {
         Trace trace = container.execute(DoSubmitCallable.class);
 
         // then
-        List<Trace.Timer> auxThreadRootTimers = trace.getHeader().getAuxThreadRootTimerList();
-        assertThat(auxThreadRootTimers).hasSize(1);
-        Trace.Timer auxThreadRootTimer = auxThreadRootTimers.get(0);
+        assertThat(trace.getHeader().hasAuxThreadRootTimer()).isTrue();
+        Trace.Timer auxThreadRootTimer = trace.getHeader().getAuxThreadRootTimer();
         assertThat(auxThreadRootTimer.getCount()).isEqualTo(100000);
         assertThat(auxThreadRootTimer.getActive()).isFalse();
         assertThat(auxThreadRootTimer.getChildTimerCount()).isEqualTo(1);
@@ -121,7 +119,7 @@ public class LotsOfNestedAuxThreadContextsIT {
             while (executor.getQueue().size() > 1000) {
                 // keep executor backlog from getting too full and adding memory pressure
                 // (since restricting heap size to test for leaking aux thread contexts)
-                Thread.sleep(1);
+                MILLISECONDS.sleep(1);
             }
             executor.submit(new Callable<Void>() {
                 @Override
@@ -138,7 +136,7 @@ public class LotsOfNestedAuxThreadContextsIT {
         @Override
         public void traceEntryMarker() {
             try {
-                Thread.sleep(100);
+                MILLISECONDS.sleep(100);
             } catch (InterruptedException e) {
             }
         }

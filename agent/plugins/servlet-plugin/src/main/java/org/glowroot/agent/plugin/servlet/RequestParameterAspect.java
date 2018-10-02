@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ package org.glowroot.agent.plugin.servlet;
 
 import java.util.Map;
 
-import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.Logger;
 import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.weaving.BindClassMeta;
@@ -28,7 +27,7 @@ import org.glowroot.agent.plugin.servlet.ServletAspect.HttpServletRequest;
 
 public class RequestParameterAspect {
 
-    private static final Logger logger = Agent.getLogger(RequestParameterAspect.class);
+    private static final Logger logger = Logger.getLogger(RequestParameterAspect.class);
 
     @Pointcut(className = "javax.servlet.ServletRequest", methodName = "getParameter*",
             methodParameterTypes = {".."}, nestingGroup = "servlet-inner-call")
@@ -44,7 +43,7 @@ public class RequestParameterAspect {
             // could prevent a servlet from choosing to read the underlying stream instead of using
             // the getParameter* methods) see SRV.3.1.1 "When Parameters Are Available"
             ServletMessageSupplier messageSupplier =
-                    (ServletMessageSupplier) context.getServletMessageSupplier();
+                    (ServletMessageSupplier) context.getServletRequestInfo();
             if (messageSupplier == null || messageSupplier.isRequestParametersCaptured()) {
                 return;
             }
@@ -59,7 +58,7 @@ public class RequestParameterAspect {
                         DetailCapture.captureRequestParameters(request));
                 return;
             }
-            Map</*@Nullable*/ String, /*@Nullable*/ String /*@Nullable*/[]> parameterMap;
+            Map</*@Nullable*/ String, /*@Nullable*/ Object> parameterMap;
             try {
                 parameterMap = request.getParameterMap();
             } catch (Exception e) {
@@ -79,6 +78,13 @@ public class RequestParameterAspect {
                 return;
             }
             if (parameterMap == null) {
+                return;
+            }
+            if (parameterMap.isEmpty()) {
+                // do not call setCaptureRequestParameters(), which will cause
+                // isRequestParametersCaptured() to return true and prevent further capture of
+                // request parameters, e.g. after a multipart/form-data request is wrapped by
+                // org.springframework.web.multipart.support.DefaultMultipartHttpServletRequest
                 return;
             }
             messageSupplier.setCaptureRequestParameters(

@@ -2,17 +2,16 @@
 # container-based environment (sudo: false) is provisioned with only 4g memory, but haven't run into time limit for jobs yet
 sudo: false
 language: java
-jdk:
-  - oraclejdk8
-  - oraclejdk7
-  - openjdk7
 before_install:
   - "export DISPLAY=:99.0"
   - sh -e /etc/init.d/xvfb start
     # NewRatio is to leave as much memory as possible to old gen
   - echo "MAVEN_OPTS=\"-Xmx768m -XX:NewRatio=20\"" > ~/.mavenrc
 install: true
-script: build/travis-ci/build.sh $TARGET
+script:
+    # travis ci provides a default settings xml that has lots of unnecessary repositories which slows build down
+  - rm ~/.m2/settings.xml
+  - build/travis-ci/build.sh $TARGET
 cache:
   directories:
   - $HOME/.m2
@@ -20,40 +19,88 @@ cache:
 matrix:
   include:
     - jdk: oraclejdk8
+      env: TARGET=test1 TEST_SHADED=true GLOWROOT_HARNESS=javaagent
+    - jdk: oraclejdk8
+      env: TARGET=test2 TEST_SHADED=true GLOWROOT_HARNESS=javaagent
+    - jdk: oraclejdk8
+      env: TARGET=test3 TEST_SHADED=true GLOWROOT_HARNESS=javaagent
+    - jdk: oraclejdk8
+      env: TARGET=test4 TEST_SHADED=true GLOWROOT_HARNESS=javaagent
+    - jdk: oraclejdk8
       env: TARGET=deploy
     - jdk: oraclejdk8
       env: TARGET=checker
+    - jdk: oraclejdk9
+      env: TARGET=test1 TEST_SHADED=true GLOWROOT_HARNESS=javaagent
+    - jdk: oraclejdk9
+      env: TARGET=test2 TEST_SHADED=true GLOWROOT_HARNESS=javaagent
+    - jdk: oraclejdk9
+      env: TARGET=test3 TEST_SHADED=true GLOWROOT_HARNESS=javaagent
+    - jdk: oraclejdk9
+      env: TARGET=test4 TEST_SHADED=true GLOWROOT_HARNESS=javaagent
+    - jdk: openjdk7
+      env: TARGET=test1 TEST_SHADED=true GLOWROOT_HARNESS=javaagent
+    - jdk: openjdk7
+      env: TARGET=test2 TEST_SHADED=true GLOWROOT_HARNESS=javaagent
+    - jdk: oraclejdk8
+      env: TARGET=test1 TEST_SHADED=false GLOWROOT_HARNESS=javaagent
+    - jdk: oraclejdk8
+      env: TARGET=test2 TEST_SHADED=false GLOWROOT_HARNESS=javaagent
+    - jdk: oraclejdk8
+      env: TARGET=test3 TEST_SHADED=false GLOWROOT_HARNESS=javaagent
+    - jdk: oraclejdk8
+      env: TARGET=test4 TEST_SHADED=false GLOWROOT_HARNESS=javaagent
+    - jdk: oraclejdk8
+      env: TARGET=test1 TEST_SHADED=true GLOWROOT_HARNESS=local
+    - jdk: oraclejdk8
+      env: TARGET=test2 TEST_SHADED=true GLOWROOT_HARNESS=local
+    - jdk: oraclejdk8
+      env: TARGET=test3 TEST_SHADED=true GLOWROOT_HARNESS=local
+    - jdk: oraclejdk8
+      env: TARGET=test4 TEST_SHADED=true GLOWROOT_HARNESS=local
+    - jdk: oraclejdk8
+      env: TARGET=test1 TEST_SHADED=false GLOWROOT_HARNESS=local
+    - jdk: oraclejdk8
+      env: TARGET=test2 TEST_SHADED=false GLOWROOT_HARNESS=local
+    - jdk: oraclejdk8
+      env: TARGET=test3 TEST_SHADED=false GLOWROOT_HARNESS=local
+    - jdk: oraclejdk8
+      env: TARGET=test4 TEST_SHADED=false GLOWROOT_HARNESS=local
       # chrome
     - jdk: oraclejdk8
-      env: TARGET=saucelabs SAUCELABS_PLATFORM="Windows 7" SAUCELABS_BROWSER_NAME=chrome SAUCELABS_BROWSER_VERSION=
+      env: TARGET=saucelabs1 SAUCELABS_PLATFORM="Windows 10" SAUCELABS_BROWSER_NAME=chrome SAUCELABS_BROWSER_VERSION=
+    - jdk: oraclejdk8
+      env: TARGET=saucelabs2 SAUCELABS_PLATFORM="Windows 10" SAUCELABS_BROWSER_NAME=chrome SAUCELABS_BROWSER_VERSION=
+    - jdk: oraclejdk8
+      env: TARGET=saucelabs3 SAUCELABS_PLATFORM="Windows 10" SAUCELABS_BROWSER_NAME=chrome SAUCELABS_BROWSER_VERSION=
       # firefox
     - jdk: oraclejdk8
-      # having trouble with latest firefox (47) on saucelabs
-      env: TARGET=saucelabs SAUCELABS_PLATFORM="Windows 7" SAUCELABS_BROWSER_NAME=firefox SAUCELABS_BROWSER_VERSION=46
+      env: TARGET=saucelabs1 SAUCELABS_PLATFORM="Windows 10" SAUCELABS_BROWSER_NAME=firefox SAUCELABS_BROWSER_VERSION=
+    - jdk: oraclejdk8
+      env: TARGET=saucelabs2 SAUCELABS_PLATFORM="Windows 10" SAUCELABS_BROWSER_NAME=firefox SAUCELABS_BROWSER_VERSION=
+    - jdk: oraclejdk8
+      env: TARGET=saucelabs3 SAUCELABS_PLATFORM="Windows 10" SAUCELABS_BROWSER_NAME=firefox SAUCELABS_BROWSER_VERSION=
+      # microsoft edge
+    - jdk: oraclejdk8
+      env: TARGET=saucelabs1 SAUCELABS_PLATFORM="Windows 10" SAUCELABS_BROWSER_NAME=MicrosoftEdge SAUCELABS_BROWSER_VERSION=
+    - jdk: oraclejdk8
+      env: TARGET=saucelabs2 SAUCELABS_PLATFORM="Windows 10" SAUCELABS_BROWSER_NAME=MicrosoftEdge SAUCELABS_BROWSER_VERSION=
+    - jdk: oraclejdk8
+      env: TARGET=saucelabs3 SAUCELABS_PLATFORM="Windows 10" SAUCELABS_BROWSER_NAME=MicrosoftEdge SAUCELABS_BROWSER_VERSION=
       # internet explorer
     - jdk: oraclejdk8
-      env: TARGET=saucelabs SAUCELABS_PLATFORM="Windows 7" SAUCELABS_BROWSER_NAME=iexplore SAUCELABS_BROWSER_VERSION=11
+      env: TARGET=saucelabs1 SAUCELABS_PLATFORM="Windows 10" SAUCELABS_BROWSER_NAME="internet explorer" SAUCELABS_BROWSER_VERSION=
     - jdk: oraclejdk8
-      env: TARGET=saucelabs SAUCELABS_PLATFORM="Windows 7" SAUCELABS_BROWSER_NAME=iexplore SAUCELABS_BROWSER_VERSION=10
+      env: TARGET=saucelabs2 SAUCELABS_PLATFORM="Windows 10" SAUCELABS_BROWSER_NAME="internet explorer" SAUCELABS_BROWSER_VERSION=
     - jdk: oraclejdk8
-      env: TARGET=saucelabs SAUCELABS_PLATFORM="Windows 7" SAUCELABS_BROWSER_NAME=iexplore SAUCELABS_BROWSER_VERSION=9
+      env: TARGET=saucelabs3 SAUCELABS_PLATFORM="Windows 10" SAUCELABS_BROWSER_NAME="internet explorer" SAUCELABS_BROWSER_VERSION=
       # safari
     - jdk: oraclejdk8
-      env: TARGET=saucelabs SAUCELABS_PLATFORM="OS X 10.11" SAUCELABS_BROWSER_NAME=safari SAUCELABS_BROWSER_VERSION=9
+      env: TARGET=saucelabs1 SAUCELABS_PLATFORM="macOS 10.13" SAUCELABS_BROWSER_NAME=safari SAUCELABS_BROWSER_VERSION=11.1
     - jdk: oraclejdk8
-      env: TARGET=saucelabs SAUCELABS_PLATFORM="OS X 10.10" SAUCELABS_BROWSER_NAME=safari SAUCELABS_BROWSER_VERSION=8
+      env: TARGET=saucelabs2 SAUCELABS_PLATFORM="macOS 10.13" SAUCELABS_BROWSER_NAME=safari SAUCELABS_BROWSER_VERSION=11.1
     - jdk: oraclejdk8
-      env: TARGET=saucelabs SAUCELABS_PLATFORM="OS X 10.9" SAUCELABS_BROWSER_NAME=safari SAUCELABS_BROWSER_VERSION=7
-    - jdk: oraclejdk8
-      env: TARGET=saucelabs SAUCELABS_PLATFORM="OS X 10.8" SAUCELABS_BROWSER_NAME=safari SAUCELABS_BROWSER_VERSION=6
-env:
-  matrix:
-    - TARGET=test SKIP_SHADING=false GLOWROOT_HARNESS=javaagent
-    - TARGET=test SKIP_SHADING=false GLOWROOT_HARNESS=local
-    - TARGET=test SKIP_SHADING=true GLOWROOT_HARNESS=javaagent
-    - TARGET=test SKIP_SHADING=true GLOWROOT_HARNESS=local
+      env: TARGET=saucelabs3 SAUCELABS_PLATFORM="macOS 10.13" SAUCELABS_BROWSER_NAME=safari SAUCELABS_BROWSER_VERSION=11.1
 addons:
-  firefox: "latest"
-  sauce_connect:
-    # this is needed on android, see https://support.saucelabs.com/customer/en/portal/questions/13056252
-    no_ssl_bump_domains: all
+  sauce_connect: true
+  firefox: "62.0"

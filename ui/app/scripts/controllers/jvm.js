@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2017 the original author or authors.
+ * Copyright 2013-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,24 +14,20 @@
  * limitations under the License.
  */
 
-/* global glowroot, angular */
+/* global glowroot, $ */
 
 glowroot.controller('JvmCtrl', [
   '$scope',
   '$location',
+  '$http',
+  '$timeout',
   'queryStrings',
-  function ($scope, $location, queryStrings) {
+  function ($scope, $location, $http, $timeout, queryStrings) {
     // \u00b7 is &middot;
     document.title = 'JVM \u00b7 Glowroot';
     $scope.$parent.activeNavbarItem = 'jvm';
 
-    $scope.hideAgentRollupDropdown = function () {
-      if (!$scope.layout) {
-        // this is ok, under grunt serve and layout hasn't loaded yet
-        return true;
-      }
-      return !$scope.layout.central || $scope.layout.agentRollups.length === 1;
-    };
+    $scope.range = {};
 
     $scope.hideMainContent = function () {
       return $scope.layout.central && !$scope.agentRollupId && !$scope.agentId;
@@ -41,46 +37,65 @@ glowroot.controller('JvmCtrl', [
       return $location.path().substring(1);
     };
 
-    function agentRollupUrl(path, agentRollup) {
-      // preserve existing query string
-      var search = angular.copy($location.search());
-      delete search['agent-rollup-id'];
-      delete search['agent-id'];
-      var query = {};
-      if (agentRollup.agent) {
-        query['agent-id'] = agentRollup.id;
-      } else {
-        query['agent-rollup-id'] = agentRollup.id;
-      }
-      angular.merge(query, search);
+    function agentRollupUrl(path, agentRollupId) {
+      var query = $scope.agentRollupQuery(agentRollupId);
       return path + queryStrings.encodeObject(query);
     }
 
-    $scope.agentRollupUrl = function (agentRollup) {
+    $scope.agentRollupUrl = function (agentRollupId) {
       var path = $location.path().substring(1);
-      if (path === 'jvm/gauges' && !agentRollup.permissions.jvm.gauges
-          || path === 'jvm/thread-dump' && !agentRollup.permissions.jvm.threadDump
-          || path === 'jvm/heap-dump' && !agentRollup.permissions.jvm.heapDump
-          || path === 'jvm/heap-histogram' && !agentRollup.permissions.jvm.heapHistogram
-          || path === 'jvm/gc' && !agentRollup.permissions.jvm.gc
-          || path === 'jvm/mbean-tree' && !agentRollup.permissions.jvm.mbeanTree
-          || path === 'jvm/system-properties' && !agentRollup.permissions.jvm.systemProperties
-          || path === 'jvm/environment' && !agentRollup.permissions.jvm.environment
-          || path === 'jvm/capabilities' && !agentRollup.permissions.jvm.capabilities) {
-        return agentRollupUrl('jvm/gauges', agentRollup);
-      } else {
-        return agentRollupUrl(path, agentRollup);
+      if ($scope.isRollup(agentRollupId)) {
+        return agentRollupUrl('jvm/gauges', agentRollupId);
       }
+      return agentRollupUrl(path, agentRollupId);
     };
 
-    $scope.$on('$stateChangeSuccess', function () {
-      // don't let the active sidebar selection get out of sync (which can happen after using the back button)
-      if (document.activeElement) {
-        var gtUrl = document.activeElement.getAttribute('gt-url');
-        if (gtUrl && gtUrl !== $location.path().substring(1)) {
-          document.activeElement.blur();
+    $scope.gaugeQueryString = function () {
+      return $scope.agentQueryString();
+    };
+
+    if ($scope.layout.central) {
+
+      $scope.$watch(function () {
+        return $location.search();
+      }, function (newValue, oldValue) {
+        if (newValue !== oldValue) {
+          // need to refresh selectpicker in order to update hrefs of the items
+          $timeout(function () {
+            // timeout is needed so this runs after dom is updated
+            $('#agentRollupDropdown').selectpicker('refresh');
+          });
         }
+      }, true);
+
+      var refreshAgentRollups = function () {
+        var from;
+        var to;
+        var path = $location.path().substring(1);
+        var message;
+        if (path === 'jvm/gauges' && $scope.agentRollupId) {
+          from = $scope.range.chartFrom;
+          to = $scope.range.chartTo;
+          message = 'No active agents in this time period';
+        } else {
+          var now = new Date().getTime();
+          from = now - 7 * 24 * 60 * 60 * 1000;
+          // looking to the future just to be safe
+          to = now + 7 * 24 * 60 * 60 * 1000;
+          message = 'No active agents in the past 7 days';
+        }
+        $scope.refreshAgentRollups(from, to, $scope, message);
+      };
+
+      // the show.bs.dropdown event target is the button which is a sibling of the select
+      $('#agentRollupDropdown').parent().on('show.bs.dropdown', refreshAgentRollups);
+
+      if ($scope.agentRollups === undefined) {
+        // timeout is needed to give gauge controller a chance to set chartFrom/chartTo
+        $timeout(function () {
+          refreshAgentRollups();
+        });
       }
-    });
+    }
   }
 ]);

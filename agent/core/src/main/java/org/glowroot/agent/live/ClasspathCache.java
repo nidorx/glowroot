@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2017 the original author or authors.
+ * Copyright 2013-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,7 +37,6 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
 import java.util.jar.Manifest;
 
-import javax.annotation.Nullable;
 import javax.annotation.concurrent.GuardedBy;
 
 import com.google.common.base.Splitter;
@@ -49,12 +48,13 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
-import com.google.common.collect.Ordering;
+import com.google.common.collect.MultimapBuilder;
+import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
-import com.google.common.collect.TreeMultimap;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Closer;
 import com.google.common.io.Resources;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -69,7 +69,7 @@ import org.glowroot.agent.weaving.ClassNames;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.objectweb.asm.Opcodes.ACC_NATIVE;
 import static org.objectweb.asm.Opcodes.ACC_SYNTHETIC;
-import static org.objectweb.asm.Opcodes.ASM5;
+import static org.objectweb.asm.Opcodes.ASM6;
 
 // TODO remove items from classpathLocations and classNameLocations when class loaders are no longer
 // present, e.g. in wildfly after undeploying an application
@@ -157,7 +157,7 @@ class ClasspathCache {
         return ImmutableList.copyOf(analyzedMethods);
     }
 
-    // using synchronization over concurrent structures in this cache to conserve memory
+    // using synchronization over non-concurrent structures in this cache to conserve memory
     synchronized void updateCache() {
         Multimap<String, Location> newClassNameLocations = HashMultimap.create();
         for (ClassLoader loader : getKnownClassLoaders()) {
@@ -166,23 +166,13 @@ class ClasspathCache {
         updateCacheWithClasspathClasses(newClassNameLocations);
         updateCacheWithBootstrapClasses(newClassNameLocations);
         if (!newClassNameLocations.isEmpty()) {
-            Multimap<String, Location> newMap =
-                    TreeMultimap.create(String.CASE_INSENSITIVE_ORDER, Ordering.allEqual());
+            // multimap that sorts keys and de-dups values while maintains value ordering
+            SetMultimap<String, Location> newMap =
+                    MultimapBuilder.treeKeys().linkedHashSetValues().build();
             newMap.putAll(classNameLocations);
             newMap.putAll(newClassNameLocations);
             classNameLocations = ImmutableMultimap.copyOf(newMap);
         }
-    }
-
-    private ImmutableList<String> combineClassNamesWithLimit(Set<String> fullMatchingClassNames,
-            Set<String> matchingClassNames, int limit) {
-        if (fullMatchingClassNames.size() < limit) {
-            int space = limit - fullMatchingClassNames.size();
-            int numToAdd = Math.min(space, matchingClassNames.size());
-            fullMatchingClassNames
-                    .addAll(ImmutableList.copyOf(Iterables.limit(matchingClassNames, numToAdd)));
-        }
-        return ImmutableList.copyOf(fullMatchingClassNames);
     }
 
     @GuardedBy("this")
@@ -194,9 +184,8 @@ class ClasspathCache {
         for (String path : Splitter.on(File.pathSeparatorChar).split(javaClassPath)) {
             File file = new File(path);
             Location location = getLocationFromFile(file);
-            if (location != null && !classpathLocations.contains(location)) {
+            if (location != null) {
                 loadClassNames(location, newClassNameLocations);
-                classpathLocations.add(location);
             }
         }
     }
@@ -211,31 +200,150 @@ class ClasspathCache {
         for (String path : Splitter.on(File.pathSeparatorChar).split(bootClassPath)) {
             File file = new File(path);
             Location location = getLocationFromFile(file);
-            if (location != null && !classpathLocations.contains(location)) {
+            if (location != null) {
                 loadClassNames(location, newClassNameLocations);
-                classpathLocations.add(location);
             }
         }
     }
 
-    private List<UiAnalyzedMethod> getAnalyzedMethods(Location location, String className)
+    @GuardedBy("this")
+    private void updateCache(ClassLoader loader, Multimap<String, Location> newClassNameLocations) {
+        List<URL> urls = getURLs(loader);
+        List<Location> locations = Lists.newArrayList();
+        for (URL url : urls) {
+            Location location = tryToGetFileFromURL(url, loader);
+            if (location != null) {
+                locations.add(location);
+            }
+        }
+        for (Location location : locations) {
+            loadClassNames(location, newClassNameLocations);
+        }
+    }
+
+    private List<ClassLoader> getKnownClassLoaders() {
+        List<ClassLoader> loaders = analyzedWorld.getClassLoaders();
+        if (loaders.isEmpty()) {
+            // this is needed for testing the UI outside of javaagent
+            ClassLoader systemClassLoader = ClassLoader.getSystemClassLoader();
+            if (systemClassLoader == null) {
+                return ImmutableList.of();
+            } else {
+                return ImmutableList.of(systemClassLoader);
+            }
+        }
+        return loaders;
+    }
+
+    @GuardedBy("this")
+    private void loadClassNames(Location location,
+            Multimap<String, Location> newClassNameLocations) {
+        if (classpathLocations.contains(location)) {
+            return;
+        }
+        // add to classpath at top of method to avoid infinite recursion in case of cycle in
+        // Manifest Class-Path
+        classpathLocations.add(location);
+        try {
+            File dir = location.directory();
+            File jarFile = location.jarFile();
+            if (dir != null) {
+                loadClassNamesFromDirectory(dir, "", location, newClassNameLocations);
+            } else if (jarFile != null) {
+                String jarFileInsideJarFile = location.jarFileInsideJarFile();
+                String directoryInsideJarFile = location.directoryInsideJarFile();
+                if (jarFileInsideJarFile == null && directoryInsideJarFile == null) {
+                    loadClassNamesFromJarFile(jarFile, location, newClassNameLocations);
+                } else if (jarFileInsideJarFile != null) {
+                    loadClassNamesFromJarFileInsideJarFile(jarFile, jarFileInsideJarFile, location,
+                            newClassNameLocations);
+                } else {
+                    // directoryInsideJarFile is not null based on above conditionals
+                    checkNotNull(directoryInsideJarFile);
+                    loadClassNamesFromDirectoryInsideJarFile(jarFile, directoryInsideJarFile,
+                            location, newClassNameLocations);
+                }
+            } else {
+                throw new AssertionError("Both Location directory() and jarFile() are null");
+            }
+        } catch (IllegalArgumentException e) {
+            // File(URI) constructor can throw IllegalArgumentException
+            logger.debug(e.getMessage(), e);
+        } catch (IOException e) {
+            logger.debug("error reading classes from file: {}", location, e);
+        }
+    }
+
+    @GuardedBy("this")
+    private void loadClassNamesFromJarFile(File jarFile, Location location,
+            Multimap<String, Location> newClassNameLocations) throws IOException {
+        Closer closer = Closer.create();
+        try {
+            InputStream in = closer.register(new FileInputStream(jarFile));
+            JarInputStream jarIn = closer.register(new JarInputStream(in));
+            loadClassNamesFromManifestClassPath(jarIn, jarFile, newClassNameLocations);
+            loadClassNamesFromJarInputStream(jarIn, "", location, newClassNameLocations);
+        } catch (Throwable t) {
+            throw closer.rethrow(t);
+        } finally {
+            closer.close();
+        }
+    }
+
+    @GuardedBy("this")
+    private void loadClassNamesFromManifestClassPath(JarInputStream jarIn, File jarFile,
+            Multimap<String, Location> newClassNameLocations) {
+        Manifest manifest = jarIn.getManifest();
+        if (manifest == null) {
+            return;
+        }
+        String classpath = manifest.getMainAttributes().getValue("Class-Path");
+        if (classpath == null) {
+            return;
+        }
+        URI baseUri = jarFile.toURI();
+        for (String path : Splitter.on(' ').omitEmptyStrings().split(classpath)) {
+            File file = new File(baseUri.resolve(path));
+            Location location = getLocationFromFile(file);
+            if (location != null) {
+                loadClassNames(location, newClassNameLocations);
+            }
+        }
+    }
+
+    private static ImmutableList<String> combineClassNamesWithLimit(
+            Set<String> fullMatchingClassNames, Set<String> matchingClassNames, int limit) {
+        if (fullMatchingClassNames.size() < limit) {
+            int space = limit - fullMatchingClassNames.size();
+            int numToAdd = Math.min(space, matchingClassNames.size());
+            fullMatchingClassNames
+                    .addAll(ImmutableList.copyOf(Iterables.limit(matchingClassNames, numToAdd)));
+        }
+        return ImmutableList.copyOf(fullMatchingClassNames);
+    }
+
+    private static List<UiAnalyzedMethod> getAnalyzedMethods(Location location, String className)
             throws IOException {
         byte[] bytes = getBytes(location, className);
         return getAnalyzedMethods(bytes);
     }
 
-    private List<UiAnalyzedMethod> getAnalyzedMethods(byte[] bytes) throws IOException {
+    private static List<UiAnalyzedMethod> getAnalyzedMethods(byte[] bytes) {
         AnalyzingClassVisitor cv = new AnalyzingClassVisitor();
         ClassReader cr = new ClassReader(bytes);
         cr.accept(cv, 0);
         return cv.getAnalyzedMethods();
     }
 
-    private List<UiAnalyzedMethod> getAnalyzedMethods(Class<?> clazz) {
+    private static List<UiAnalyzedMethod> getAnalyzedMethods(Class<?> clazz) {
         List<UiAnalyzedMethod> analyzedMethods = Lists.newArrayList();
         for (Method method : clazz.getDeclaredMethods()) {
             if (method.isSynthetic() || Modifier.isNative(method.getModifiers())) {
                 // don't add synthetic or native methods to the analyzed model
+                continue;
+            }
+            if (method.getName().startsWith("glowroot$")) {
+                // don't add glowroot mixin methods (this naming is just by convention)
                 continue;
             }
             ImmutableUiAnalyzedMethod.Builder builder = ImmutableUiAnalyzedMethod.builder();
@@ -257,25 +365,7 @@ class ClasspathCache {
         return analyzedMethods;
     }
 
-    @GuardedBy("this")
-    private void updateCache(ClassLoader loader, Multimap<String, Location> newClassNameLocations) {
-        List<URL> urls = getURLs(loader);
-        List<Location> locations = Lists.newArrayList();
-        for (URL url : urls) {
-            Location location = tryToGetFileFromURL(url, loader);
-            if (location != null) {
-                locations.add(location);
-            }
-        }
-        for (Location location : locations) {
-            if (!classpathLocations.contains(location)) {
-                loadClassNames(location, newClassNameLocations);
-                classpathLocations.add(location);
-            }
-        }
-    }
-
-    private @Nullable Location tryToGetFileFromURL(URL url, ClassLoader loader) {
+    private static @Nullable Location tryToGetFileFromURL(URL url, ClassLoader loader) {
         if (url.getProtocol().equals("vfs")) {
             // special case for jboss/wildfly
             try {
@@ -302,7 +392,7 @@ class ClasspathCache {
         return null;
     }
 
-    private List<URL> getURLs(ClassLoader loader) {
+    private static List<URL> getURLs(ClassLoader loader) {
         if (loader instanceof URLClassLoader) {
             try {
                 return Lists.newArrayList(((URLClassLoader) loader).getURLs());
@@ -316,52 +406,15 @@ class ClasspathCache {
                 return ImmutableList.of();
             }
         }
-        // special case for jboss/wildfly
+        // special case for jboss/wildfly class loader
         try {
             return Collections.list(loader.getResources("/"));
-        } catch (IOException e) {
-            logger.warn(e.getMessage(), e);
-            return ImmutableList.of();
-        }
-    }
-
-    private List<ClassLoader> getKnownClassLoaders() {
-        List<ClassLoader> loaders = analyzedWorld.getClassLoaders();
-        if (loaders.isEmpty()) {
-            // this is needed for testing the UI outside of javaagent
-            ClassLoader systemClassLoader = ClassLoader.getSystemClassLoader();
-            if (systemClassLoader == null) {
-                return ImmutableList.of();
-            } else {
-                return ImmutableList.of(systemClassLoader);
-            }
-        }
-        return loaders;
-    }
-
-    private static void loadClassNames(Location location,
-            Multimap<String, Location> newClassNameLocations) {
-        try {
-            File dir = location.directory();
-            File jarFile = location.jarFile();
-            if (dir != null) {
-                loadClassNamesFromDirectory(dir, "", location, newClassNameLocations);
-            } else if (jarFile != null) {
-                String nestedJarFilePath = location.nestedJarFilePath();
-                if (nestedJarFilePath == null) {
-                    loadClassNamesFromJarFile(jarFile, location, newClassNameLocations);
-                } else {
-                    loadClassNamesFromNestedJarFile(jarFile, nestedJarFilePath, location,
-                            newClassNameLocations);
-                }
-            } else {
-                throw new AssertionError("Both Location directory() and jarFile() are null");
-            }
-        } catch (IllegalArgumentException e) {
-            // File(URI) constructor can throw IllegalArgumentException
+        } catch (Exception e) {
+            // some problematic class loaders (e.g. drools) can throw unchecked exception above
+            //
+            // log exception at debug level
             logger.debug(e.getMessage(), e);
-        } catch (IOException e) {
-            logger.debug("error reading classes from file: {}", location, e);
+            return ImmutableList.of();
         }
     }
 
@@ -383,36 +436,21 @@ class ClasspathCache {
         }
     }
 
-    private static void loadClassNamesFromJarFile(File jarFile, Location location,
+    private static void loadClassNamesFromJarFileInsideJarFile(File jarFile,
+            String jarFileInsideJarFile, Location location,
             Multimap<String, Location> newClassNameLocations) throws IOException {
-        Closer closer = Closer.create();
-        InputStream s = new FileInputStream(jarFile);
-        JarInputStream jarIn = closer.register(new JarInputStream(s));
-        try {
-            loadClassNamesFromManifestClassPath(jarIn, jarFile, newClassNameLocations);
-            loadClassNamesFromJarInputStream(jarIn, location, newClassNameLocations);
-        } catch (Throwable t) {
-            throw closer.rethrow(t);
-        } finally {
-            closer.close();
-        }
-    }
-
-    private static void loadClassNamesFromNestedJarFile(File jarFile, String nestedJarFilePath,
-            Location location, Multimap<String, Location> newClassNameLocations)
-            throws IOException {
         URI uri;
         try {
-            uri = new URI("jar", "file:" + jarFile.getPath() + "!/" + nestedJarFilePath, "");
+            uri = new URI("jar", "file:" + jarFile.getPath() + "!/" + jarFileInsideJarFile, "");
         } catch (URISyntaxException e) {
             // this is a programmatic error
             throw new RuntimeException(e);
         }
         Closer closer = Closer.create();
-        InputStream s = uri.toURL().openStream();
-        JarInputStream jarIn = closer.register(new JarInputStream(s));
         try {
-            loadClassNamesFromJarInputStream(jarIn, location, newClassNameLocations);
+            InputStream in = closer.register(uri.toURL().openStream());
+            JarInputStream jarIn = closer.register(new JarInputStream(in));
+            loadClassNamesFromJarInputStream(jarIn, "", location, newClassNameLocations);
         } catch (Throwable t) {
             throw closer.rethrow(t);
         } finally {
@@ -420,39 +458,36 @@ class ClasspathCache {
         }
     }
 
-    private static void loadClassNamesFromManifestClassPath(JarInputStream jarIn, File jarFile,
-            Multimap<String, Location> newClassNameLocations) {
-        Manifest manifest = jarIn.getManifest();
-        if (manifest == null) {
-            return;
-        }
-        String classpath = manifest.getMainAttributes().getValue("Class-Path");
-        if (classpath == null) {
-            return;
-        }
-        URI baseUri = jarFile.toURI();
-        for (String path : Splitter.on(' ').omitEmptyStrings().split(classpath)) {
-            File file = new File(baseUri.resolve(path));
-            Location location = getLocationFromFile(file);
-            if (location != null) {
-                loadClassNames(location, newClassNameLocations);
-            }
+    private static void loadClassNamesFromDirectoryInsideJarFile(File jarFile,
+            String directoryInsideJarFile, Location location,
+            Multimap<String, Location> newClassNameLocations) throws IOException {
+        Closer closer = Closer.create();
+        try {
+            InputStream in = closer.register(new FileInputStream(jarFile));
+            JarInputStream jarIn = closer.register(new JarInputStream(in));
+            loadClassNamesFromJarInputStream(jarIn, directoryInsideJarFile, location,
+                    newClassNameLocations);
+        } catch (Throwable t) {
+            throw closer.rethrow(t);
+        } finally {
+            closer.close();
         }
     }
 
-    private static void loadClassNamesFromJarInputStream(JarInputStream jarIn, Location location,
-            Multimap<String, Location> newClassNameLocations) throws IOException {
+    private static void loadClassNamesFromJarInputStream(JarInputStream jarIn, String directory,
+            Location location, Multimap<String, Location> newClassNameLocations)
+            throws IOException {
         JarEntry jarEntry;
         while ((jarEntry = jarIn.getNextJarEntry()) != null) {
             if (jarEntry.isDirectory()) {
                 continue;
             }
             String name = jarEntry.getName();
-            if (!name.endsWith(".class")) {
-                continue;
+            if (name.startsWith(directory) && name.endsWith(".class")) {
+                name = name.substring(directory.length());
+                String className = name.substring(0, name.lastIndexOf('.')).replace('/', '.');
+                newClassNameLocations.put(className, location);
             }
-            String className = name.substring(0, name.lastIndexOf('.')).replace('/', '.');
-            newClassNameLocations.put(className, location);
         }
     }
 
@@ -512,12 +547,12 @@ class ClasspathCache {
         private final List<UiAnalyzedMethod> analyzedMethods = Lists.newArrayList();
 
         private AnalyzingClassVisitor() {
-            super(ASM5);
+            super(ASM6);
         }
 
         @Override
         public @Nullable MethodVisitor visitMethod(int access, String name, String desc,
-                @Nullable String signature, String /*@Nullable*/[] exceptions) {
+                @Nullable String signature, String /*@Nullable*/ [] exceptions) {
             if ((access & ACC_SYNTHETIC) != 0 || (access & ACC_NATIVE) != 0) {
                 // don't add synthetic or native methods to the analyzed model
                 return null;
@@ -561,18 +596,27 @@ class ClasspathCache {
     private static Location getLocationFromJarFile(String f) {
         int index = f.indexOf("!/");
         File jarFile = new File(f.substring(5, index));
-        String nestedJarFilePath = f.substring(index + 2);
-        if (nestedJarFilePath.isEmpty()) {
+        String pathInsideJarFile = f.substring(index + 2);
+        if (pathInsideJarFile.isEmpty()) {
             // the jar file itself
             return ImmutableLocation.builder().jarFile(jarFile).build();
         }
         // strip off trailing !/
-        nestedJarFilePath =
-                nestedJarFilePath.substring(0, nestedJarFilePath.length() - 2);
-        return ImmutableLocation.builder()
-                .jarFile(jarFile)
-                .nestedJarFilePath(nestedJarFilePath)
-                .build();
+        pathInsideJarFile = pathInsideJarFile.substring(0, pathInsideJarFile.length() - 2);
+        if (pathInsideJarFile.endsWith(".jar")) {
+            return ImmutableLocation.builder()
+                    .jarFile(jarFile)
+                    .jarFileInsideJarFile(pathInsideJarFile)
+                    .build();
+        } else {
+            if (!pathInsideJarFile.endsWith("/")) {
+                pathInsideJarFile += "/";
+            }
+            return ImmutableLocation.builder()
+                    .jarFile(jarFile)
+                    .directoryInsideJarFile(pathInsideJarFile)
+                    .build();
+        }
     }
 
     private static byte[] getBytes(Location location, String className) throws IOException {
@@ -583,11 +627,16 @@ class ClasspathCache {
             URI uri = new File(dir, name).toURI();
             return Resources.toByteArray(uri.toURL());
         } else if (jarFile != null) {
-            String nestedJarFilePath = location.nestedJarFilePath();
-            if (nestedJarFilePath == null) {
+            String jarFileInsideJarFile = location.jarFileInsideJarFile();
+            String directoryInsideJarFile = location.directoryInsideJarFile();
+            if (jarFileInsideJarFile == null && directoryInsideJarFile == null) {
                 return getBytesFromJarFile(name, jarFile);
+            } else if (jarFileInsideJarFile != null) {
+                return getBytesFromJarFileInsideJarFile(name, jarFile, jarFileInsideJarFile);
             } else {
-                return getBytesFromNestedJarFile(name, jarFile, nestedJarFilePath);
+                // directoryInsideJarFile is not null based on above conditionals
+                checkNotNull(directoryInsideJarFile);
+                return getBytesFromDirectoryInsideJarFile(name, jarFile, directoryInsideJarFile);
             }
         } else {
             throw new AssertionError("Both Location directory() and jarFile() are null");
@@ -606,20 +655,20 @@ class ClasspathCache {
         return Resources.toByteArray(uri.toURL());
     }
 
-    private static byte[] getBytesFromNestedJarFile(String name, File jarFile,
-            String nestedJarFilePath) throws IOException {
+    private static byte[] getBytesFromJarFileInsideJarFile(String name, File jarFile,
+            String jarFileInsideJarFile) throws IOException {
         String path = jarFile.getPath();
         URI uri;
         try {
-            uri = new URI("jar", "file:" + path + "!/" + nestedJarFilePath, "");
+            uri = new URI("jar", "file:" + path + "!/" + jarFileInsideJarFile, "");
         } catch (URISyntaxException e) {
             // this is a programmatic error
             throw new RuntimeException(e);
         }
         Closer closer = Closer.create();
-        InputStream s = uri.toURL().openStream();
-        JarInputStream jarIn = closer.register(new JarInputStream(s));
         try {
+            InputStream in = closer.register(uri.toURL().openStream());
+            JarInputStream jarIn = closer.register(new JarInputStream(in));
             JarEntry jarEntry;
             while ((jarEntry = jarIn.getNextJarEntry()) != null) {
                 if (jarEntry.isDirectory()) {
@@ -637,6 +686,19 @@ class ClasspathCache {
         throw new UnsupportedOperationException();
     }
 
+    private static byte[] getBytesFromDirectoryInsideJarFile(String name, File jarFile,
+            String directoryInsideJarFile) throws IOException {
+        String path = jarFile.getPath();
+        URI uri;
+        try {
+            uri = new URI("jar", "file:" + path + "!/" + directoryInsideJarFile + name, "");
+        } catch (URISyntaxException e) {
+            // this is a programmatic error
+            throw new RuntimeException(e);
+        }
+        return Resources.toByteArray(uri.toURL());
+    }
+
     @Value.Immutable
     interface Location {
         @Nullable
@@ -644,6 +706,8 @@ class ClasspathCache {
         @Nullable
         File jarFile();
         @Nullable
-        String nestedJarFilePath();
+        String jarFileInsideJarFile();
+        @Nullable
+        String directoryInsideJarFile();
     }
 }

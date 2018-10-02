@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,19 +15,21 @@
  */
 package org.glowroot.agent.plugin.cassandra;
 
-import javax.annotation.Nullable;
-
 import org.glowroot.agent.plugin.api.QueryEntry;
+import org.glowroot.agent.plugin.api.Timer;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.weaving.BindReceiver;
 import org.glowroot.agent.plugin.api.weaving.BindReturn;
+import org.glowroot.agent.plugin.api.weaving.BindTraveler;
 import org.glowroot.agent.plugin.api.weaving.Mixin;
+import org.glowroot.agent.plugin.api.weaving.OnAfter;
+import org.glowroot.agent.plugin.api.weaving.OnBefore;
 import org.glowroot.agent.plugin.api.weaving.OnReturn;
 import org.glowroot.agent.plugin.api.weaving.Pointcut;
 
 public class ResultSetAspect {
 
-    // the field and method names are verbose to avoid conflict since they will become fields
-    // and methods in all classes that extend com.datastax.driver.core.ResultSet
+    // the field and method names are verbose since they will be mixed in to existing classes
     @Mixin("com.datastax.driver.core.ResultSet")
     public static class ResultSetImpl implements ResultSet {
 
@@ -36,82 +38,103 @@ public class ResultSetAspect {
         // needs to be volatile, since ResultSets are thread safe, and therefore app/framework does
         // *not* need to provide visibility when used across threads and so this cannot piggyback
         // (unlike with jdbc ResultSets)
-        private volatile @Nullable QueryEntry glowroot$lastQueryEntry;
+        private transient volatile @Nullable QueryEntry glowroot$queryEntry;
 
         @Override
-        public @Nullable QueryEntry glowroot$getLastQueryEntry() {
-            return glowroot$lastQueryEntry;
+        public @Nullable QueryEntry glowroot$getQueryEntry() {
+            return glowroot$queryEntry;
         }
 
         @Override
-        public void glowroot$setLastQueryEntry(@Nullable QueryEntry lastQueryEntry) {
-            this.glowroot$lastQueryEntry = lastQueryEntry;
-        }
-
-        @Override
-        public boolean glowroot$hasLastQueryEntry() {
-            return glowroot$lastQueryEntry != null;
+        public void glowroot$setQueryEntry(@Nullable QueryEntry queryEntry) {
+            glowroot$queryEntry = queryEntry;
         }
     }
 
-    // the method names are verbose to avoid conflict since they will become methods in all classes
-    // that extend com.datastax.driver.core.ResultSet
+    // the method names are verbose since they will be mixed in to existing classes
     public interface ResultSet {
 
         @Nullable
-        QueryEntry glowroot$getLastQueryEntry();
+        QueryEntry glowroot$getQueryEntry();
 
-        void glowroot$setLastQueryEntry(@Nullable QueryEntry lastQueryEntry);
-
-        boolean glowroot$hasLastQueryEntry();
+        void glowroot$setQueryEntry(@Nullable QueryEntry queryEntry);
     }
 
     @Pointcut(className = "com.datastax.driver.core.ResultSet", methodName = "one",
             methodParameterTypes = {})
     public static class OneAdvice {
+
+        @OnBefore
+        public static @Nullable Timer onBefore(@BindReceiver ResultSet resultSet) {
+            QueryEntry queryEntry = resultSet.glowroot$getQueryEntry();
+            return queryEntry == null ? null : queryEntry.extend();
+        }
+
         @OnReturn
         public static void onReturn(@BindReturn @Nullable Object row,
                 @BindReceiver ResultSet resultSet) {
-            QueryEntry lastQueryEntry = resultSet.glowroot$getLastQueryEntry();
-            if (lastQueryEntry == null) {
+            QueryEntry queryEntry = resultSet.glowroot$getQueryEntry();
+            if (queryEntry == null) {
                 return;
             }
             if (row != null) {
-                lastQueryEntry.incrementCurrRow();
+                queryEntry.incrementCurrRow();
             } else {
-                lastQueryEntry.rowNavigationAttempted();
+                queryEntry.rowNavigationAttempted();
+            }
+        }
+
+        @OnAfter
+        public static void onAfter(@BindTraveler @Nullable Timer timer) {
+            if (timer != null) {
+                timer.stop();
             }
         }
     }
 
-    @Pointcut(className = "com.datastax.driver.core.ResultSet",
-            methodDeclaringClassName = "java.lang.Iterable", methodName = "iterator",
-            methodParameterTypes = {})
+    @Pointcut(className = "java.lang.Iterable",
+            subTypeRestriction = "com.datastax.driver.core.ResultSet",
+            methodName = "iterator", methodParameterTypes = {})
     public static class IteratorAdvice {
+
         @OnReturn
         public static void onReturn(@BindReceiver ResultSet resultSet) {
-            QueryEntry lastQueryEntry = resultSet.glowroot$getLastQueryEntry();
-            if (lastQueryEntry == null) {
+            QueryEntry queryEntry = resultSet.glowroot$getQueryEntry();
+            if (queryEntry == null) {
                 // tracing must be disabled (e.g. exceeded trace entry limit)
                 return;
             }
-            lastQueryEntry.rowNavigationAttempted();
+            queryEntry.rowNavigationAttempted();
         }
     }
 
-    @Pointcut(className = "com.datastax.driver.core.ResultSet",
-            methodDeclaringClassName = "com.datastax.driver.core.PagingIterable"
-                    + "|com.datastax.driver.core.ResultSet",
+    @Pointcut(className = "com.datastax.driver.core.PagingIterable"
+            + "|com.datastax.driver.core.ResultSet",
+            subTypeRestriction = "com.datastax.driver.core.ResultSet",
             methodName = "isExhausted", methodParameterTypes = {})
     public static class IsExhaustedAdvice {
+
+        @OnBefore
+        public static @Nullable Timer onBefore(@BindReceiver ResultSet resultSet) {
+            QueryEntry queryEntry = resultSet.glowroot$getQueryEntry();
+            return queryEntry == null ? null : queryEntry.extend();
+        }
+
         @OnReturn
         public static void onReturn(@BindReceiver ResultSet resultSet) {
-            QueryEntry lastQueryEntry = resultSet.glowroot$getLastQueryEntry();
-            if (lastQueryEntry == null) {
+            QueryEntry queryEntry = resultSet.glowroot$getQueryEntry();
+            if (queryEntry == null) {
                 // tracing must be disabled (e.g. exceeded trace entry limit)
                 return;
             }
-            lastQueryEntry.rowNavigationAttempted();
+            queryEntry.rowNavigationAttempted();
+        }
+
+        @OnAfter
+        public static void onAfter(@BindTraveler @Nullable Timer timer) {
+            if (timer != null) {
+                timer.stop();
+            }
         }
     }
 }

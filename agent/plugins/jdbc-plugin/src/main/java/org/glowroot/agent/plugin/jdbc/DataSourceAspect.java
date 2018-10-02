@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,6 @@
  */
 package org.glowroot.agent.plugin.jdbc;
 
-import java.sql.Connection;
-import java.sql.SQLException;
-
-import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
-
 import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.Logger;
 import org.glowroot.agent.plugin.api.Message;
@@ -28,6 +23,8 @@ import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.Timer;
 import org.glowroot.agent.plugin.api.TimerName;
 import org.glowroot.agent.plugin.api.TraceEntry;
+import org.glowroot.agent.plugin.api.checker.MonotonicNonNull;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.config.BooleanProperty;
 import org.glowroot.agent.plugin.api.config.ConfigService;
 import org.glowroot.agent.plugin.api.weaving.BindReturn;
@@ -38,6 +35,7 @@ import org.glowroot.agent.plugin.api.weaving.OnBefore;
 import org.glowroot.agent.plugin.api.weaving.OnReturn;
 import org.glowroot.agent.plugin.api.weaving.OnThrow;
 import org.glowroot.agent.plugin.api.weaving.Pointcut;
+import org.glowroot.agent.plugin.api.weaving.Shim;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -45,7 +43,7 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 // slow while expanding
 public class DataSourceAspect {
 
-    private static final Logger logger = Agent.getLogger(DataSourceAspect.class);
+    private static final Logger logger = Logger.getLogger(DataSourceAspect.class);
     private static final ConfigService configService = Agent.getConfigService("jdbc");
 
     private static final BooleanProperty captureGetConnection =
@@ -54,6 +52,11 @@ public class DataSourceAspect {
             configService.getBooleanProperty("captureConnectionLifecycleTraceEntries");
     private static final BooleanProperty captureTransactionLifecycleTraceEntries =
             configService.getBooleanProperty("captureTransactionLifecycleTraceEntries");
+
+    @Shim("java.sql.Connection")
+    public interface Connection {
+        boolean getAutoCommit();
+    }
 
     @Pointcut(className = "javax.sql.DataSource", methodName = "getConnection",
             methodParameterTypes = {".."}, nestingGroup = "jdbc", timerName = "jdbc get connection")
@@ -72,10 +75,10 @@ public class DataSourceAspect {
             }
         }
         @OnReturn
-        public static void onReturn(@BindReturn Connection connection,
+        public static void onReturn(@BindReturn @Nullable Connection connection,
                 @BindTraveler Object entryOrTimer) {
             if (entryOrTimer instanceof TraceEntry) {
-                onReturnTraceEntry(connection, entryOrTimer);
+                onReturnTraceEntry(connection, (TraceEntry) entryOrTimer);
             } else {
                 ((Timer) entryOrTimer).stop();
             }
@@ -89,9 +92,9 @@ public class DataSourceAspect {
             }
         }
         // split out to separate method so it doesn't affect inlining budget of common case
-        private static void onReturnTraceEntry(Connection connection, Object entryOrTimer) {
-            TraceEntry traceEntry = (TraceEntry) entryOrTimer;
-            if (captureTransactionLifecycleTraceEntries.value()) {
+        private static void onReturnTraceEntry(@Nullable Connection connection,
+                TraceEntry traceEntry) {
+            if (captureTransactionLifecycleTraceEntries.value() && connection != null) {
                 GetConnectionMessageSupplier messageSupplier =
                         (GetConnectionMessageSupplier) traceEntry.getMessageSupplier();
                 if (messageSupplier != null) {
@@ -99,7 +102,7 @@ public class DataSourceAspect {
                     String autoCommit;
                     try {
                         autoCommit = Boolean.toString(connection.getAutoCommit());
-                    } catch (SQLException e) {
+                    } catch (Exception e) {
                         logger.warn(e.getMessage(), e);
                         // using toString() instead of getMessage() in order to capture exception
                         // class name
@@ -108,7 +111,7 @@ public class DataSourceAspect {
                     messageSupplier.setAutoCommit(autoCommit);
                 }
             }
-            traceEntry.endWithStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
+            traceEntry.endWithLocationStackTrace(JdbcPluginProperties.stackTraceThresholdMillis(),
                     MILLISECONDS);
         }
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,94 +15,93 @@
  */
 package org.glowroot.central.repo;
 
+import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.Future;
 
 import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.ResultSet;
-import com.datastax.driver.core.ResultSetFuture;
 import com.datastax.driver.core.Row;
-import com.datastax.driver.core.Session;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
-import com.google.common.primitives.Ints;
 import org.immutables.value.Value;
 
 import org.glowroot.central.util.RateLimiter;
-import org.glowroot.central.util.Sessions;
-import org.glowroot.common.repo.ConfigRepository;
+import org.glowroot.central.util.Session;
+import org.glowroot.common.util.CaptureTimes;
+import org.glowroot.common.util.Clock;
 import org.glowroot.common.util.Styles;
 
 import static com.google.common.base.Preconditions.checkNotNull;
-import static java.util.concurrent.TimeUnit.HOURS;
+import static java.util.concurrent.TimeUnit.DAYS;
 
 class GaugeNameDao {
 
-    private static final String WITH_LCS =
-            "with compaction = { 'class' : 'LeveledCompactionStrategy' }";
-
     private final Session session;
-    private final ConfigRepository configRepository;
+    private final ConfigRepositoryImpl configRepository;
+    private final Clock clock;
 
     private final PreparedStatement insertPS;
     private final PreparedStatement readPS;
 
-    private final RateLimiter<GaugeNameKey> rateLimiter = new RateLimiter<>();
+    private final RateLimiter<GaugeKey> rateLimiter = new RateLimiter<>();
 
-    GaugeNameDao(Session session, ConfigRepository configRepository) {
+    GaugeNameDao(Session session, ConfigRepositoryImpl configRepository, Clock clock)
+            throws Exception {
         this.session = session;
         this.configRepository = configRepository;
+        this.clock = clock;
 
-        session.execute("create table if not exists gauge_name (agent_rollup varchar,"
-                + " gauge_name varchar, primary key (agent_rollup, gauge_name)) " + WITH_LCS);
+        int maxRollupHours = configRepository.getCentralStorageConfig().getMaxRollupHours();
+        session.createTableWithTWCS("create table if not exists gauge_name (agent_rollup_id"
+                + " varchar, capture_time timestamp, gauge_name varchar, primary key"
+                + " (agent_rollup_id, capture_time, gauge_name))", maxRollupHours);
 
-        insertPS = session.prepare("insert into gauge_name (agent_rollup, gauge_name)"
-                + " values (?, ?) using ttl ?");
-        readPS = session.prepare("select gauge_name from gauge_name where agent_rollup = ?");
+        insertPS = session.prepare("insert into gauge_name (agent_rollup_id, capture_time,"
+                + " gauge_name) values (?, ?, ?) using ttl ?");
+        readPS = session.prepare("select gauge_name from gauge_name where agent_rollup_id = ? and"
+                + " capture_time >= ? and capture_time <= ?");
     }
 
-    List<String> getGaugeNames(String agentRollupId) {
+    Set<String> getGaugeNames(String agentRollupId, long from, long to) throws Exception {
+        long rolledUpFrom = CaptureTimes.getRollup(from, DAYS.toMillis(1));
+        long rolledUpTo = CaptureTimes.getRollup(to, DAYS.toMillis(1));
         BoundStatement boundStatement = readPS.bind();
         boundStatement.setString(0, agentRollupId);
+        boundStatement.setTimestamp(1, new Date(rolledUpFrom));
+        boundStatement.setTimestamp(2, new Date(rolledUpTo));
         ResultSet results = session.execute(boundStatement);
-        List<String> gaugeNames = Lists.newArrayList();
+        Set<String> gaugeNames = new HashSet<>();
         for (Row row : results) {
             gaugeNames.add(checkNotNull(row.getString(0)));
         }
         return gaugeNames;
     }
 
-    List<ResultSetFuture> store(String agentRollupId, String gaugeName) {
-        GaugeNameKey rateLimiterKey = ImmutableGaugeNameKey.of(agentRollupId, gaugeName);
+    List<Future<?>> insert(String agentRollupId, long captureTime, String gaugeName)
+            throws Exception {
+        long rollupCaptureTime = CaptureTimes.getRollup(captureTime, DAYS.toMillis(1));
+        GaugeKey rateLimiterKey = ImmutableGaugeKey.of(agentRollupId, rollupCaptureTime, gaugeName);
         if (!rateLimiter.tryAcquire(rateLimiterKey)) {
             return ImmutableList.of();
         }
         BoundStatement boundStatement = insertPS.bind();
         int i = 0;
         boundStatement.setString(i++, agentRollupId);
+        boundStatement.setTimestamp(i++, new Date(rollupCaptureTime));
         boundStatement.setString(i++, gaugeName);
-        boundStatement.setInt(i++, getMaxTTL());
-        return ImmutableList.of(Sessions.executeAsyncWithOnFailure(session, boundStatement,
-                () -> rateLimiter.invalidate(rateLimiterKey)));
-    }
-
-    private int getMaxTTL() {
-        long maxTTL = 0;
-        for (long expirationHours : configRepository.getStorageConfig().rollupExpirationHours()) {
-            if (expirationHours == 0) {
-                // zero value expiration/TTL means never expire
-                return 0;
-            }
-            maxTTL = Math.max(maxTTL, HOURS.toSeconds(expirationHours));
-        }
-        // intentionally not accounting for rateLimiter
-        return Ints.saturatedCast(maxTTL);
+        int maxRollupTTL = configRepository.getCentralStorageConfig().getMaxRollupTTL();
+        boundStatement.setInt(i++, Common.getAdjustedTTL(maxRollupTTL, rollupCaptureTime, clock));
+        return ImmutableList.of(session.executeAsync(boundStatement));
     }
 
     @Value.Immutable
     @Styles.AllParameters
-    interface GaugeNameKey {
+    interface GaugeKey {
         String agentRollupId();
+        long captureTime();
         String gaugeName();
     }
 }

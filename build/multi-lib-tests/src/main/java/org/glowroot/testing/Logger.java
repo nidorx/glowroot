@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ public class Logger {
         logback();
         log4j();
         log4j2x();
+        jbossLogging();
     }
 
     private static void logback() throws Exception {
@@ -119,6 +120,21 @@ public class Logger {
             updateLibVersion("logback.version", "1.1." + i);
             run(test);
         }
+        for (int i = 9; i <= 10; i++) {
+            updateLibVersion("slf4j.version", "1.7.22");
+            updateLibVersion("logback.version", "1.1." + i);
+            run(test);
+        }
+        for (int i = 0; i <= 1; i++) {
+            updateLibVersion("slf4j.version", "1.7.22");
+            updateLibVersion("logback.version", "1.2." + i);
+            run(test);
+        }
+        for (int i = 2; i <= 3; i++) {
+            updateLibVersion("slf4j.version", "1.7.25");
+            updateLibVersion("logback.version", "1.2.2");
+            run(test);
+        }
     }
 
     private static void log4j() throws Exception {
@@ -160,6 +176,50 @@ public class Logger {
         runJava7(test);
         updateLibVersion("log4j2x.version", "2.7");
         runJava7(test);
+        updateLibVersion("log4j2x.version", "2.8");
+        runJava7(test);
+        updateLibVersion("log4j2x.version", "2.8.1");
+        runJava7(test);
+        updateLibVersion("log4j2x.version", "2.8.2");
+        runJava7(test);
+        updateLibVersion("log4j2x.version", "2.9.0");
+        runJava7(test);
+        updateLibVersion("log4j2x.version", "2.9.1");
+        runJava7(test);
+        updateLibVersion("log4j2x.version", "2.10.0");
+        runJava7(test);
+        updateLibVersion("log4j2x.version", "2.11.0");
+        runJava7(test);
+        updateLibVersion("log4j2x.version", "2.11.1");
+        runJava7(test);
+    }
+
+    private static void jbossLogging() throws Exception {
+        final String test = "JavaLoggingIT";
+        for (int i = 0; i <= 2; i++) {
+            updateLibVersion("jboss.logging.version", "1.2." + i + ".GA");
+            runJBossLogging(test);
+        }
+        for (int i = 0; i <= 2; i++) {
+            updateLibVersion("jboss.logging.version", "1.3." + i + ".Final");
+            runJBossLogging(test);
+        }
+        for (int i = 0; i <= 3; i++) {
+            updateLibVersion("jboss.logging.version", "1.4." + i + ".Final");
+            runJBossLogging(test);
+        }
+        for (int i = 0; i <= 9; i++) {
+            updateLibVersion("jboss.logging.version", "1.5." + i + ".Final");
+            runJBossLoggingJava7(test);
+        }
+        for (int i = 0; i <= 10; i++) {
+            updateLibVersion("jboss.logging.version", "2.0." + i + ".Final");
+            runJBossLoggingJava7(test);
+        }
+        for (int i = 0; i <= 4; i++) {
+            updateLibVersion("jboss.logging.version", "2.1." + i + ".Final");
+            runJBossLoggingJava8(test);
+        }
     }
 
     private static void updateLibVersion(String property, String version) throws IOException {
@@ -176,5 +236,17 @@ public class Logger {
 
     private static void runJava7(String test) throws Exception {
         Util.runTest(MODULE_PATH, test, JAVA7, JAVA8);
+    }
+
+    private static void runJBossLogging(String test) throws Exception {
+        Util.runTest(MODULE_PATH, test, "jboss-logging", JAVA6, JAVA7, JAVA8);
+    }
+
+    private static void runJBossLoggingJava7(String test) throws Exception {
+        Util.runTest(MODULE_PATH, test, "jboss-logging", JAVA7, JAVA8);
+    }
+
+    private static void runJBossLoggingJava8(String test) throws Exception {
+        Util.runTest(MODULE_PATH, test, "jboss-logging", JAVA8);
     }
 }

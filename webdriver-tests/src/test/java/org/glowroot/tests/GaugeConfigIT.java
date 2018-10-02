@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ import org.glowroot.tests.config.ConfigSidebar;
 import org.glowroot.tests.config.GaugeConfigPage;
 import org.glowroot.tests.util.Utils;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.openqa.selenium.By.linkText;
 import static org.openqa.selenium.By.xpath;
 
 public class GaugeConfigIT extends WebDriverIT {
@@ -36,12 +36,12 @@ public class GaugeConfigIT extends WebDriverIT {
         ConfigSidebar configSidebar = new ConfigSidebar(driver);
 
         app.open();
-        globalNavbar.getConfigLink().click();
-        configSidebar.getGaugesLink().click();
+        globalNavbar.clickConfigLink();
+        configSidebar.clickGaugesLink();
 
         // when
-        Utils.withWait(driver, linkText("java.lang / Memory")).click();
-        Utils.withWait(driver, linkText("Return to list")).click();
+        clickLinkWithWait("java.lang / Memory");
+        clickLink("Return to list");
     }
 
     @Test
@@ -53,21 +53,19 @@ public class GaugeConfigIT extends WebDriverIT {
         GaugeConfigPage gaugePage = new GaugeConfigPage(driver);
 
         app.open();
-        globalNavbar.getConfigLink().click();
-        configSidebar.getGaugesLink().click();
+        globalNavbar.clickConfigLink();
+        configSidebar.clickGaugesLink();
 
         // when
         createGauge();
 
         // then
-        Utils.withWait(driver, linkText("java.lang / ClassLoading")).click();
+        clickLinkWithWait("java.lang / ClassLoading");
         assertThat(gaugePage.getMBeanObjectNameTextField().getAttribute("value"))
                 .isEqualTo("java.lang:type=ClassLoading");
-        assertThat(gaugePage.getMBeanAttributeCheckBox("LoadedClassCount").isSelected()).isTrue();
-        assertThat(gaugePage.getMBeanAttributeCheckBox("TotalLoadedClassCount").isSelected())
-                .isTrue();
-        assertThat(gaugePage.getMBeanAttributeCheckBox("UnloadedClassCount").isSelected())
-                .isFalse();
+        assertThat(gaugePage.getMBeanAttributeCheckBoxValue("LoadedClassCount")).isTrue();
+        assertThat(gaugePage.getMBeanAttributeCheckBoxValue("TotalLoadedClassCount")).isTrue();
+        assertThat(gaugePage.getMBeanAttributeCheckBoxValue("UnloadedClassCount")).isFalse();
     }
 
     @Test
@@ -79,27 +77,25 @@ public class GaugeConfigIT extends WebDriverIT {
         GaugeConfigPage gaugePage = new GaugeConfigPage(driver);
 
         app.open();
-        globalNavbar.getConfigLink().click();
-        configSidebar.getGaugesLink().click();
+        globalNavbar.clickConfigLink();
+        configSidebar.clickGaugesLink();
 
         // when
         createGauge();
-        Utils.withWait(driver, linkText("java.lang / ClassLoading")).click();
-        gaugePage.getMBeanAttributeCheckBox("LoadedClassCount").click();
+        clickLinkWithWait("java.lang / ClassLoading");
+        gaugePage.clickMBeanAttributeCheckBox("LoadedClassCount");
         gaugePage.clickSaveButton();
         // wait for save to finish
-        Thread.sleep(1000);
-        driver.findElement(linkText("Return to list")).click();
+        SECONDS.sleep(1);
+        clickLink("Return to list");
 
         // then
-        Utils.withWait(driver, linkText("java.lang / ClassLoading")).click();
+        clickLinkWithWait("java.lang / ClassLoading");
         assertThat(gaugePage.getMBeanObjectNameTextField().getAttribute("value"))
                 .isEqualTo("java.lang:type=ClassLoading");
-        assertThat(gaugePage.getMBeanAttributeCheckBox("LoadedClassCount").isSelected()).isFalse();
-        assertThat(gaugePage.getMBeanAttributeCheckBox("TotalLoadedClassCount").isSelected())
-                .isTrue();
-        assertThat(gaugePage.getMBeanAttributeCheckBox("UnloadedClassCount").isSelected())
-                .isFalse();
+        assertThat(gaugePage.getMBeanAttributeCheckBoxValue("LoadedClassCount")).isFalse();
+        assertThat(gaugePage.getMBeanAttributeCheckBoxValue("TotalLoadedClassCount")).isTrue();
+        assertThat(gaugePage.getMBeanAttributeCheckBoxValue("UnloadedClassCount")).isFalse();
     }
 
     @Test
@@ -111,19 +107,19 @@ public class GaugeConfigIT extends WebDriverIT {
         GaugeConfigPage gaugePage = new GaugeConfigPage(driver);
 
         app.open();
-        globalNavbar.getConfigLink().click();
-        configSidebar.getGaugesLink().click();
+        globalNavbar.clickConfigLink();
+        configSidebar.clickGaugesLink();
 
         // when
         createGauge();
-        Utils.withWait(driver, linkText("java.lang / ClassLoading")).click();
-        gaugePage.getDeleteButton().click();
+        clickLinkWithWait("java.lang / ClassLoading");
+        gaugePage.clickDeleteButton();
 
         // then
-        Utils.withWait(driver, linkText("java.lang / Memory"));
+        clickLinkWithWait("java.lang / Memory");
         boolean notFound = false;
         try {
-            driver.findElement(linkText("java.lang / ClassLoading"));
+            driver.findElement(Utils.linkText("java.lang / ClassLoading"));
         } catch (NoSuchElementException e) {
             notFound = true;
         }
@@ -139,8 +135,8 @@ public class GaugeConfigIT extends WebDriverIT {
         GaugeConfigPage gaugePage = new GaugeConfigPage(driver);
 
         app.open();
-        globalNavbar.getConfigLink().click();
-        configSidebar.getGaugesLink().click();
+        globalNavbar.clickConfigLink();
+        configSidebar.clickGaugesLink();
 
         createGauge();
 
@@ -156,21 +152,19 @@ public class GaugeConfigIT extends WebDriverIT {
         GaugeConfigPage gaugePage = new GaugeConfigPage(driver);
         gaugePage.getMBeanObjectNameTextField().sendKeys("ClassLoading");
         gaugePage.clickMBeanObjectNameAutoCompleteItem("java.lang:type=ClassLoading");
-        gaugePage.getMBeanAttributeCheckBox("LoadedClassCount").click();
-        gaugePage.getMBeanAttributeCheckBox("TotalLoadedClassCount").click();
-        gaugePage.getAddButton().click();
-        // getDeleteButton() waits for the save/redirect
-        // (the delete button does not appear until after the save/redirect)
-        gaugePage.getDeleteButton();
-        driver.findElement(linkText("Return to list")).click();
+        gaugePage.clickMBeanAttributeCheckBox("LoadedClassCount");
+        gaugePage.clickMBeanAttributeCheckBox("TotalLoadedClassCount");
+        gaugePage.clickAddButton();
+        // the delete button does not appear until after the save/redirect
+        gaugePage.waitForDeleteButton();
+        clickLink("Return to list");
     }
 
     private void clickNewGauge() {
         if (WebDriverSetup.useCentral) {
-            Utils.withWait(driver, xpath("//a[@href='config/gauge?agent-id=" + agentId + "&new']"))
-                    .click();
+            clickWithWait(xpath("//a[@href='config/gauge?agent-id=" + agentId + "&new']"));
         } else {
-            Utils.withWait(driver, xpath("//a[@href='config/gauge?new']")).click();
+            clickWithWait(xpath("//a[@href='config/gauge?new']"));
         }
     }
 }

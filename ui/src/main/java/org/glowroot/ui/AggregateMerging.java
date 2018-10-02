@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,49 +17,51 @@ package org.glowroot.ui;
 
 import java.util.List;
 
-import javax.annotation.Nullable;
-
 import com.google.common.collect.Lists;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 
 import org.glowroot.common.live.LiveAggregateRepository.OverviewAggregate;
-import org.glowroot.common.repo.MutableThreadStats;
-import org.glowroot.common.repo.MutableTimer;
 import org.glowroot.common.util.Styles;
+import org.glowroot.common2.repo.MutableThreadStats;
+import org.glowroot.common2.repo.MutableTimer;
 import org.glowroot.wire.api.model.AggregateOuterClass.Aggregate;
+
+import static com.google.common.base.Preconditions.checkNotNull;
 
 class AggregateMerging {
 
     private AggregateMerging() {}
 
-    static MergedAggregate getMergedAggregate(List<OverviewAggregate> overviewAggregates)
-            throws Exception {
+    static MergedAggregate getMergedAggregate(List<OverviewAggregate> overviewAggregates) {
         long transactionCount = 0;
         List<MutableTimer> mainThreadRootTimers = Lists.newArrayList();
-        List<MutableTimer> auxThreadRootTimers = Lists.newArrayList();
-        List<MutableTimer> asyncTimers = Lists.newArrayList();
         MutableThreadStats mainThreadStats = new MutableThreadStats();
+        MutableTimer auxThreadRootTimer = MutableTimer.createAuxThreadRootTimer();
         MutableThreadStats auxThreadStats = new MutableThreadStats();
+        List<MutableTimer> asyncTimers = Lists.newArrayList();
         for (OverviewAggregate aggregate : overviewAggregates) {
             transactionCount += aggregate.transactionCount();
             mergeRootTimers(aggregate.mainThreadRootTimers(), mainThreadRootTimers);
-            mergeRootTimers(aggregate.auxThreadRootTimers(), auxThreadRootTimers);
-            mergeRootTimers(aggregate.asyncTimers(), asyncTimers);
             mainThreadStats.addThreadStats(aggregate.mainThreadStats());
-            auxThreadStats.addThreadStats(aggregate.auxThreadStats());
+            Aggregate.Timer toBeMergedAuxThreadRootTimer = aggregate.auxThreadRootTimer();
+            if (toBeMergedAuxThreadRootTimer != null) {
+                auxThreadRootTimer.merge(toBeMergedAuxThreadRootTimer);
+                // aux thread stats is non-null when aux thread root timer is non-null
+                auxThreadStats.addThreadStats(checkNotNull(aggregate.auxThreadStats()));
+            }
+            mergeRootTimers(aggregate.asyncTimers(), asyncTimers);
         }
-        ImmutableMergedAggregate.Builder mergedAggregate = ImmutableMergedAggregate.builder();
-        mergedAggregate.transactionCount(transactionCount);
-        mergedAggregate.mainThreadRootTimers(mainThreadRootTimers);
-        mergedAggregate.auxThreadRootTimers(auxThreadRootTimers);
-        mergedAggregate.asyncTimers(asyncTimers);
-        if (!mainThreadStats.isNA()) {
-            mergedAggregate.mainThreadStats(mainThreadStats);
+        ImmutableMergedAggregate.Builder builder = ImmutableMergedAggregate.builder()
+                .transactionCount(transactionCount)
+                .mainThreadRootTimers(mainThreadRootTimers)
+                .mainThreadStats(mainThreadStats);
+        if (auxThreadRootTimer.getCount() != 0) {
+            builder.auxThreadRootTimers(auxThreadRootTimer)
+                    .auxThreadStats(auxThreadStats);
         }
-        if (!auxThreadStats.isNA()) {
-            mergedAggregate.auxThreadStats(auxThreadStats);
-        }
-        return mergedAggregate.build();
+        return builder.asyncTimers(asyncTimers)
+                .build();
     }
 
     private static void mergeRootTimers(List<Aggregate.Timer> toBeMergedRootTimers,
@@ -87,12 +89,12 @@ class AggregateMerging {
     interface MergedAggregate {
         long transactionCount();
         List<MutableTimer> mainThreadRootTimers();
-        List<MutableTimer> auxThreadRootTimers();
-        List<MutableTimer> asyncTimers();
-        @Nullable
         MutableThreadStats mainThreadStats();
         @Nullable
+        MutableTimer auxThreadRootTimers();
+        @Nullable
         MutableThreadStats auxThreadStats();
+        List<MutableTimer> asyncTimers();
     }
 
     @Value.Immutable

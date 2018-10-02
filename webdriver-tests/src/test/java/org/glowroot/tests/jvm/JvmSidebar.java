@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2016 the original author or authors.
+ * Copyright 2014-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import org.openqa.selenium.WebElement;
 import org.glowroot.tests.util.Utils;
 
 import static org.openqa.selenium.By.cssSelector;
-import static org.openqa.selenium.By.linkText;
 
 public class JvmSidebar {
 
@@ -31,31 +30,36 @@ public class JvmSidebar {
         this.driver = driver;
     }
 
-    public WebElement getGaugesLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Gauges"));
+    public void clickGaugesLink() {
+        clickWithWait("Gauges");
     }
 
-    public WebElement getMBeanTreeLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("MBean tree"));
+    public void clickMBeanTreeLink() {
+        clickWithWait("MBean tree");
     }
 
-    public WebElement getThreadDumpLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Thread dump"));
+    public void clickThreadDumpLink() {
+        clickWithWait("Thread dump");
     }
 
-    public WebElement getHeapDumpLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Heap dump"));
+    public void clickHeapDumpLink() {
+        clickWithWait("Heap dump");
     }
 
-    public WebElement getHeapHistogramLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Heap histogram"));
+    public void clickHeapHistogramLink() {
+        clickWithWait("Heap histogram");
     }
 
-    public WebElement getEnvironmentLink() {
-        return Utils.withWait(driver, getSidebar(), linkText("Environment"));
+    public void clickForceGcLink() {
+        clickWithWait("Force GC");
     }
 
-    private WebElement getSidebar() {
-        return Utils.withWait(driver, cssSelector("div.gt-sidebar"));
+    public void clickEnvironmentLink() {
+        clickWithWait("Environment");
+    }
+
+    private void clickWithWait(String linkText) {
+        WebElement sidebar = Utils.getWithWait(driver, cssSelector("div.gt-sidebar"));
+        Utils.clickWithWait(driver, sidebar, Utils.linkText(linkText));
     }
 }

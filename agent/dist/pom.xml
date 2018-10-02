@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
     <groupId>org.glowroot</groupId>
     <artifactId>glowroot-parent</artifactId>
-    <version>0.9.9</version>
+    <version>0.11.1</version>
     <relativePath>../..</relativePath>
   </parent>
 
@@ -23,7 +24,49 @@
     </dependency>
     <dependency>
       <groupId>org.glowroot</groupId>
+      <artifactId>glowroot-agent-central-https-linux</artifactId>
+      <version>${project.version}</version>
+      <!-- need to mark this as provided since it is still present in the dependency reduced pom
+        which is deployed to maven central -->
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.glowroot</groupId>
+      <artifactId>glowroot-agent-central-https-windows</artifactId>
+      <version>${project.version}</version>
+      <!-- need to mark this as provided since it is still present in the dependency reduced pom
+        which is deployed to maven central -->
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.glowroot</groupId>
+      <artifactId>glowroot-agent-central-https-osx</artifactId>
+      <version>${project.version}</version>
+      <!-- need to mark this as provided since it is still present in the dependency reduced pom
+        which is deployed to maven central -->
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.glowroot</groupId>
+      <artifactId>glowroot-agent-embedded</artifactId>
+      <version>${project.version}</version>
+      <!-- need to mark this as provided since it is still present in the dependency reduced pom
+        which is deployed to maven central -->
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.glowroot</groupId>
       <artifactId>glowroot-agent-cassandra-plugin</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.glowroot</groupId>
+      <artifactId>glowroot-agent-ejb-plugin</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.glowroot</groupId>
+      <artifactId>glowroot-agent-elasticsearch-plugin</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
@@ -44,6 +87,11 @@
     <dependency>
       <groupId>org.glowroot</groupId>
       <artifactId>glowroot-agent-http-client-plugin</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.glowroot</groupId>
+      <artifactId>glowroot-agent-java-http-server-plugin</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
@@ -103,11 +151,6 @@
     </dependency>
     <dependency>
       <groupId>org.glowroot</groupId>
-      <artifactId>glowroot-agent-spray-plugin</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.glowroot</groupId>
       <artifactId>glowroot-agent-spring-plugin</artifactId>
       <version>${project.version}</version>
     </dependency>
@@ -140,20 +183,6 @@
           </dependencyReducedPomLocation>
           <createSourcesJar>true</createSourcesJar>
           <shadeSourcesContent>true</shadeSourcesContent>
-          <transformers>
-            <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-              <manifestEntries>
-                <Implementation-Title>${project.name}</Implementation-Title>
-                <Implementation-Version>${project.version}</Implementation-Version>
-                <Build-Commit>${glowroot.build.commit}</Build-Commit>
-                <Build-Time>${maven.build.timestamp}</Build-Time>
-                <Main-Class>org.glowroot.agent.OfflineViewer</Main-Class>
-                <Premain-Class>org.glowroot.agent.AgentPremain</Premain-Class>
-                <Can-Redefine-Classes>true</Can-Redefine-Classes>
-                <Can-Retransform-Classes>true</Can-Retransform-Classes>
-              </manifestEntries>
-            </transformer>
-          </transformers>
           <artifactSet>
             <!-- explicit includes shouldn't be needed, since the transitive dependencies are shaded
               during multi-module build, but due to https://issues.apache.org/jira/browse/MSHADE-206
@@ -171,6 +200,21 @@
               </excludes>
             </filter>
           </filters>
+          <transformers>
+            <transformer
+              implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+              <manifestEntries>
+                <Implementation-Title>${project.name}</Implementation-Title>
+                <Implementation-Version>${project.version}</Implementation-Version>
+                <Build-Commit>${glowroot.build.commit}</Build-Commit>
+                <Build-Time>${maven.build.timestamp}</Build-Time>
+                <Premain-Class>org.glowroot.agent.AgentPremain</Premain-Class>
+                <Main-Class>org.glowroot.agent.ToolMain</Main-Class>
+                <Can-Redefine-Classes>true</Can-Redefine-Classes>
+                <Can-Retransform-Classes>true</Can-Retransform-Classes>
+              </manifestEntries>
+            </transformer>
+          </transformers>
         </configuration>
         <executions>
           <execution>
@@ -204,6 +248,19 @@
 
   <profiles>
     <profile>
+      <id>include-central-https-linux-alpine</id>
+      <dependencies>
+        <dependency>
+          <groupId>org.glowroot</groupId>
+          <artifactId>glowroot-agent-central-https-linux-alpine</artifactId>
+          <version>${project.version}</version>
+          <!-- need to mark this as provided since it is still present in the dependency reduced pom
+            which is deployed to maven central -->
+          <scope>provided</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
       <id>javadoc</id>
       <build>
         <plugins>
@@ -211,6 +268,7 @@
             <artifactId>maven-dependency-plugin</artifactId>
             <executions>
               <execution>
+                <id>copy-javadoc</id>
                 <phase>package</phase>
                 <goals>
                   <goal>copy</goal>
@@ -219,7 +277,7 @@
                   <artifactItems>
                     <artifactItem>
                       <groupId>org.glowroot</groupId>
-                      <artifactId>glowroot-agent-core</artifactId>
+                      <artifactId>glowroot-agent-core-unshaded</artifactId>
                       <classifier>javadoc</classifier>
                       <version>${project.version}</version>
                     </artifactItem>
@@ -230,7 +288,7 @@
           </plugin>
           <plugin>
             <!-- maven shade plugin doesn't aggregate javadoc, and maven central requires javadoc,
-              so attaching org.glowroot:glowroot-agent-core javadoc -->
+              so attaching org.glowroot:glowroot-agent-core-unshaded javadoc -->
             <groupId>org.codehaus.mojo</groupId>
             <artifactId>build-helper-maven-plugin</artifactId>
             <executions>
@@ -242,7 +300,7 @@
                 <configuration>
                   <artifacts>
                     <artifact>
-                      <file>${project.build.directory}/dependency/glowroot-agent-core-${project.version}-javadoc.jar</file>
+                      <file>${project.build.directory}/dependency/glowroot-agent-core-unshaded-${project.version}-javadoc.jar</file>
                       <type>jar</type>
                       <classifier>javadoc</classifier>
                     </artifact>

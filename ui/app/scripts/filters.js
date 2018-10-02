@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2015 the original author or authors.
+ * Copyright 2013-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,19 +35,38 @@ glowroot.filter('gtDuration', function () {
     }
     var duration = moment.duration(input);
     var parts = [];
-    if (duration.days() >= 1) {
-      parts.push(Math.floor(duration.days()) + 'd');
+    var days = duration.asDays();
+    if (days >= 1) {
+      parts.push(Math.floor(days) + 'd');
     }
-    if (duration.hours() >= 1) {
-      parts.push(Math.floor(duration.hours()) + 'h');
+    var hours = duration.hours();
+    if (parts.length || hours >= 1) {
+      parts.push(Math.floor(hours) + 'h');
     }
-    if (duration.minutes() >= 1) {
-      parts.push(Math.floor(duration.minutes()) + 'm');
+    var minutes = duration.minutes();
+    if (parts.length || minutes >= 1) {
+      parts.push(Math.floor(minutes) + 'm');
     }
-    if (duration.seconds() >= 1) {
-      parts.push(Math.floor(duration.seconds()) + 's');
+    var seconds = duration.seconds();
+    if (parts.length || seconds >= 1) {
+      parts.push(Math.floor(seconds) + 's');
+    }
+    if (!parts.length) {
+      return input + 'ms';
     }
     return parts.join(' ');
+  };
+});
+
+glowroot.filter('gtGaugeValue', function () {
+  return function (value) {
+    var nonScaledValue;
+    if (value < 1000000) {
+      nonScaledValue = parseFloat(value.toPrecision(6));
+    } else {
+      nonScaledValue = Math.round(value);
+    }
+    return nonScaledValue.toLocaleString(undefined, {maximumSignificantDigits: 15});
   };
 });
 

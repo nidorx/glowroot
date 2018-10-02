@@ -19,6 +19,9 @@ public class Preconditions {
             @Nullable Object errorMessage);
     @EnsuresNonNull("#1")
     public static <T extends @Nullable Object> T checkNotNull(@Nullable T reference,
+            @Nullable String errorMessageTemplate, @Nullable Object p1);
+    @EnsuresNonNull("#1")
+    public static <T extends @Nullable Object> T checkNotNull(@Nullable T reference,
             @Nullable String errorMessageTemplate, @Nullable Object... errorMessageArgs);
 }
 
@@ -59,4 +62,15 @@ public class Maps {
     public static <K, V extends @Nullable Object> TreeMap<K, V> newTreeMap();
     public static <C extends @Nullable Object, K extends C, V extends @Nullable Object>
             TreeMap<K, V> newTreeMap(@Nullable Comparator<C> comparator);
+}
+
+/* ========================================================================== */
+package com.google.common.util.concurrent;
+
+public interface AsyncFunction<I, O> {
+  ListenableFuture<O> apply(I input);
+}
+
+public interface FutureCallback<V> {
+  void onSuccess(V result);
 }

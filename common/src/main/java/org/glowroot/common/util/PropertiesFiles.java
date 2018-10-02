@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 the original author or authors.
+ * Copyright 2017-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,12 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Map;
 import java.util.Properties;
 
-import com.google.common.base.Charsets;
 import com.google.common.io.Files;
+
+import static com.google.common.base.Charsets.ISO_8859_1;
 
 public class PropertiesFiles {
 
@@ -39,12 +41,20 @@ public class PropertiesFiles {
         return props;
     }
 
-    public static void upgradeIfNeeded(File propFile, String find, String replace)
+    public static void upgradeIfNeeded(File propFile, Map<String, String> findReplacePairs)
             throws IOException {
-        String content = Files.toString(propFile, Charsets.UTF_8);
-        if (content.contains(find)) {
-            content = content.replace(find, replace);
-            Files.write(content, propFile, Charsets.UTF_8);
+        // properties files must be ISO_8859_1
+        String content = Files.toString(propFile, ISO_8859_1);
+        boolean modified = false;
+        for (Map.Entry<String, String> entry : findReplacePairs.entrySet()) {
+            String find = entry.getKey();
+            if (content.contains(find)) {
+                content = content.replace(find, entry.getValue());
+                modified = true;
+            }
+        }
+        if (modified) {
+            Files.write(content, propFile, ISO_8859_1);
         }
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,14 +19,13 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
 
-import javax.annotation.Nullable;
-
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.google.common.base.Ticker;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.io.CharStreams;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 
 import org.glowroot.common.live.ImmutableTracePointFilter;
@@ -36,11 +35,11 @@ import org.glowroot.common.live.LiveTraceRepository.TracePoint;
 import org.glowroot.common.live.LiveTraceRepository.TracePointFilter;
 import org.glowroot.common.live.StringComparator;
 import org.glowroot.common.model.Result;
-import org.glowroot.common.repo.ConfigRepository;
-import org.glowroot.common.repo.ImmutableTraceQuery;
-import org.glowroot.common.repo.TraceRepository;
-import org.glowroot.common.repo.TraceRepository.TraceQuery;
 import org.glowroot.common.util.Clock;
+import org.glowroot.common2.repo.ConfigRepository;
+import org.glowroot.common2.repo.ImmutableTraceQuery;
+import org.glowroot.common2.repo.TraceRepository;
+import org.glowroot.common2.repo.TraceRepository.TraceQuery;
 import org.glowroot.ui.TransactionJsonService.TransactionDataRequest;
 
 import static java.util.concurrent.TimeUnit.HOURS;
@@ -112,6 +111,13 @@ class TracePointJsonService {
 
     private String getPoints(TraceKind traceKind, String agentRollupId, TracePointRequest request)
             throws Exception {
+        double durationMillisLow = request.durationMillisLow();
+        long durationNanosLow = Math.round(durationMillisLow * NANOSECONDS_PER_MILLISECOND);
+        Long durationNanosHigh = null;
+        Double durationMillisHigh = request.durationMillisHigh();
+        if (durationMillisHigh != null) {
+            durationNanosHigh = Math.round(durationMillisHigh * NANOSECONDS_PER_MILLISECOND);
+        }
         TraceQuery query = ImmutableTraceQuery.builder()
                 .transactionType(request.transactionType())
                 .transactionName(request.transactionName())
@@ -119,6 +125,8 @@ class TracePointJsonService {
                 .to(request.to())
                 .build();
         TracePointFilter filter = ImmutableTracePointFilter.builder()
+                .durationNanosLow(durationNanosLow)
+                .durationNanosHigh(durationNanosHigh)
                 .headlineComparator(request.headlineComparator())
                 .headline(request.headline())
                 .errorMessageComparator(request.errorMessageComparator())
@@ -203,6 +211,9 @@ class TracePointJsonService {
             for (TracePoint pendingPoint : matchingPendingPoints) {
                 insertIntoOrderedPoints(pendingPoint, orderedPoints);
             }
+            if (limit != 0 && orderedPoints.size() > limit) {
+                orderedPoints = orderedPoints.subList(0, limit);
+            }
             return new Result<TracePoint>(orderedPoints, queryResult.moreAvailable());
         }
 
@@ -264,46 +275,49 @@ class TracePointJsonService {
                 boolean limitExceeded, boolean expired) throws Exception {
             StringBuilder sb = new StringBuilder();
             JsonGenerator jg = jsonFactory.createGenerator(CharStreams.asWriter(sb));
-            jg.writeStartObject();
-            jg.writeArrayFieldStart("normalPoints");
-            for (TracePoint point : points) {
-                if (!point.error() && !point.partial()) {
-                    writePoint(point, jg);
+            try {
+                jg.writeStartObject();
+                jg.writeArrayFieldStart("normalPoints");
+                for (TracePoint point : points) {
+                    if (!point.error() && !point.partial()) {
+                        writePoint(point, jg);
+                    }
                 }
-            }
-            jg.writeEndArray();
-            jg.writeArrayFieldStart("errorPoints");
-            for (TracePoint point : points) {
-                if (point.error() && !point.partial()) {
-                    writePoint(point, jg);
+                jg.writeEndArray();
+                jg.writeArrayFieldStart("errorPoints");
+                for (TracePoint point : points) {
+                    if (point.error() && !point.partial()) {
+                        writePoint(point, jg);
+                    }
                 }
-            }
-            jg.writeEndArray();
-            jg.writeArrayFieldStart("partialPoints");
-            for (TracePoint point : points) {
-                if (point.partial()) {
-                    writePoint(point, jg);
+                jg.writeEndArray();
+                jg.writeArrayFieldStart("partialPoints");
+                for (TracePoint point : points) {
+                    if (point.partial()) {
+                        writePoint(point, jg);
+                    }
                 }
+                for (TracePoint activePoint : activePoints) {
+                    writePoint(activePoint, jg);
+                }
+                jg.writeEndArray();
+                if (limitExceeded) {
+                    jg.writeBooleanField("limitExceeded", true);
+                }
+                if (expired) {
+                    jg.writeBooleanField("expired", true);
+                }
+                jg.writeEndObject();
+            } finally {
+                jg.close();
             }
-            for (TracePoint activePoint : activePoints) {
-                writePoint(activePoint, jg);
-            }
-            jg.writeEndArray();
-            if (limitExceeded) {
-                jg.writeBooleanField("limitExceeded", true);
-            }
-            if (expired) {
-                jg.writeBooleanField("expired", true);
-            }
-            jg.writeEndObject();
-            jg.close();
             return sb.toString();
         }
 
         private void writePoint(TracePoint point, JsonGenerator jg) throws IOException {
             jg.writeStartArray();
             jg.writeNumber(point.captureTime());
-            jg.writeNumber(point.durationNanos() / NANOSECONDS_PER_MILLISECOND);
+            jg.writeNumber(point.durationNanos() / (double) NANOSECONDS_PER_MILLISECOND);
             jg.writeString(point.agentId());
             jg.writeString(point.traceId());
             jg.writeEndArray();
@@ -318,6 +332,8 @@ class TracePointJsonService {
         public abstract @Nullable String transactionName();
         public abstract long from();
         public abstract long to();
+        public abstract double durationMillisLow();
+        public abstract @Nullable Double durationMillisHigh();
         public abstract @Nullable StringComparator headlineComparator();
         public abstract @Nullable String headline();
         public abstract @Nullable StringComparator errorMessageComparator();

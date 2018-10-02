@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ import play.mvc.Results;
 
 import org.glowroot.agent.it.harness.TraceEntryMarker;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
+
 public class AsyncController extends Controller {
 
     public static Result message() {
@@ -31,7 +33,7 @@ public class AsyncController extends Controller {
             @Override
             public Result call() {
                 try {
-                    Thread.sleep(1000);
+                    SECONDS.sleep(1);
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 }

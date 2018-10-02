@@ -1,5 +1,5 @@
 /**
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package org.glowroot.agent.plugin.httpclient;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.squareup.okhttp.Callback;
 import com.squareup.okhttp.MediaType;
@@ -35,6 +36,7 @@ import org.glowroot.agent.it.harness.Containers;
 import org.glowroot.agent.it.harness.TraceEntryMarker;
 import org.glowroot.wire.api.model.TraceOuterClass.Trace;
 
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class OkHttpClientPluginIT {
@@ -146,7 +148,12 @@ public class OkHttpClientPluginIT {
             Request request = new Request.Builder()
                     .url("http://localhost:" + getPort() + "/hello1/")
                     .build();
-            client.newCall(request).execute();
+            Response response = client.newCall(request).execute();
+            if (response.code() != 200) {
+                throw new IllegalStateException(
+                        "Unexpected response status code: " + response.code());
+            }
+            response.body().close();
         }
     }
 
@@ -160,7 +167,12 @@ public class OkHttpClientPluginIT {
                     .url("http://localhost:" + getPort() + "/hello2")
                     .post(body)
                     .build();
-            client.newCall(request).execute();
+            Response response = client.newCall(request).execute();
+            if (response.code() != 200) {
+                throw new IllegalStateException(
+                        "Unexpected response status code: " + response.code());
+            }
+            response.body().close();
         }
     }
 
@@ -172,10 +184,13 @@ public class OkHttpClientPluginIT {
                     .url("http://localhost:" + getPort() + "/hello1/")
                     .build();
             final CountDownLatch latch = new CountDownLatch(1);
+            final AtomicInteger responseStatusCode = new AtomicInteger();
             client.newCall(request).enqueue(new Callback() {
                 @Override
-                public void onResponse(Response response) {
+                public void onResponse(Response response) throws IOException {
                     new CreateTraceEntry().traceEntryMarker();
+                    responseStatusCode.set(response.code());
+                    response.body().close();
                     latch.countDown();
                 }
                 @Override
@@ -185,8 +200,12 @@ public class OkHttpClientPluginIT {
                 }
             });
             latch.await();
+            if (responseStatusCode.get() != 200) {
+                throw new IllegalStateException(
+                        "Unexpected response status code: " + responseStatusCode.get());
+            }
             // need to wait just a bit longer to ensure auxiliary thread capture completes
-            Thread.sleep(100);
+            MILLISECONDS.sleep(100);
         }
     }
 
@@ -201,10 +220,13 @@ public class OkHttpClientPluginIT {
                     .post(body)
                     .build();
             final CountDownLatch latch = new CountDownLatch(1);
+            final AtomicInteger responseStatusCode = new AtomicInteger();
             client.newCall(request).enqueue(new Callback() {
                 @Override
-                public void onResponse(Response response) {
+                public void onResponse(Response response) throws IOException {
                     new CreateTraceEntry().traceEntryMarker();
+                    responseStatusCode.set(response.code());
+                    response.body().close();
                     latch.countDown();
                 }
                 @Override
@@ -214,8 +236,12 @@ public class OkHttpClientPluginIT {
                 }
             });
             latch.await();
+            if (responseStatusCode.get() != 200) {
+                throw new IllegalStateException(
+                        "Unexpected response status code: " + responseStatusCode.get());
+            }
             // need to wait just a bit longer to ensure auxiliary thread capture completes
-            Thread.sleep(100);
+            MILLISECONDS.sleep(100);
         }
     }
 

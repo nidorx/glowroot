@@ -39,6 +39,65 @@
       "type": "string",
       "label": "Capture response headers",
       "description": "Comma-separated list of response headers to capture in the root trace entry. The wildcard '*' is supported anywhere in the parameter."
+    },
+    {
+      "name": "traceErrorOn4xxResponseCode",
+      "type": "boolean",
+      "label": "Error on 4xx",
+      "checkboxLabel": "Mark trace as error on 4xx response code",
+      "description": "Mark the trace as an error when a 4xx response code is returned."
+    },
+    {
+      "name": "captureRequestRemoteAddr",
+      "type": "boolean",
+      "label": "Capture request remote address",
+      "checkboxLabel": "Capture request remote address using ServletRequest.getRemoteAddr()"
+    },
+    {
+      "name": "captureRequestRemoteHostname",
+      "type": "boolean",
+      "label": "Capture request remote hostname",
+      "checkboxLabel": "Capture request remote hostname using ServletRequest.getRemoteHost()"
+    },
+    {
+      "name": "captureRequestRemotePort",
+      "type": "boolean",
+      "label": "Capture request remote port",
+      "checkboxLabel": "Capture request remote port using ServletRequest.getRemotePort()",
+      "description": "This only applies to Servlet 3.0+ containers."
+    },
+    {
+      "name": "captureRequestLocalAddr",
+      "type": "boolean",
+      "label": "Capture request local address",
+      "checkboxLabel": "Capture request local address using ServletRequest.getLocalAddr()",
+      "description": "This only applies to Servlet 3.0+ containers."
+    },
+    {
+      "name": "captureRequestLocalHostname",
+      "type": "boolean",
+      "label": "Capture request local hostname",
+      "checkboxLabel": "Capture request local hostname using ServletRequest.getLocalName()",
+      "description": "This only applies to Servlet 3.0+ containers."
+    },
+    {
+      "name": "captureRequestLocalPort",
+      "type": "boolean",
+      "label": "Capture request local port",
+      "checkboxLabel": "Capture request local port using ServletRequest.getLocalPort()",
+      "description": "This only applies to Servlet 3.0+ containers."
+    },
+    {
+      "name": "captureRequestServerHostname",
+      "type": "boolean",
+      "label": "Capture request server hostname",
+      "checkboxLabel": "Capture request server hostname using ServletRequest.getServerName()"
+    },
+    {
+      "name": "captureRequestServerPort",
+      "type": "boolean",
+      "label": "Capture request server port",
+      "checkboxLabel": "Capture request server port using ServletRequest.getServerPort()"
     }
   ],
   "instrumentation": [
@@ -48,9 +107,10 @@
       "methodParameterTypes": [
         "javax.servlet.ServletContextEvent"
       ],
-      "captureKind": "trace-entry",
+      "captureKind": "transaction",
       "timerName": "listener init",
-      "traceEntryMessageTemplate": "listener init: {{this.class.name}}"
+      "transactionType": "Startup",
+      "transactionNameTemplate": "Listener init: {{this.class.name}}"
     },
     {
       "className": "javax.servlet.Servlet",
@@ -58,9 +118,10 @@
       "methodParameterTypes": [
         "javax.servlet.ServletConfig"
       ],
-      "captureKind": "trace-entry",
+      "captureKind": "transaction",
       "timerName": "servlet init",
-      "traceEntryMessageTemplate": "servlet init: {{this.class.name}}"
+      "transactionType": "Startup",
+      "transactionNameTemplate": "Servlet init: {{this.class.name}}"
     },
     {
       "className": "javax.servlet.Filter",
@@ -68,9 +129,10 @@
       "methodParameterTypes": [
         "javax.servlet.FilterConfig"
       ],
-      "captureKind": "trace-entry",
+      "captureKind": "transaction",
       "timerName": "filter init",
-      "traceEntryMessageTemplate": "filter init: {{this.class.name}}"
+      "transactionType": "Startup",
+      "transactionNameTemplate": "Filter init: {{this.class.name}}"
     },
     {
       "className": "javax.servlet.ServletContainerInitializer",
@@ -79,19 +141,20 @@
         "java.util.Set",
         "javax.servlet.ServletContext"
       ],
-      "captureKind": "trace-entry",
+      "captureKind": "transaction",
       "timerName": "container initializer",
-      "traceEntryMessageTemplate": "container initializer: {{this.class.name}}"
+      "transactionType": "Startup",
+      "transactionNameTemplate": "Container initializer: {{this.class.name}}"
     },
     {
-      "className": "io.undertow.servlet.api.DeploymentManager",
-      "methodName": "start",
+      "className": "org.wildfly.extension.undertow.deployment.UndertowDeploymentService",
+      "methodName": "startContext",
       "methodParameterTypes": [
       ],
       "captureKind": "transaction",
       "timerName": "application startup",
       "transactionType": "Startup",
-      "transactionNameTemplate": "Servlet context: {{this.deployment.deploymentInfo.contextPath}}"
+      "transactionNameTemplate": "Servlet context: {{this.deploymentInfoInjectedValue.value.contextPath}}"
     },
     {
       "className": "org.eclipse.jetty.webapp.WebAppContext",
@@ -111,6 +174,8 @@
     "org.glowroot.agent.plugin.servlet.ResponseHeaderAspect",
     "org.glowroot.agent.plugin.servlet.RequestDispatcherAspect",
     "org.glowroot.agent.plugin.servlet.SessionAspect",
-    "org.glowroot.agent.plugin.servlet.CatalinaAppStartupAspect"
+    "org.glowroot.agent.plugin.servlet.CatalinaAppStartupAspect",
+    "org.glowroot.agent.plugin.servlet.WebLogicAppStartupAspect",
+    "org.glowroot.agent.plugin.servlet.WebSphereAppStartupAspect"
   ]
 }

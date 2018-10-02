@@ -11,8 +11,13 @@ public class ClassLoader {
             @Nullable String implVersion, @Nullable String implVendor, @Nullable URL sealBase);
 }
 
+public class Object {
+    // this is needed for plugins that call toString() on application objects
+    public @Nullable String toString();
+}
+
 public class String {
-    public @PolyTainted String toLowerCase(Locale locale) @PolyTainted;
+    public @PolyTainted String toLowerCase(@PolyTainted String this, Locale locale);
 }
 
 public class Class<T> {
@@ -22,6 +27,16 @@ public class Class<T> {
 public class StackTraceElement {
     // methodName can be null after hotswapping under Eclipse debugger
     public @Nullable String getMethodName();
+}
+
+public class StringBuilder {
+    // this overrides Object toString() above to specify that it never returns null
+    public String toString();
+}
+
+public class Throwable {
+    // subclasses can override this and return null
+    public StackTraceElement @Nullable [] getStackTrace();
 }
 
 /* ========================================================================== */
@@ -60,6 +75,11 @@ public class InvocationTargetException {
 /* ========================================================================== */
 package java.net;
 
+public class URI {
+    public URI(@Nullable String scheme, @Nullable String host, @Nullable String path,
+            @Nullable String fragment);
+}
+
 public class URL {
     // see https://code.google.com/p/checker-framework/issues/detail?id=371
     public boolean equals(@Nullable Object obj);
@@ -74,6 +94,21 @@ package java.nio.channels;
 
 public class FileChannel {
     public @Nullable FileLock tryLock();
+}
+
+/* ========================================================================== */
+package java.security;
+
+public class CodeSource {
+    public CodeSource(URL url, Certificate @Nullable [] signers);
+    public CodeSource(URL url, CodeSigner @Nullable [] signers);
+}
+
+/* ========================================================================== */
+package java.text;
+
+public class MessageFormat {
+    public static String format(String pattern, @Nullable Object ... arguments);
 }
 
 /* ========================================================================== */
@@ -122,4 +157,16 @@ package javax.management.openmbean;
 
 public class CompositeType {
     public @Nullable OpenType<?> getType(String itemName);
+}
+
+/* ========================================================================== */
+package javax.tools;
+
+public interface JavaCompiler {
+    CompilationTask getTask(@Nullable Writer out,
+                            @Nullable JavaFileManager fileManager,
+                            @Nullable DiagnosticListener<? super JavaFileObject> diagnosticListener,
+                            @Nullable Iterable<String> options,
+                            @Nullable Iterable<String> classes,
+                            @Nullable Iterable<? extends JavaFileObject> compilationUnits);
 }

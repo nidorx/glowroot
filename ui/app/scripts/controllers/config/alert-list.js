@@ -29,50 +29,30 @@ glowroot.controller('ConfigAlertListCtrl', [
       return;
     }
 
-    $scope.alertQueryString = function (alert) {
+    $scope.configQueryString = function (config) {
       var query = {};
       if ($scope.agentId) {
         query.agentId = $scope.agentId;
+      } else if ($scope.agentRollupId) {
+        query.agentRollupId = $scope.agentRollupId;
       }
-      query.v = alert.version;
+      query.v = config.version;
       return queryStrings.encodeObject(query);
     };
 
-    $scope.alertText = function (alert) {
-      if (alert.kind === 'transaction') {
-        return alert.transactionType + ' - ' + alert.transactionPercentile
-            + $scope.percentileSuffix(alert.transactionPercentile) + ' percentile over a '
-            + alert.timePeriodSeconds / 60 + ' minute period exceeds ' + alert.transactionThresholdMillis
-            + ' milliseconds';
-      } else if (alert.kind === 'gauge') {
-        var threshold;
-        if (alert.gaugeUnit === 'bytes') {
-          threshold = $filter('gtBytes')(alert.gaugeThreshold);
-        } else if (alert.gaugeUnit) {
-          threshold = alert.gaugeThreshold + ' ' + alert.gaugeUnit;
-        } else {
-          threshold = alert.gaugeThreshold;
-        }
-        return 'Gauge - ' + alert.gaugeDisplay + ' - average over a ' + alert.timePeriodSeconds / 60
-            + ' minute period exceeds ' + threshold;
-      } else if (alert.kind === 'heartbeat') {
-        return 'Heartbeat - no heartbeat received for ' + alert.timePeriodSeconds + ' seconds';
-      } else {
-        return 'Unknown alert kind ' + alert.kind;
-      }
-    };
-
     $scope.newQueryString = function () {
-      if ($scope.agentId) {
-        return '?agent-id=' + encodeURIComponent($scope.agentId) + '&new';
+      var queryString = $scope.agentQueryString();
+      if (queryString === '') {
+        return '?new';
+      } else {
+        return queryString + '&new';
       }
-      return '?new';
     };
 
-    $http.get('backend/config/alerts?agent-id=' + encodeURIComponent($scope.agentId))
+    $http.get('backend/config/alerts?agent-rollup-id=' + encodeURIComponent($scope.agentRollupId))
         .then(function (response) {
           $scope.loaded = true;
-          $scope.alerts = response.data;
+          $scope.configs = response.data;
         }, function (response) {
           httpErrors.handle(response, $scope);
         });

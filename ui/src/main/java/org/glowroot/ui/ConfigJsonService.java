@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2017 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,27 +15,34 @@
  */
 package org.glowroot.ui;
 
-import java.io.IOException;
 import java.util.List;
-
-import javax.annotation.Nullable;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 
-import org.glowroot.common.repo.ConfigRepository;
-import org.glowroot.common.repo.ConfigRepository.OptimisticLockException;
 import org.glowroot.common.util.ObjectMappers;
+import org.glowroot.common.util.Styles;
 import org.glowroot.common.util.Versions;
+import org.glowroot.common2.config.MoreConfigDefaults;
+import org.glowroot.common2.repo.ConfigRepository;
+import org.glowroot.common2.repo.ConfigRepository.OptimisticLockException;
+import org.glowroot.common2.repo.GaugeValueRepository;
+import org.glowroot.common2.repo.GaugeValueRepository.Gauge;
+import org.glowroot.common2.repo.TransactionTypeRepository;
+import org.glowroot.ui.GaugeValueJsonService.GaugeOrdering;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AdvancedConfig;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.GeneralConfig;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.JvmConfig;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.PluginConfig;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.PluginProperty;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.SlowThreshold;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.TransactionConfig;
-import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.UiConfig;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.UiDefaultsConfig;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.UserRecordingConfig;
 import org.glowroot.wire.api.model.Proto.OptionalInt32;
 
@@ -47,28 +54,59 @@ class ConfigJsonService {
 
     private static final ObjectMapper mapper = ObjectMappers.create();
 
+    private final TransactionTypeRepository transactionTypeRepository;
+    private final GaugeValueRepository gaugeValueRepository;
     private final ConfigRepository configRepository;
 
-    ConfigJsonService(ConfigRepository configRepository) {
+    ConfigJsonService(TransactionTypeRepository transactionTypeRepository,
+            GaugeValueRepository gaugeValueRepository, ConfigRepository configRepository) {
+        this.transactionTypeRepository = transactionTypeRepository;
+        this.gaugeValueRepository = gaugeValueRepository;
         this.configRepository = configRepository;
+    }
+
+    @GET(path = "/backend/config/general", permission = "agent:config:view:general")
+    String getGeneralConfig(@BindAgentRollupId String agentRollupId) throws Exception {
+        GeneralConfig config = configRepository.getGeneralConfig(agentRollupId);
+        return mapper.writeValueAsString(GeneralConfigDto.create(config, agentRollupId));
     }
 
     @GET(path = "/backend/config/transaction", permission = "agent:config:view:transaction")
     String getTransactionConfig(@BindAgentId String agentId) throws Exception {
         TransactionConfig config = configRepository.getTransactionConfig(agentId);
-        if (config == null) {
-            return "{}";
+        List<String> transactionTypes = transactionTypeRepository.read(agentId);
+        if (transactionTypes == null) {
+            transactionTypes = ImmutableList.of();
         }
-        return mapper.writeValueAsString(TransactionConfigDto.create(config));
+        return mapper.writeValueAsString(ImmutableTransactionConfigResponse.builder()
+                .config(TransactionConfigDto.create(config))
+                .defaultTransactionType(
+                        configRepository.getUiDefaultsConfig(agentId).getDefaultTransactionType())
+                .addAllAllTransactionTypes(transactionTypes)
+                .build());
     }
 
-    @GET(path = "/backend/config/ui", permission = "agent:config:view:ui")
-    String getUiConfig(@BindAgentId String agentId) throws Exception {
-        UiConfig config = configRepository.getUiConfig(agentId);
-        if (config == null) {
-            return "{}";
+    @GET(path = "/backend/config/jvm", permission = "agent:config:view:jvm")
+    String getJvmConfig(@BindAgentId String agentId) throws Exception {
+        JvmConfig config = configRepository.getJvmConfig(agentId);
+        return mapper.writeValueAsString(JvmConfigDto.create(config));
+    }
+
+    // central supports ui defaults config on rollups
+    @GET(path = "/backend/config/ui-defaults", permission = "agent:config:view:uiDefaults")
+    String getUiDefaultsConfig(@BindAgentRollupId String agentRollupId) throws Exception {
+        UiDefaultsConfig config = configRepository.getUiDefaultsConfig(agentRollupId);
+        List<String> transactionTypes = transactionTypeRepository.read(agentRollupId);
+        if (transactionTypes == null) {
+            transactionTypes = ImmutableList.of();
         }
-        return mapper.writeValueAsString(UiConfigDto.create(config));
+        List<Gauge> gauges = gaugeValueRepository.getRecentlyActiveGauges(agentRollupId);
+        ImmutableList<Gauge> sortedGauges = new GaugeOrdering().immutableSortedCopy(gauges);
+        return mapper.writeValueAsString(ImmutableUiDefaultsConfigResponse.builder()
+                .config(UiDefaultsConfigDto.create(config))
+                .addAllAllTransactionTypes(transactionTypes)
+                .addAllAllGauges(sortedGauges)
+                .build());
     }
 
     @GET(path = "/backend/config/plugins", permission = "agent:config:view:plugin")
@@ -94,19 +132,26 @@ class ConfigJsonService {
     @GET(path = "/backend/config/user-recording", permission = "agent:config:view:userRecording")
     String getUserRecordingConfig(@BindAgentId String agentId) throws Exception {
         UserRecordingConfig config = configRepository.getUserRecordingConfig(agentId);
-        if (config == null) {
-            return "{}";
-        }
         return mapper.writeValueAsString(UserRecordingConfigDto.create(config));
     }
 
+    // central supports advanced config on rollups (maxQueryAggregates and maxServiceCallAggregates)
     @GET(path = "/backend/config/advanced", permission = "agent:config:view:advanced")
-    String getAdvancedConfig(@BindAgentId String agentId) throws Exception {
-        AdvancedConfig config = configRepository.getAdvancedConfig(agentId);
-        if (config == null) {
-            return "{}";
-        }
+    String getAdvancedConfig(@BindAgentRollupId String agentRollupId) throws Exception {
+        AdvancedConfig config = configRepository.getAdvancedConfig(agentRollupId);
         return mapper.writeValueAsString(AdvancedConfigDto.create(config));
+    }
+
+    @POST(path = "/backend/config/general", permission = "agent:config:edit:general")
+    String updateGeneralConfig(@BindAgentRollupId String agentRollupId,
+            @BindRequest GeneralConfigDto configDto) throws Exception {
+        try {
+            configRepository.updateGeneralConfig(agentRollupId, configDto.convert(),
+                    configDto.version());
+        } catch (OptimisticLockException e) {
+            throw new JsonServiceException(PRECONDITION_FAILED, e);
+        }
+        return getGeneralConfig(agentRollupId);
     }
 
     @POST(path = "/backend/config/transaction", permission = "agent:config:edit:transaction")
@@ -121,16 +166,28 @@ class ConfigJsonService {
         return getTransactionConfig(agentId);
     }
 
-    @POST(path = "/backend/config/ui", permission = "agent:config:edit:ui")
-    String updateUiConfig(@BindAgentId String agentId, @BindRequest UiConfigDto configDto)
+    @POST(path = "/backend/config/jvm", permission = "agent:config:edit:jvm")
+    String updateJvmConfig(@BindAgentId String agentId, @BindRequest JvmConfigDto configDto)
             throws Exception {
         try {
-            configRepository.updateUiConfig(agentId, configDto.convert(),
+            configRepository.updateJvmConfig(agentId, configDto.convert(), configDto.version());
+        } catch (OptimisticLockException e) {
+            throw new JsonServiceException(PRECONDITION_FAILED, e);
+        }
+        return getJvmConfig(agentId);
+    }
+
+    // central supports ui defaults config on rollups
+    @POST(path = "/backend/config/ui-defaults", permission = "agent:config:edit:uiDefaults")
+    String updateUiDefaultsConfig(@BindAgentRollupId String agentRollupId,
+            @BindRequest UiDefaultsConfigDto configDto) throws Exception {
+        try {
+            configRepository.updateUiDefaultsConfig(agentRollupId, configDto.convert(),
                     configDto.version());
         } catch (OptimisticLockException e) {
             throw new JsonServiceException(PRECONDITION_FAILED, e);
         }
-        return getUiConfig(agentId);
+        return getUiDefaultsConfig(agentRollupId);
     }
 
     @POST(path = "/backend/config/plugins", permission = "agent:config:edit:plugins")
@@ -161,19 +218,20 @@ class ConfigJsonService {
         return getUserRecordingConfig(agentId);
     }
 
+    // central supports advanced config on rollups (maxQueryAggregates and maxServiceCallAggregates)
     @POST(path = "/backend/config/advanced", permission = "agent:config:edit:advanced")
-    String updateAdvancedConfig(@BindAgentId String agentId,
+    String updateAdvancedConfig(@BindAgentRollupId String agentRollupId,
             @BindRequest AdvancedConfigDto configDto) throws Exception {
         try {
-            configRepository.updateAdvancedConfig(agentId, configDto.convert(),
+            configRepository.updateAdvancedConfig(agentRollupId, configDto.convert(),
                     configDto.version());
         } catch (OptimisticLockException e) {
             throw new JsonServiceException(PRECONDITION_FAILED, e);
         }
-        return getAdvancedConfig(agentId);
+        return getAdvancedConfig(agentRollupId);
     }
 
-    private String getPluginConfigInternal(String agentId, String pluginId) throws IOException {
+    private String getPluginConfigInternal(String agentId, String pluginId) throws Exception {
         PluginConfig config = configRepository.getPluginConfig(agentId, pluginId);
         if (config == null) {
             throw new IllegalArgumentException("Plugin id not found: " + pluginId);
@@ -201,35 +259,132 @@ class ConfigJsonService {
     // attribute, and that they have no default attribute values
 
     @Value.Immutable
-    abstract static class TransactionConfigDto {
+    abstract static class GeneralConfigDto {
 
-        abstract Optional<String> agentId(); // only used in request
-        abstract int slowThresholdMillis();
-        abstract int profilingIntervalMillis();
-        abstract boolean captureThreadStats();
+        abstract String display();
+        abstract @Nullable String defaultDisplay(); // only used in response
         abstract String version();
 
-        private TransactionConfig convert() {
-            return TransactionConfig.newBuilder()
-                    .setSlowThresholdMillis(of(slowThresholdMillis()))
-                    .setProfilingIntervalMillis(of(profilingIntervalMillis()))
-                    .setCaptureThreadStats(captureThreadStats())
+        private GeneralConfig convert() {
+            return GeneralConfig.newBuilder()
+                    .setDisplay(display())
                     .build();
         }
-        private static TransactionConfigDto create(TransactionConfig config) {
-            return ImmutableTransactionConfigDto.builder()
-                    .slowThresholdMillis(config.getSlowThresholdMillis().getValue())
-                    .profilingIntervalMillis(config.getProfilingIntervalMillis().getValue())
-                    .captureThreadStats(config.getCaptureThreadStats())
+
+        private static GeneralConfigDto create(GeneralConfig config, String agentRollupId) {
+            return ImmutableGeneralConfigDto.builder()
+                    .display(config.getDisplay())
+                    .defaultDisplay(
+                            MoreConfigDefaults.getDefaultAgentRollupDisplayPart(agentRollupId))
                     .version(Versions.getVersion(config))
                     .build();
         }
     }
 
     @Value.Immutable
+    interface TransactionConfigResponse {
+        ImmutableTransactionConfigDto config();
+        String defaultTransactionType();
+        List<String> allTransactionTypes();
+    }
+
+    @Value.Immutable
+    abstract static class TransactionConfigDto {
+
+        abstract int slowThresholdMillis();
+        abstract int profilingIntervalMillis();
+        abstract boolean captureThreadStats();
+        abstract List<ImmutableSlowThresholdDto> slowThresholds();
+        abstract String version();
+
+        private TransactionConfig convert() {
+            TransactionConfig.Builder builder = TransactionConfig.newBuilder()
+                    .setSlowThresholdMillis(of(slowThresholdMillis()))
+                    .setProfilingIntervalMillis(of(profilingIntervalMillis()))
+                    .setCaptureThreadStats(captureThreadStats());
+            for (SlowThresholdDto slowThreshold : new SlowThresholdDtoOrdering()
+                    .sortedCopy(slowThresholds())) {
+                builder.addSlowThreshold(slowThreshold.convert());
+            }
+            return builder.build();
+        }
+
+        private static ImmutableTransactionConfigDto create(TransactionConfig config) {
+            ImmutableTransactionConfigDto.Builder builder = ImmutableTransactionConfigDto.builder()
+                    .slowThresholdMillis(config.getSlowThresholdMillis().getValue())
+                    .profilingIntervalMillis(config.getProfilingIntervalMillis().getValue())
+                    .captureThreadStats(config.getCaptureThreadStats())
+                    .version(Versions.getVersion(config));
+            for (SlowThreshold slowThreshold : config.getSlowThresholdList()) {
+                builder.addSlowThresholds(SlowThresholdDto.create(slowThreshold));
+            }
+            return builder.build();
+        }
+    }
+
+    @Value.Immutable
+    @Styles.AllParameters
+    abstract static class SlowThresholdDto {
+
+        public abstract String transactionType();
+        public abstract String transactionName();
+        public abstract int thresholdMillis();
+
+        private SlowThreshold convert() {
+            return SlowThreshold.newBuilder()
+                    .setTransactionType(transactionType())
+                    .setTransactionName(transactionName())
+                    .setThresholdMillis(thresholdMillis())
+                    .build();
+        }
+
+        private static ImmutableSlowThresholdDto create(SlowThreshold slowThreshold) {
+            return ImmutableSlowThresholdDto.builder()
+                    .transactionType(slowThreshold.getTransactionType())
+                    .transactionName(slowThreshold.getTransactionName())
+                    .thresholdMillis(slowThreshold.getThresholdMillis())
+                    .build();
+        }
+    }
+
+    private static class SlowThresholdDtoOrdering extends Ordering<SlowThresholdDto> {
+        @Override
+        public int compare(SlowThresholdDto left, SlowThresholdDto right) {
+            int compare = left.transactionType().compareToIgnoreCase(right.transactionType());
+            if (compare != 0) {
+                return compare;
+            }
+            compare = left.transactionName().compareToIgnoreCase(right.transactionName());
+            if (compare != 0) {
+                return compare;
+            }
+            return left.thresholdMillis() - right.thresholdMillis();
+        }
+    }
+
+    @Value.Immutable
+    abstract static class JvmConfigDto {
+
+        abstract ImmutableList<String> maskSystemProperties();
+        abstract String version();
+
+        private JvmConfig convert() {
+            JvmConfig.Builder builder =
+                    JvmConfig.newBuilder().addAllMaskSystemProperty(maskSystemProperties());
+            return builder.build();
+        }
+
+        private static JvmConfigDto create(JvmConfig config) {
+            ImmutableJvmConfigDto.Builder builder = ImmutableJvmConfigDto.builder()
+                    .maskSystemProperties(config.getMaskSystemPropertyList())
+                    .version(Versions.getVersion(config));
+            return builder.build();
+        }
+    }
+
+    @Value.Immutable
     abstract static class UserRecordingConfigDto {
 
-        abstract Optional<String> agentId(); // only used in request
         abstract ImmutableList<String> users();
         abstract @Nullable Integer profilingIntervalMillis();
         abstract String version();
@@ -290,10 +445,10 @@ class ConfigJsonService {
         abstract String name();
         abstract PropertyType type();
         abstract @Nullable Object value();
-        abstract @Nullable Object defaultValue(); // only used in response
-        abstract @Nullable String label(); // only used in response
-        abstract @Nullable String checkboxLabel(); // only used in response
-        abstract @Nullable String description(); // only used in response
+        abstract @Nullable Object defaultValue();
+        abstract @Nullable String label();
+        abstract @Nullable String checkboxLabel();
+        abstract @Nullable String description();
 
         private PluginProperty convert() {
             return PluginProperty.newBuilder()
@@ -373,73 +528,79 @@ class ConfigJsonService {
     @Value.Immutable
     abstract static class AdvancedConfigDto {
 
-        abstract Optional<String> agentId(); // only used in request
-        abstract boolean weavingTimer();
         abstract int immediatePartialStoreThresholdSeconds();
-        abstract int maxAggregateTransactionsPerType();
-        abstract int maxAggregateQueriesPerType();
-        abstract int maxAggregateServiceCallsPerType();
+        abstract int maxTransactionAggregates();
+        abstract int maxQueryAggregates();
+        abstract int maxServiceCallAggregates();
         abstract int maxTraceEntriesPerTransaction();
-        abstract int maxStackTraceSamplesPerTransaction();
+        abstract int maxProfileSamplesPerTransaction();
         abstract int mbeanGaugeNotFoundDelaySeconds();
+        abstract boolean weavingTimer();
         abstract String version();
 
         private AdvancedConfig convert() {
             return AdvancedConfig.newBuilder()
-                    .setWeavingTimer(weavingTimer())
                     .setImmediatePartialStoreThresholdSeconds(
                             of(immediatePartialStoreThresholdSeconds()))
-                    .setMaxAggregateTransactionsPerType(of(maxAggregateTransactionsPerType()))
-                    .setMaxAggregateQueriesPerType(of(maxAggregateQueriesPerType()))
-                    .setMaxAggregateServiceCallsPerType(of(maxAggregateServiceCallsPerType()))
+                    .setMaxTransactionAggregates(of(maxTransactionAggregates()))
+                    .setMaxQueryAggregates(of(maxQueryAggregates()))
+                    .setMaxServiceCallAggregates(of(maxServiceCallAggregates()))
                     .setMaxTraceEntriesPerTransaction(of(maxTraceEntriesPerTransaction()))
-                    .setMaxStackTraceSamplesPerTransaction(of(maxStackTraceSamplesPerTransaction()))
+                    .setMaxProfileSamplesPerTransaction(of(maxProfileSamplesPerTransaction()))
                     .setMbeanGaugeNotFoundDelaySeconds(of(mbeanGaugeNotFoundDelaySeconds()))
+                    .setWeavingTimer(weavingTimer())
                     .build();
         }
 
         private static AdvancedConfigDto create(AdvancedConfig config) {
             return ImmutableAdvancedConfigDto.builder()
-                    .weavingTimer(config.getWeavingTimer())
                     .immediatePartialStoreThresholdSeconds(
                             config.getImmediatePartialStoreThresholdSeconds().getValue())
-                    .maxAggregateTransactionsPerType(
-                            config.getMaxAggregateTransactionsPerType().getValue())
-                    .maxAggregateQueriesPerType(config.getMaxAggregateQueriesPerType().getValue())
-                    .maxAggregateServiceCallsPerType(
-                            config.getMaxAggregateServiceCallsPerType().getValue())
+                    .maxTransactionAggregates(config.getMaxTransactionAggregates().getValue())
+                    .maxQueryAggregates(config.getMaxQueryAggregates().getValue())
+                    .maxServiceCallAggregates(config.getMaxServiceCallAggregates().getValue())
                     .maxTraceEntriesPerTransaction(
                             config.getMaxTraceEntriesPerTransaction().getValue())
-                    .maxStackTraceSamplesPerTransaction(
-                            config.getMaxStackTraceSamplesPerTransaction().getValue())
+                    .maxProfileSamplesPerTransaction(
+                            config.getMaxProfileSamplesPerTransaction().getValue())
                     .mbeanGaugeNotFoundDelaySeconds(
                             config.getMbeanGaugeNotFoundDelaySeconds().getValue())
+                    .weavingTimer(config.getWeavingTimer())
                     .version(Versions.getVersion(config))
                     .build();
         }
     }
 
     @Value.Immutable
-    abstract static class UiConfigDto {
+    interface UiDefaultsConfigResponse {
+        ImmutableUiDefaultsConfigDto config();
+        List<String> allTransactionTypes();
+        List<Gauge> allGauges();
+    }
 
-        abstract Optional<String> agentId(); // only used in request
-        abstract String defaultDisplayedTransactionType();
-        abstract ImmutableList<Double> defaultDisplayedPercentiles();
+    @Value.Immutable
+    abstract static class UiDefaultsConfigDto {
+
+        abstract String defaultTransactionType();
+        abstract List<Double> defaultPercentiles();
+        abstract List<String> defaultGaugeNames();
         abstract String version();
 
-        private UiConfig convert() throws Exception {
-            return UiConfig.newBuilder()
-                    .setDefaultDisplayedTransactionType(defaultDisplayedTransactionType())
-                    .addAllDefaultDisplayedPercentile(
-                            Ordering.natural().immutableSortedCopy(defaultDisplayedPercentiles()))
+        private UiDefaultsConfig convert() throws Exception {
+            return UiDefaultsConfig.newBuilder()
+                    .setDefaultTransactionType(defaultTransactionType())
+                    .addAllDefaultPercentile(
+                            Ordering.natural().immutableSortedCopy(defaultPercentiles()))
+                    .addAllDefaultGaugeName(defaultGaugeNames())
                     .build();
         }
 
-        private static UiConfigDto create(UiConfig config) {
-            return ImmutableUiConfigDto.builder()
-                    .defaultDisplayedTransactionType(config.getDefaultDisplayedTransactionType())
-                    .defaultDisplayedPercentiles(Ordering.natural()
-                            .immutableSortedCopy(config.getDefaultDisplayedPercentileList()))
+        private static ImmutableUiDefaultsConfigDto create(UiDefaultsConfig config) {
+            return ImmutableUiDefaultsConfigDto.builder()
+                    .defaultTransactionType(config.getDefaultTransactionType())
+                    .defaultPercentiles(Ordering.natural()
+                            .immutableSortedCopy(config.getDefaultPercentileList()))
+                    .defaultGaugeNames(config.getDefaultGaugeNameList())
                     .version(Versions.getVersion(config))
                     .build();
         }

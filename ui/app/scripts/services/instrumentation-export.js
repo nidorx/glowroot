@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,11 @@ glowroot.factory('instrumentationExport', [
       if (!config.classAnnotation) {
         delete config.classAnnotation;
       }
-      if (!config.methodDeclaringClassName) {
-        delete config.methodDeclaringClassName;
+      if (!config.subTypeRestriction) {
+        delete config.subTypeRestriction;
+      }
+      if (!config.superTypeRestriction) {
+        delete config.superTypeRestriction;
       }
       if (!config.methodAnnotation) {
         delete config.methodAnnotation;
@@ -56,13 +59,16 @@ glowroot.factory('instrumentationExport', [
       if (config.transactionSlowThresholdMillis === null) {
         delete config.transactionSlowThresholdMillis;
       }
+      if (config.alreadyInTransactionBehavior === null) {
+        delete config.alreadyInTransactionBehavior;
+      }
       if (!config.transactionOuter) {
         delete config.transactionOuter;
       }
       if (!config.traceEntryMessageTemplate) {
         delete config.traceEntryMessageTemplate;
       }
-      if (!config.traceEntryStackThresholdMillis) {
+      if (config.traceEntryStackThresholdMillis === null) {
         delete config.traceEntryStackThresholdMillis;
       }
       if (!config.traceEntryCaptureSelfNested) {

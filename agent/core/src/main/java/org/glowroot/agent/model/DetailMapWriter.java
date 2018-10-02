@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,97 +15,110 @@
  */
 package org.glowroot.agent.model;
 
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 
-import javax.annotation.Nullable;
-
-import com.google.common.base.Optional;
-import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.glowroot.agent.plugin.api.util.Optional;
 import org.glowroot.wire.api.model.TraceOuterClass.Trace;
-
-import static com.google.common.base.Preconditions.checkNotNull;
 
 public class DetailMapWriter {
 
     private static final Logger logger = LoggerFactory.getLogger(DetailMapWriter.class);
 
-    private static final String UNSHADED_GUAVA_OPTIONAL_CLASS_NAME;
-
-    static {
-        String className = Optional.class.getName();
-        if (className.startsWith("org.glowroot.agent.shaded")) {
-            className = className.replace("org.glowroot.agent.shaded", "com");
-        }
-        UNSHADED_GUAVA_OPTIONAL_CLASS_NAME = className;
-    }
+    private static final int MESSAGE_CHAR_LIMIT =
+            Integer.getInteger("glowroot.message.char.limit", 100000);
 
     private DetailMapWriter() {}
 
-    public static List<Trace.DetailEntry> toProto(
-            Map<String, ? extends /*@Nullable*/ Object> detail) {
-        return writeMap(detail);
+    public static List<Trace.DetailEntry> toProto(Map<String, ?> detail) {
+        return mapToProto(detail);
     }
 
-    private static List<Trace.DetailEntry> writeMap(Map<?, ?> detail) {
-        List<Trace.DetailEntry> entries = Lists.newArrayListWithCapacity(detail.size());
-        for (Entry<?, ? extends /*@Nullable*/ Object> entry : detail.entrySet()) {
+    private static Trace.DetailEntry createDetailEntry(String name, @Nullable Object value) {
+        if (value instanceof Map) {
+            return Trace.DetailEntry.newBuilder()
+                    .setName(name)
+                    .addAllChildEntry(mapToProto((Map<?, ?>) value))
+                    .build();
+        } else if (value instanceof List) {
+            return Trace.DetailEntry.newBuilder()
+                    .setName(name)
+                    .addAllValue(listToProto((List<?>) value))
+                    .build();
+        } else {
+            return Trace.DetailEntry.newBuilder()
+                    .setName(name)
+                    .addAllValue(singleObjectToProto(value))
+                    .build();
+        }
+    }
+
+    private static List<Trace.DetailEntry> mapToProto(Map<?, ?> map) {
+        List<Trace.DetailEntry> entries = Lists.newArrayListWithCapacity(map.size());
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
             Object key = entry.getKey();
             if (key == null) {
                 // skip invalid data
                 logger.warn("detail map has null key");
                 continue;
             }
-            String name = key.toString();
-            if (name == null) {
-                // skip invalid data
-                continue;
+            String name;
+            if (key instanceof String) {
+                name = (String) key;
+            } else {
+                name = convertToStringAndTruncate(key);
             }
             entries.add(createDetailEntry(name, entry.getValue()));
         }
         return entries;
     }
 
-    private static Trace.DetailEntry createDetailEntry(String name, @Nullable Object value) {
-        if (value instanceof Map) {
-            return Trace.DetailEntry.newBuilder().setName(name)
-                    .addAllChildEntry(writeMap((Map<?, ?>) value)).build();
-        } else if (value instanceof List) {
-            Trace.DetailEntry.Builder builder = Trace.DetailEntry.newBuilder().setName(name);
-            for (Object v : (List<?>) value) {
-                addValue(builder, v);
+    private static List<Trace.DetailValue> listToProto(List<?> list) {
+        List<Trace.DetailValue> detailValues = Lists.newArrayListWithCapacity(list.size());
+        for (Object item : (List<?>) list) {
+            Trace.DetailValue detailValue = createValue(item);
+            if (detailValue != null) {
+                detailValues.add(detailValue);
             }
-            return builder.build();
+        }
+        return detailValues;
+    }
+
+    private static List<Trace.DetailValue> singleObjectToProto(@Nullable Object value) {
+        Trace.DetailValue detailValue = createValue(value);
+        if (detailValue == null) {
+            return ImmutableList.of();
         } else {
-            // simple value
-            Trace.DetailEntry.Builder builder = Trace.DetailEntry.newBuilder().setName(name);
-            addValue(builder, value);
-            return builder.build();
+            return ImmutableList.of(detailValue);
         }
     }
 
-    private static void addValue(Trace.DetailEntry.Builder builder,
+    private static Trace. /*@Nullable*/ DetailValue createValue(
             @Nullable Object possiblyOptionalValue) {
         Object value = stripOptional(possiblyOptionalValue);
         if (value == null) {
             // add nothing (as a corollary, this will strip null/Optional.absent() items from lists)
+            return null;
         } else if (value instanceof String) {
-            builder.addValueBuilder().setString((String) value).build();
+            return Trace.DetailValue.newBuilder().setString((String) value).build();
         } else if (value instanceof Boolean) {
-            builder.addValueBuilder().setBoolean((Boolean) value).build();
+            return Trace.DetailValue.newBuilder().setBoolean((Boolean) value).build();
         } else if (value instanceof Long) {
-            builder.addValueBuilder().setLong((Long) value).build();
+            return Trace.DetailValue.newBuilder().setLong((Long) value).build();
+        } else if (value instanceof Integer) {
+            return Trace.DetailValue.newBuilder().setLong((Integer) value).build();
         } else if (value instanceof Number) {
-            builder.addValueBuilder().setDouble(((Number) value).doubleValue()).build();
+            return Trace.DetailValue.newBuilder().setDouble(((Number) value).doubleValue()).build();
         } else {
             logger.warn("detail map has unexpected value type: {}", value.getClass().getName());
-            builder.addValueBuilder().setString(Strings.nullToEmpty(value.toString())).build();
+            return Trace.DetailValue.newBuilder().setString(convertToStringAndTruncate(value))
+                    .build();
         }
     }
 
@@ -117,30 +130,25 @@ public class DetailMapWriter {
             Optional<?> val = (Optional<?>) value;
             return val.orNull();
         }
-        if (isUnshadedGuavaOptional(value) || isGuavaOptionalInAnotherClassLoader(value)) {
-            // this is just for plugin tests that run against shaded glowroot-core
-            Class<?> optionalClass = value.getClass().getSuperclass();
-            // just tested that super class is not null in condition
-            checkNotNull(optionalClass);
-            try {
-                Method orNullMethod = optionalClass.getMethod("orNull");
-                return orNullMethod.invoke(value);
-            } catch (Exception e) {
-                logger.error(e.getMessage(), e);
-                return null;
-            }
-        }
         return value;
     }
 
-    private static boolean isUnshadedGuavaOptional(Object value) {
-        Class<?> superClass = value.getClass().getSuperclass();
-        return superClass != null
-                && superClass.getName().equals(UNSHADED_GUAVA_OPTIONAL_CLASS_NAME);
+    // unexpected keys and values are not truncated in org.glowroot.agent.plugin.api.MessageImpl, so
+    // need to be truncated here after converting them to strings
+    private static String convertToStringAndTruncate(Object obj) {
+        String str = obj.toString();
+        if (str == null) {
+            return "";
+        }
+        return truncate(str);
     }
 
-    private static boolean isGuavaOptionalInAnotherClassLoader(Object value) {
-        Class<?> superClass = value.getClass().getSuperclass();
-        return superClass != null && superClass.getName().equals(Optional.class.getName());
+    private static String truncate(String s) {
+        if (s.length() <= MESSAGE_CHAR_LIMIT) {
+            return s;
+        } else {
+            return s.substring(0, MESSAGE_CHAR_LIMIT) + " [truncated to " + MESSAGE_CHAR_LIMIT
+                    + " characters]";
+        }
     }
 }

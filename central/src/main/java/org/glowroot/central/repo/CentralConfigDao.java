@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2017 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,89 +16,127 @@
 package org.glowroot.central.repo;
 
 import java.io.IOException;
-
-import javax.annotation.Nullable;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
-import com.datastax.driver.core.Session;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Optional;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
-import org.immutables.value.Value;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.glowroot.central.util.Cache;
+import org.glowroot.central.util.Cache.CacheLoader;
+import org.glowroot.central.util.ClusterManager;
+import org.glowroot.central.util.Session;
 import org.glowroot.common.util.ObjectMappers;
-import org.glowroot.common.util.Styles;
+import org.glowroot.common.util.Versions;
+import org.glowroot.common2.repo.ConfigRepository.OptimisticLockException;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
-public class CentralConfigDao {
+class CentralConfigDao {
 
     private static final Logger logger = LoggerFactory.getLogger(CentralConfigDao.class);
-
-    private static final String WITH_LCS =
-            "with compaction = { 'class' : 'LeveledCompactionStrategy' }";
 
     private static final ObjectMapper mapper = ObjectMappers.create();
 
     private final Session session;
 
-    private final PreparedStatement insertPS;
+    private final PreparedStatement insertIfNotExistsPS;
+    private final PreparedStatement updatePS;
     private final PreparedStatement readPS;
 
-    private final LoadingCache<CacheKey, Optional<Object>> cache =
-            CacheBuilder.newBuilder().build(new CentralConfigCacheLoader());
+    private final Cache<String, Optional<Object>> centralConfigCache;
 
-    public CentralConfigDao(Session session) {
+    private final Map<String, Class<?>> keyTypes = new ConcurrentHashMap<>();
+
+    CentralConfigDao(Session session, ClusterManager clusterManager) throws Exception {
         this.session = session;
 
-        session.execute("create table if not exists central_config (key varchar, value varchar,"
-                + " primary key (key)) " + WITH_LCS);
+        session.createTableWithLCS("create table if not exists central_config (key varchar, value"
+                + " varchar, primary key (key))");
 
-        insertPS = session.prepare("insert into central_config (key, value) values (?, ?)");
+        insertIfNotExistsPS = session
+                .prepare("insert into central_config (key, value) values (?, ?) if not exists");
+        updatePS =
+                session.prepare("update central_config set value = ? where key = ? if value = ?");
         readPS = session.prepare("select value from central_config where key = ?");
+
+        centralConfigCache =
+                clusterManager.createCache("centralConfigCache", new CentralConfigCacheLoader());
     }
 
-    void write(String key, Object config) throws JsonProcessingException {
-        BoundStatement boundStatement = insertPS.bind();
+    void addKeyType(String key, Class<?> clazz) {
+        keyTypes.put(key, clazz);
+    }
+
+    void write(String key, Object config, String priorVersion) throws Exception {
+        BoundStatement boundStatement = readPS.bind();
+        boundStatement.bind(key);
+        ResultSet results = session.execute(boundStatement);
+        Row row = results.one();
+        if (row == null) {
+            writeIfNotExists(key, config);
+            return;
+        }
+        String currValue = checkNotNull(row.getString(0));
+        Object currConfig = readValue(key, currValue);
+        if (!Versions.getJsonVersion(currConfig).equals(priorVersion)) {
+            throw new OptimisticLockException();
+        }
+        String newValue = mapper.writeValueAsString(config);
+        boundStatement = updatePS.bind();
         int i = 0;
+        boundStatement.setString(i++, newValue);
         boundStatement.setString(i++, key);
-        boundStatement.setString(i++, mapper.writeValueAsString(config));
-        session.execute(boundStatement);
-        cache.invalidate(ImmutableCacheKey.of(key, null));
+        boundStatement.setString(i++, currValue);
+        results = session.execute(boundStatement);
+        row = checkNotNull(results.one());
+        boolean applied = row.getBool("[applied]");
+        if (applied) {
+            centralConfigCache.invalidate(key);
+        } else {
+            throw new OptimisticLockException();
+        }
     }
 
     @Nullable
-    <T> T read(String key, Class<T> clazz) {
-        return clazz.cast(cache.getUnchecked(ImmutableCacheKey.of(key, clazz)).orNull());
+    Object read(String key) throws Exception {
+        return centralConfigCache.get(key).orNull();
     }
 
-    @Value.Immutable
-    @Styles.AllParameters
-    interface CacheKey {
-
-        String key();
-
-        // type is marked auxiliary so that it won't be included in hashCode or equals
-        // which is needed so that cache.invalidate() can be performed using the key alone
-        @Value.Auxiliary
-        @Nullable
-        @SuppressWarnings("immutables")
-        Class<?> type();
+    private void writeIfNotExists(String key, Object config) throws Exception {
+        String initialValue = mapper.writeValueAsString(config);
+        BoundStatement boundStatement = insertIfNotExistsPS.bind();
+        int i = 0;
+        boundStatement.setString(i++, key);
+        boundStatement.setString(i++, initialValue);
+        ResultSet results = session.execute(boundStatement);
+        Row row = checkNotNull(results.one());
+        boolean applied = row.getBool("[applied]");
+        if (applied) {
+            centralConfigCache.invalidate(key);
+        } else {
+            throw new OptimisticLockException();
+        }
     }
 
-    private class CentralConfigCacheLoader extends CacheLoader<CacheKey, Optional<Object>> {
+    private Object readValue(String key, String value) throws IOException {
+        Class<?> type = checkNotNull(keyTypes.get(key));
+        // config is non-null b/c text "null" is never stored
+        return checkNotNull(mapper.readValue(value, type));
+    }
+
+    private class CentralConfigCacheLoader implements CacheLoader<String, Optional<Object>> {
         @Override
-        public Optional<Object> load(CacheKey key) throws Exception {
+        public Optional<Object> load(String key) throws Exception {
             BoundStatement boundStatement = readPS.bind();
-            boundStatement.bind(key.key());
+            boundStatement.bind(key);
             ResultSet results = session.execute(boundStatement);
             Row row = results.one();
             if (row == null) {
@@ -109,9 +147,7 @@ public class CentralConfigDao {
                 return Optional.absent();
             }
             try {
-                Object config = mapper.readValue(value, checkNotNull(key.type()));
-                // config is non-null b/c text "null" is never stored
-                return Optional.of(checkNotNull(config));
+                return Optional.of(readValue(key, value));
             } catch (IOException e) {
                 logger.error("error parsing config node '{}': ", key, e);
                 return Optional.absent();

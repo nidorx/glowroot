@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package org.glowroot.ui;
 
 import java.io.File;
 import java.net.InetAddress;
+import java.util.Arrays;
 
 import javax.mail.Message;
 
@@ -24,24 +25,33 @@ import org.junit.Before;
 import org.junit.Test;
 
 import org.glowroot.common.live.LiveAggregateRepository;
-import org.glowroot.common.repo.ConfigRepository;
-import org.glowroot.common.repo.RepoAdmin;
-import org.glowroot.common.repo.util.MailService;
+import org.glowroot.common2.config.ImmutableEmbeddedAdminGeneralConfig;
+import org.glowroot.common2.repo.ConfigRepository;
+import org.glowroot.common2.repo.RepoAdmin;
+import org.glowroot.common2.repo.util.HttpClient;
+import org.glowroot.common2.repo.util.MailService;
 import org.glowroot.ui.AdminJsonService.SmtpConfigDto;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class AdminJsonServiceTest {
 
     private MockMailService mailService;
+    private HttpClient httpClient;
     private AdminJsonService adminJsonService;
 
     @Before
     public void beforeEachTest() {
         mailService = new MockMailService();
-        adminJsonService = new AdminJsonService(false, new File("."), mock(ConfigRepository.class),
-                mock(RepoAdmin.class), mock(LiveAggregateRepository.class), mailService);
+        httpClient = mock(HttpClient.class);
+        ConfigRepository configRepository = mock(ConfigRepository.class);
+        when(configRepository.getEmbeddedAdminGeneralConfig())
+                .thenReturn(ImmutableEmbeddedAdminGeneralConfig.builder().build());
+        adminJsonService = new AdminJsonService(false, false, false, Arrays.asList(new File(".")),
+                configRepository, mock(RepoAdmin.class), mock(LiveAggregateRepository.class),
+                mailService, httpClient);
     }
 
     @Test
@@ -49,7 +59,6 @@ public class AdminJsonServiceTest {
         // given
         SmtpConfigDto configDto = ImmutableSmtpConfigDto.builder()
                 .host("localhost")
-                .ssl(false)
                 .username("")
                 .passwordExists(false)
                 .fromEmailAddress("from@example.org")
@@ -64,7 +73,7 @@ public class AdminJsonServiceTest {
         assertThat(message.getFrom()[0].toString()).isEqualTo("From Example <from@example.org>");
         assertThat(message.getRecipients(Message.RecipientType.TO)[0].toString())
                 .isEqualTo("to@example.org");
-        assertThat(message.getSubject()).isEqualTo("Test email from Glowroot");
+        assertThat(message.getSubject()).isEqualTo("[Glowroot] Test email");
         assertThat(message.getContent()).isEqualTo("");
     }
 
@@ -73,7 +82,6 @@ public class AdminJsonServiceTest {
         // given
         SmtpConfigDto configDto = ImmutableSmtpConfigDto.builder()
                 .host("localhost")
-                .ssl(false)
                 .username("")
                 .passwordExists(false)
                 .fromEmailAddress("")
@@ -90,7 +98,7 @@ public class AdminJsonServiceTest {
                 .isEqualTo("From Example <glowroot@" + localHostname + ">");
         assertThat(message.getRecipients(Message.RecipientType.TO)[0].toString())
                 .isEqualTo("to@example.org");
-        assertThat(message.getSubject()).isEqualTo("Test email from Glowroot");
+        assertThat(message.getSubject()).isEqualTo("[Glowroot] Test email");
         assertThat(message.getContent()).isEqualTo("");
     }
 
@@ -99,7 +107,6 @@ public class AdminJsonServiceTest {
         // given
         SmtpConfigDto configDto = ImmutableSmtpConfigDto.builder()
                 .host("localhost")
-                .ssl(false)
                 .username("")
                 .passwordExists(false)
                 .fromEmailAddress("")
@@ -116,7 +123,7 @@ public class AdminJsonServiceTest {
                 .isEqualTo("Glowroot <glowroot@" + localHostname + ">");
         assertThat(message.getRecipients(Message.RecipientType.TO)[0].toString())
                 .isEqualTo("to@example.org");
-        assertThat(message.getSubject()).isEqualTo("Test email from Glowroot");
+        assertThat(message.getSubject()).isEqualTo("[Glowroot] Test email");
         assertThat(message.getContent()).isEqualTo("");
     }
 

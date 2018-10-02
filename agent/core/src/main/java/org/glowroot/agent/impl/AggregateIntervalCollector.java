@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,23 +15,20 @@
  */
 package org.glowroot.agent.impl;
 
-import java.io.IOException;
+import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Set;
 
-import javax.annotation.Nullable;
 import javax.annotation.concurrent.GuardedBy;
 
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 import org.glowroot.agent.collector.Collector;
+import org.glowroot.agent.collector.Collector.AggregateReader;
 import org.glowroot.agent.collector.Collector.AggregateVisitor;
-import org.glowroot.agent.collector.Collector.Aggregates;
-import org.glowroot.agent.model.Profile;
-import org.glowroot.agent.model.QueryCollector.SharedQueryTextCollector;
+import org.glowroot.agent.model.SharedQueryTextCollection;
 import org.glowroot.common.live.LiveAggregateRepository.OverviewAggregate;
 import org.glowroot.common.live.LiveAggregateRepository.PercentileAggregate;
 import org.glowroot.common.live.LiveAggregateRepository.ThroughputAggregate;
@@ -41,37 +38,37 @@ import org.glowroot.common.model.OverallSummaryCollector;
 import org.glowroot.common.model.ProfileCollector;
 import org.glowroot.common.model.QueryCollector;
 import org.glowroot.common.model.ServiceCallCollector;
-import org.glowroot.common.model.TransactionErrorSummaryCollector;
-import org.glowroot.common.model.TransactionSummaryCollector;
-import org.glowroot.common.repo.Utils;
+import org.glowroot.common.model.TransactionNameErrorSummaryCollector;
+import org.glowroot.common.model.TransactionNameSummaryCollector;
+import org.glowroot.common.util.CaptureTimes;
 import org.glowroot.common.util.Clock;
 import org.glowroot.wire.api.model.AggregateOuterClass.Aggregate;
 
 public class AggregateIntervalCollector {
 
-    private static final Logger logger = LoggerFactory.getLogger(AggregateIntervalCollector.class);
-
-    private static final AtomicBoolean maxAggregateTransactionsWarnLogged = new AtomicBoolean();
+    private static final String LIMIT_EXCEEDED_BUCKET = "LIMIT EXCEEDED BUCKET";
 
     private final long captureTime;
-    private final int maxAggregateTransactionsPerTransactionType;
-    private final int maxAggregateQueriesPerType;
-    private final int maxAggregateServiceCallsPerType;
+    private final int maxTransactionAggregates;
+    private final int maxQueryAggregates;
+    private final int maxServiceCallAggregates;
     private final Clock clock;
 
     @GuardedBy("lock")
     private final Map<String, IntervalTypeCollector> typeCollectors = Maps.newHashMap();
 
+    // lock is primarily for visibility (there is almost no contention since written via a single
+    // thread and flushed afterwards via a different thread, with potential concurrent access by the
+    // UI for "live" data when running the embedded collector)
     private final Object lock = new Object();
 
     AggregateIntervalCollector(long currentTime, long aggregateIntervalMillis,
-            int maxAggregateTransactionsPerTransactionType, int maxAggregateQueriesPerType,
-            int maxAggregateServiceCallsPerType, Clock clock) {
-        captureTime = Utils.getRollupCaptureTime(currentTime, aggregateIntervalMillis);
-        this.maxAggregateTransactionsPerTransactionType =
-                maxAggregateTransactionsPerTransactionType;
-        this.maxAggregateQueriesPerType = maxAggregateQueriesPerType;
-        this.maxAggregateServiceCallsPerType = maxAggregateServiceCallsPerType;
+            int maxTransactionAggregates, int maxQueryAggregates, int maxServiceCallAggregates,
+            Clock clock) {
+        captureTime = CaptureTimes.getRollup(currentTime, aggregateIntervalMillis);
+        this.maxTransactionAggregates = maxTransactionAggregates;
+        this.maxQueryAggregates = maxQueryAggregates;
+        this.maxServiceCallAggregates = maxServiceCallAggregates;
         this.clock = clock;
     }
 
@@ -97,7 +94,7 @@ public class AggregateIntervalCollector {
         }
     }
 
-    public void mergeTransactionSummariesInto(TransactionSummaryCollector collector,
+    public void mergeTransactionNameSummariesInto(TransactionNameSummaryCollector collector,
             String transactionType) {
         synchronized (lock) {
             IntervalTypeCollector typeCollector = typeCollectors.get(transactionType);
@@ -106,7 +103,7 @@ public class AggregateIntervalCollector {
             }
             for (AggregateCollector aggregateCollector : typeCollector.transactionAggregateCollectors
                     .values()) {
-                aggregateCollector.mergeTransactionSummariesInto(collector);
+                aggregateCollector.mergeTransactionNameSummariesInto(collector);
             }
         }
     }
@@ -122,8 +119,8 @@ public class AggregateIntervalCollector {
         }
     }
 
-    public void mergeTransactionErrorSummariesInto(TransactionErrorSummaryCollector collector,
-            String transactionType) {
+    public void mergeTransactionNameErrorSummariesInto(
+            TransactionNameErrorSummaryCollector collector, String transactionType) {
         synchronized (lock) {
             IntervalTypeCollector typeCollector = typeCollectors.get(transactionType);
             if (typeCollector == null) {
@@ -131,7 +128,7 @@ public class AggregateIntervalCollector {
             }
             for (AggregateCollector aggregateCollector : typeCollector.transactionAggregateCollectors
                     .values()) {
-                aggregateCollector.mergeTransactionErrorSummariesInto(collector);
+                aggregateCollector.mergeTransactionNameErrorSummariesInto(collector);
             }
         }
     }
@@ -188,7 +185,7 @@ public class AggregateIntervalCollector {
     }
 
     public void mergeQueriesInto(QueryCollector collector, String transactionType,
-            @Nullable String transactionName) throws IOException {
+            @Nullable String transactionName) {
         synchronized (lock) {
             AggregateCollector aggregateCollector =
                     getAggregateCollector(transactionType, transactionName);
@@ -200,7 +197,7 @@ public class AggregateIntervalCollector {
     }
 
     public void mergeServiceCallsInto(ServiceCallCollector collector, String transactionType,
-            @Nullable String transactionName) throws IOException {
+            @Nullable String transactionName) {
         synchronized (lock) {
             AggregateCollector aggregateCollector =
                     getAggregateCollector(transactionType, transactionName);
@@ -235,8 +232,16 @@ public class AggregateIntervalCollector {
         }
     }
 
+    // TODO report checker framework issue that occurs without this suppression
+    @SuppressWarnings("return.type.incompatible")
+    Set<String> getTransactionTypes() {
+        synchronized (lock) {
+            return typeCollectors.keySet();
+        }
+    }
+
     void flush(Collector collector) throws Exception {
-        collector.collectAggregates(captureTime, new AggregatesImpl());
+        collector.collectAggregates(new AggregateReaderImpl(captureTime));
     }
 
     void clear() {
@@ -245,6 +250,7 @@ public class AggregateIntervalCollector {
         }
     }
 
+    @GuardedBy("lock")
     private IntervalTypeCollector getTypeCollector(String transactionType) {
         IntervalTypeCollector typeCollector;
         typeCollector = typeCollectors.get(transactionType);
@@ -255,6 +261,7 @@ public class AggregateIntervalCollector {
         return typeCollector;
     }
 
+    @GuardedBy("lock")
     private @Nullable AggregateCollector getAggregateCollector(String transactionType,
             @Nullable String transactionName) {
         IntervalTypeCollector intervalTypeCollector = typeCollectors.get(transactionType);
@@ -275,51 +282,39 @@ public class AggregateIntervalCollector {
                 Maps.newConcurrentMap();
 
         private IntervalTypeCollector() {
-            overallAggregateCollector = new AggregateCollector(null, maxAggregateQueriesPerType,
-                    maxAggregateServiceCallsPerType);
+            overallAggregateCollector =
+                    new AggregateCollector(null, maxQueryAggregates, maxServiceCallAggregates);
         }
 
         private void add(Transaction transaction) {
             merge(transaction, overallAggregateCollector);
             AggregateCollector transactionAggregateCollector =
                     transactionAggregateCollectors.get(transaction.getTransactionName());
-            if (transactionAggregateCollector == null && transactionAggregateCollectors
-                    .size() < maxAggregateTransactionsPerTransactionType) {
-                transactionAggregateCollector =
-                        new AggregateCollector(transaction.getTransactionName(),
-                                maxAggregateQueriesPerType, maxAggregateServiceCallsPerType);
-                transactionAggregateCollectors.put(transaction.getTransactionName(),
-                        transactionAggregateCollector);
-            }
             if (transactionAggregateCollector == null) {
-                if (!maxAggregateTransactionsWarnLogged.getAndSet(true)) {
-                    logger.warn("the max transaction names per transaction type was exceeded"
-                            + " during the current interval. consider increasing the limit under"
-                            + " Configuration > Advanced, or reducing the number of transaction"
-                            + " names by configuring instrumentation points under Configuration"
-                            + " > Instrumentation that override the transaction name.");
+                if (transactionAggregateCollectors.size() < maxTransactionAggregates) {
+                    transactionAggregateCollector =
+                            createTransactionAggregateCollector(transaction.getTransactionName());
+                } else {
+                    transactionAggregateCollector =
+                            transactionAggregateCollectors.get(LIMIT_EXCEEDED_BUCKET);
+                    if (transactionAggregateCollector == null) {
+                        transactionAggregateCollector =
+                                createTransactionAggregateCollector(LIMIT_EXCEEDED_BUCKET);
+                    }
                 }
-                return;
             }
             merge(transaction, transactionAggregateCollector);
         }
 
+        private AggregateCollector createTransactionAggregateCollector(String transactionName) {
+            AggregateCollector transactionAggregateCollector = new AggregateCollector(
+                    transactionName, maxQueryAggregates, maxServiceCallAggregates);
+            transactionAggregateCollectors.put(transactionName, transactionAggregateCollector);
+            return transactionAggregateCollector;
+        }
+
         private void merge(Transaction transaction, AggregateCollector aggregateCollector) {
-            aggregateCollector.add(transaction);
-            aggregateCollector.getMainThreadRootTimers()
-                    .mergeRootTimer(transaction.getMainThreadRootTimer());
-            transaction.mergeAuxThreadTimersInto(aggregateCollector.getAuxThreadRootTimers());
-            transaction.mergeAsyncTimersInto(aggregateCollector.getAsyncTimers());
-            transaction.mergeQueriesInto(aggregateCollector.getQueryCollector());
-            transaction.mergeServiceCallsInto(aggregateCollector.getServiceCallCollector());
-            Profile mainThreadProfile = transaction.getMainThreadProfile();
-            if (mainThreadProfile != null) {
-                aggregateCollector.mergeMainThreadProfile(mainThreadProfile);
-            }
-            Profile auxThreadProfile = transaction.getAuxThreadProfile();
-            if (auxThreadProfile != null) {
-                aggregateCollector.mergeAuxThreadProfile(auxThreadProfile);
-            }
+            aggregateCollector.mergeDataFrom(transaction);
         }
 
         private @Nullable String getFullQueryText(String fullQueryTextSha1) {
@@ -337,13 +332,26 @@ public class AggregateIntervalCollector {
         }
     }
 
-    private class AggregatesImpl implements Aggregates {
+    private class AggregateReaderImpl implements AggregateReader {
+
+        private final long captureTime;
+
+        private AggregateReaderImpl(long captureTime) {
+            this.captureTime = captureTime;
+        }
+
         @Override
-        public <T extends Exception> void accept(AggregateVisitor<T> aggregateVisitor) throws T {
+        public long captureTime() {
+            return captureTime;
+        }
+
+        @Override
+        public void accept(AggregateVisitor aggregateVisitor) throws Exception {
             synchronized (lock) {
-                SharedQueryTextCollector sharedQueryTextCollector = new SharedQueryTextCollector();
+                SharedQueryTextCollectionImpl sharedQueryTextCollector =
+                        new SharedQueryTextCollectionImpl();
                 ScratchBuffer scratchBuffer = new ScratchBuffer();
-                for (Entry<String, IntervalTypeCollector> e : typeCollectors.entrySet()) {
+                for (Map.Entry<String, IntervalTypeCollector> e : typeCollectors.entrySet()) {
                     String transactionType = e.getKey();
                     IntervalTypeCollector intervalTypeCollector = e.getValue();
                     Aggregate overallAggregate = intervalTypeCollector.overallAggregateCollector
@@ -351,7 +359,7 @@ public class AggregateIntervalCollector {
                     aggregateVisitor.visitOverallAggregate(transactionType,
                             sharedQueryTextCollector.getAndClearLastestSharedQueryTexts(),
                             overallAggregate);
-                    for (Entry<String, AggregateCollector> f : intervalTypeCollector.transactionAggregateCollectors
+                    for (Map.Entry<String, AggregateCollector> f : intervalTypeCollector.transactionAggregateCollectors
                             .entrySet()) {
                         Aggregate transactionAggregate =
                                 f.getValue().build(sharedQueryTextCollector, scratchBuffer);
@@ -361,6 +369,30 @@ public class AggregateIntervalCollector {
                     }
                 }
             }
+        }
+    }
+
+    private static class SharedQueryTextCollectionImpl implements SharedQueryTextCollection {
+
+        private final Map<String, Integer> sharedQueryTextIndexes = Maps.newHashMap();
+
+        private List<String> latestSharedQueryTexts = Lists.newArrayList();
+
+        public List<String> getAndClearLastestSharedQueryTexts() {
+            List<String> latestSharedQueryTexts = this.latestSharedQueryTexts;
+            this.latestSharedQueryTexts = Lists.newArrayList();
+            return latestSharedQueryTexts;
+        }
+
+        @Override
+        public int getSharedQueryTextIndex(String queryText) {
+            Integer sharedQueryTextIndex = sharedQueryTextIndexes.get(queryText);
+            if (sharedQueryTextIndex == null) {
+                sharedQueryTextIndex = sharedQueryTextIndexes.size();
+                sharedQueryTextIndexes.put(queryText, sharedQueryTextIndex);
+                latestSharedQueryTexts.add(queryText);
+            }
+            return sharedQueryTextIndex;
         }
     }
 }

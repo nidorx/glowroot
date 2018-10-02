@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,9 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 
-import javax.annotation.Nullable;
-
 import com.google.common.collect.Sets;
 import io.grpc.stub.StreamObserver;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,18 +34,19 @@ import org.glowroot.agent.it.harness.grpc.JavaagentServiceOuterClass.AppUnderTes
 import org.glowroot.agent.it.harness.grpc.JavaagentServiceOuterClass.Void;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 class JavaagentServiceImpl extends JavaagentServiceImplBase {
 
     private static final Logger logger = LoggerFactory.getLogger(JavaagentServiceImpl.class);
 
-    private static final boolean checkThreads;
+    private static final boolean CHECK_THREADS;
 
     static {
         // only check threads for glowroot-agent-integration-tests
         // it is not always possible to clean up threads in plugin tests, e.g. OkHttp starts a
         // couple of threads that are not stoppable
-        checkThreads = Boolean.getBoolean("glowroot.test.checkThreads");
+        CHECK_THREADS = Boolean.getBoolean("glowroot.test.checkThreads");
     }
 
     private volatile @Nullable Thread executingAppThread;
@@ -71,8 +71,9 @@ class JavaagentServiceImpl extends JavaagentServiceImplBase {
         }
         try {
             executingAppThread = Thread.currentThread();
-            Class<?> appClass = Class.forName(request.getValue());
-            AppUnderTest app = (AppUnderTest) appClass.newInstance();
+            Class<?> appClass =
+                    Class.forName(request.getValue(), true, ClassLoader.getSystemClassLoader());
+            AppUnderTest app = (AppUnderTest) appClass.getConstructor().newInstance();
             app.executeApp();
         } catch (Throwable t) {
             logger.error(t.getMessage(), t);
@@ -84,7 +85,7 @@ class JavaagentServiceImpl extends JavaagentServiceImplBase {
         try {
             // this avoids a sporadic gRPC error when running AnalyzedClassPlanBeeIT
             // TODO after next gRPC release, remove this and see if sporadic error still occurs
-            Thread.sleep(100);
+            MILLISECONDS.sleep(100);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return;
@@ -142,11 +143,11 @@ class JavaagentServiceImpl extends JavaagentServiceImplBase {
     @Override
     public void shutdown(Void request, StreamObserver<Void> responseObserver) {
         try {
-            if (checkThreads && preExistingThreads != null) {
+            if (CHECK_THREADS && preExistingThreads != null) {
                 Threads.preShutdownCheck(preExistingThreads);
             }
             checkNotNull(MainEntryPoint.getGlowrootAgentInit()).close();
-            if (checkThreads && preExistingThreads != null) {
+            if (CHECK_THREADS && preExistingThreads != null) {
                 Threads.postShutdownCheck(preExistingThreads);
             }
         } catch (Throwable t) {
@@ -167,7 +168,7 @@ class JavaagentServiceImpl extends JavaagentServiceImplBase {
             public void run() {
                 try {
                     // wait a few millis for response to be returned
-                    Thread.sleep(10);
+                    MILLISECONDS.sleep(10);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }

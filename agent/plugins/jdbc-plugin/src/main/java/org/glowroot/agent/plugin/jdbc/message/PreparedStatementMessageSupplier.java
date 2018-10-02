@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,9 @@
  */
 package org.glowroot.agent.plugin.jdbc.message;
 
-import javax.annotation.Nullable;
-
 import org.glowroot.agent.plugin.api.QueryMessage;
 import org.glowroot.agent.plugin.api.QueryMessageSupplier;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 
 public class PreparedStatementMessageSupplier extends QueryMessageSupplier {
 
@@ -37,10 +36,10 @@ public class PreparedStatementMessageSupplier extends QueryMessageSupplier {
             appendParameters(sb, parameters);
             suffix = sb.toString();
         }
-        return QueryMessage.create("jdbc execution: ", suffix);
+        return QueryMessage.create("jdbc execute: ", suffix);
     }
 
-    static String appendParameters(StringBuilder sb, BindParameterList parameters) {
+    static void appendParameters(StringBuilder sb, BindParameterList parameters) {
         sb.append(" [");
         boolean first = true;
         for (Object parameter : parameters) {
@@ -59,6 +58,5 @@ public class PreparedStatementMessageSupplier extends QueryMessageSupplier {
             first = false;
         }
         sb.append("]");
-        return sb.toString();
     }
 }

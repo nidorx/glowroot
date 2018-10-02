@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2016 the original author or authors.
+ * Copyright 2014-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,49 +15,48 @@
  */
 package org.glowroot.tests.config;
 
-import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 
-import org.glowroot.tests.util.Utils;
+import org.glowroot.tests.util.Page;
 
 import static org.openqa.selenium.By.xpath;
 
-public class AdvancedConfigPage {
-
-    private final WebDriver driver;
+public class AdvancedConfigPage extends Page {
 
     public AdvancedConfigPage(WebDriver driver) {
-        this.driver = driver;
+        super(driver);
     }
 
     public WebElement getImmediatePartialStoreThresholdTextField() {
-        return withWait(xpath("//div[@gt-label='Immediate partial trace store threshold']//input"));
+        return getWithWait(
+                xpath("//div[@gt-label='Immediate partial trace store threshold']//input"));
     }
 
-    public WebElement getMaxAggregateQueriesPerTypeTextField() {
-        return withWait(xpath("//div[@gt-label='Max aggregate queries per query type']//input"));
+    public WebElement getMaxTransactionAggregatesTextField() {
+        return getWithWait(
+                xpath("//div[@gt-label='Max transaction aggregates per transaction type']//input"));
     }
 
-    public WebElement getMaxAggregateServiceCallsPerTypeTextField() {
-        return withWait(xpath(
-                "//div[@gt-label='Max aggregate service calls per service call type']//input"));
+    public WebElement getMaxQueryAggregatesTextField() {
+        return getWithWait(
+                xpath("//div[@gt-label='Max query aggregates per transaction aggregate']//input"));
+    }
+
+    public WebElement getMaxServiceCallAggregatesTextField() {
+        return getWithWait(xpath(
+                "//div[@gt-label='Max service call aggregates per transaction aggregate']//input"));
     }
 
     public WebElement getMaxTraceEntriesPerTransactionTextField() {
-        return withWait(xpath("//div[@gt-label='Max trace entries per transaction']//input"));
+        return getWithWait(xpath("//div[@gt-label='Max trace entries per transaction']//input"));
     }
 
-    public WebElement getMaxStackTraceSamplesPerTransactionTextField() {
-        return withWait(xpath("//div[@gt-label='Max stack trace samples per transaction']//input"));
+    public WebElement getMaxProfileSamplesPerTransactionTextField() {
+        return getWithWait(xpath("//div[@gt-label='Max profile samples per transaction']//input"));
     }
 
     public void clickSaveButton() {
-        WebElement saveButton = withWait(xpath("//button[normalize-space()='Save changes']"));
-        saveButton.click();
-    }
-
-    private WebElement withWait(By by) {
-        return Utils.withWait(driver, by);
+        clickWithWait(xpath("//button[normalize-space()='Save changes']"));
     }
 }

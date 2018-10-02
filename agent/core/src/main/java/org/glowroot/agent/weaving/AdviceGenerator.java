@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2016 the original author or authors.
+ * Copyright 2013-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import javax.annotation.Nullable;
-
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.checkerframework.checker.nullness.qual.RequiresNonNull;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassWriter;
@@ -35,6 +34,7 @@ import org.slf4j.LoggerFactory;
 import org.glowroot.agent.config.InstrumentationConfig;
 import org.glowroot.agent.plugin.api.ThreadContext.Priority;
 import org.glowroot.agent.weaving.ClassLoaders.LazyDefinedClass;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig.AlreadyInTransactionBehavior;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig.CaptureKind;
 
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -50,6 +50,8 @@ import static org.objectweb.asm.Opcodes.CHECKCAST;
 import static org.objectweb.asm.Opcodes.GETFIELD;
 import static org.objectweb.asm.Opcodes.GETSTATIC;
 import static org.objectweb.asm.Opcodes.GOTO;
+import static org.objectweb.asm.Opcodes.ICONST_0;
+import static org.objectweb.asm.Opcodes.ICONST_1;
 import static org.objectweb.asm.Opcodes.IFEQ;
 import static org.objectweb.asm.Opcodes.IFNE;
 import static org.objectweb.asm.Opcodes.IFNONNULL;
@@ -109,7 +111,7 @@ class AdviceGenerator {
         }
     }
 
-    private LazyDefinedClass generate() throws Exception {
+    private LazyDefinedClass generate() {
         LazyDefinedClass methodMetaClass = null;
         if (methodMetaInternalName != null) {
             methodMetaClass = generateMethodMetaClass(config);
@@ -124,9 +126,10 @@ class AdviceGenerator {
         addClassAnnotation(cw);
         addStaticFields(cw);
         addStaticInitializer(cw);
-        if (pluginId != null && !config.enabledProperty().isEmpty()) {
-            addIsEnabledMethod(cw);
-        }
+        boolean checkNotInTransaction = config.isTransaction()
+                && config.alreadyInTransactionBehavior() == AlreadyInTransactionBehavior.DO_NOTHING;
+        boolean checkPropertyNotEnabled = pluginId != null && !config.enabledProperty().isEmpty();
+        addIsEnabledMethodIfNeeded(cw, checkNotInTransaction, checkPropertyNotEnabled);
         if (config.isTraceEntryOrGreater()) {
             // methodMetaInternalName is non-null when entry or greater
             checkNotNull(methodMetaInternalName);
@@ -154,11 +157,12 @@ class AdviceGenerator {
                 cw.visitAnnotation("Lorg/glowroot/agent/plugin/api/weaving/Pointcut;", true);
         annotationVisitor.visit("className", config.className());
         annotationVisitor.visit("classAnnotation", config.classAnnotation());
-        annotationVisitor.visit("methodDeclaringClassName", config.methodDeclaringClassName());
+        annotationVisitor.visit("subTypeRestriction", config.subTypeRestriction());
+        annotationVisitor.visit("superTypeRestriction", config.superTypeRestriction());
         annotationVisitor.visit("methodName", config.methodName());
         annotationVisitor.visit("methodAnnotation", config.methodAnnotation());
         AnnotationVisitor arrayAnnotationVisitor =
-                annotationVisitor.visitArray("methodParameterTypes");
+                checkNotNull(annotationVisitor.visitArray("methodParameterTypes"));
         for (String methodParameterType : config.methodParameterTypes()) {
             arrayAnnotationVisitor.visit(null, methodParameterType);
         }
@@ -248,15 +252,57 @@ class AdviceGenerator {
         mv.visitEnd();
     }
 
-    private void addIsEnabledMethod(ClassWriter cw) {
-        MethodVisitor mv = cw.visitMethod(ACC_PUBLIC + ACC_STATIC, "isEnabled", "()Z", null, null);
+    private void addIsEnabledMethodIfNeeded(ClassWriter cw, boolean checkNotInTransaction,
+            boolean checkPropertyNotEnabled) {
+        if (!checkNotInTransaction && !checkPropertyNotEnabled) {
+            return;
+        }
+        String desc;
+        if (checkNotInTransaction) {
+            desc = "(Lorg/glowroot/agent/plugin/api/OptionalThreadContext;)Z";
+        } else {
+            desc = "()Z";
+        }
+        MethodVisitor mv = cw.visitMethod(ACC_PUBLIC + ACC_STATIC, "isEnabled", desc, null, null);
         visitAnnotation(mv, "Lorg/glowroot/agent/plugin/api/weaving/IsEnabled;");
         mv.visitCode();
-        mv.visitFieldInsn(GETSTATIC, adviceInternalName, "enabled",
-                "Lorg/glowroot/agent/plugin/api/config/BooleanProperty;");
-        mv.visitMethodInsn(INVOKEINTERFACE, "org/glowroot/agent/plugin/api/config/BooleanProperty",
-                "value", "()Z", true);
-        mv.visitInsn(IRETURN);
+        if (checkNotInTransaction && !checkPropertyNotEnabled) {
+            mv.visitMethodInsn(INVOKEINTERFACE,
+                    "org/glowroot/agent/plugin/api/OptionalThreadContext", "isInTransaction", "()Z",
+                    true);
+            Label returnTrueLabel = new Label();
+            mv.visitJumpInsn(IFEQ, returnTrueLabel);
+            mv.visitInsn(ICONST_0);
+            mv.visitInsn(IRETURN);
+            mv.visitLabel(returnTrueLabel);
+            mv.visitInsn(ICONST_1);
+            mv.visitInsn(IRETURN);
+        } else if (!checkNotInTransaction) {
+            mv.visitFieldInsn(GETSTATIC, adviceInternalName, "enabled",
+                    "Lorg/glowroot/agent/plugin/api/config/BooleanProperty;");
+            mv.visitMethodInsn(INVOKEINTERFACE,
+                    "org/glowroot/agent/plugin/api/config/BooleanProperty", "value", "()Z", true);
+            mv.visitInsn(IRETURN);
+        } else {
+            // check both
+            mv.visitMethodInsn(INVOKEINTERFACE,
+                    "org/glowroot/agent/plugin/api/OptionalThreadContext", "isInTransaction", "()Z",
+                    true);
+            Label returnTrueLabel = new Label();
+            mv.visitJumpInsn(IFEQ, returnTrueLabel);
+            mv.visitInsn(ICONST_0);
+            mv.visitInsn(IRETURN);
+            mv.visitFieldInsn(GETSTATIC, adviceInternalName, "enabled",
+                    "Lorg/glowroot/agent/plugin/api/config/BooleanProperty;");
+            mv.visitMethodInsn(INVOKEINTERFACE,
+                    "org/glowroot/agent/plugin/api/config/BooleanProperty", "value", "()Z", true);
+            mv.visitJumpInsn(IFNE, returnTrueLabel);
+            mv.visitInsn(ICONST_0);
+            mv.visitInsn(IRETURN);
+            mv.visitLabel(returnTrueLabel);
+            mv.visitInsn(ICONST_1);
+            mv.visitInsn(IRETURN);
+        }
         mv.visitMaxs(0, 0);
         mv.visitEnd();
     }
@@ -293,39 +339,54 @@ class AdviceGenerator {
             }
             mv.visitVarInsn(ALOAD, 4);
             mv.visitMethodInsn(INVOKEVIRTUAL, methodMetaInternalName, "getTransactionNameTemplate",
-                    "()Lorg/glowroot/agent/weaving/MessageTemplate;", false);
+                    "()Lorg/glowroot/agent/bytecode/api/MessageTemplate;", false);
             mv.visitVarInsn(ALOAD, 1);
             mv.visitVarInsn(ALOAD, 2);
             mv.visitVarInsn(ALOAD, 3);
-            mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/GenericMessageSupplier",
-                    "create",
-                    "(Lorg/glowroot/agent/weaving/MessageTemplate;"
+            mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/bytecode/api/Bytecode",
+                    "getMessageText",
+                    "(Lorg/glowroot/agent/bytecode/api/MessageTemplate;"
                             + "Ljava/lang/Object;Ljava/lang/String;[Ljava/lang/Object;)"
-                            + "Lorg/glowroot/agent/weaving/GenericMessageSupplier;",
+                            + "Ljava/lang/String;",
                     false);
-            mv.visitMethodInsn(INVOKEVIRTUAL, "org/glowroot/agent/weaving/GenericMessageSupplier",
-                    "getMessageText", "()Ljava/lang/String;", false);
         }
         mv.visitVarInsn(ALOAD, 4);
         mv.visitMethodInsn(INVOKEVIRTUAL, methodMetaInternalName, "getMessageTemplate",
-                "()Lorg/glowroot/agent/weaving/MessageTemplate;", false);
+                "()Lorg/glowroot/agent/bytecode/api/MessageTemplate;", false);
         mv.visitVarInsn(ALOAD, 1);
         mv.visitVarInsn(ALOAD, 2);
         mv.visitVarInsn(ALOAD, 3);
-        mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/GenericMessageSupplier",
-                "create",
-                "(Lorg/glowroot/agent/weaving/MessageTemplate;"
+        mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/bytecode/api/Bytecode",
+                "createMessageSupplier",
+                "(Lorg/glowroot/agent/bytecode/api/MessageTemplate;"
                         + "Ljava/lang/Object;Ljava/lang/String;[Ljava/lang/Object;)"
-                        + "Lorg/glowroot/agent/weaving/GenericMessageSupplier;",
+                        + "Lorg/glowroot/agent/plugin/api/MessageSupplier;",
                 false);
         mv.visitFieldInsn(GETSTATIC, adviceInternalName, "timerName",
                 "Lorg/glowroot/agent/plugin/api/TimerName;");
         if (config.isTransaction()) {
+            String fieldName;
+            if (config
+                    .alreadyInTransactionBehaviorCorrected() == AlreadyInTransactionBehavior.CAPTURE_NEW_TRANSACTION) {
+                fieldName = "CAPTURE_NEW_TRANSACTION";
+            } else {
+                // it doesn't matter what DO_NOTHING is mapped to, since in that case the @OnBefore
+                // method will be bypassed completely if already in a transaction due to @IsEnabled
+                fieldName = "CAPTURE_TRACE_ENTRY";
+            }
+            mv.visitFieldInsn(GETSTATIC,
+                    "org/glowroot/agent/plugin/api/OptionalThreadContext"
+                            + "$AlreadyInTransactionBehavior",
+                    fieldName,
+                    "Lorg/glowroot/agent/plugin/api/OptionalThreadContext"
+                            + "$AlreadyInTransactionBehavior;");
             mv.visitMethodInsn(INVOKEINTERFACE,
                     "org/glowroot/agent/plugin/api/OptionalThreadContext", "startTransaction",
                     "(Ljava/lang/String;Ljava/lang/String;"
                             + "Lorg/glowroot/agent/plugin/api/MessageSupplier;"
-                            + "Lorg/glowroot/agent/plugin/api/TimerName;)"
+                            + "Lorg/glowroot/agent/plugin/api/TimerName;"
+                            + "Lorg/glowroot/agent/plugin/api/OptionalThreadContext"
+                            + "$AlreadyInTransactionBehavior;)"
                             + "Lorg/glowroot/agent/plugin/api/TraceEntry;",
                     true);
         } else {
@@ -386,14 +447,6 @@ class AdviceGenerator {
         MethodVisitor mv =
                 cw.visitMethod(ACC_PUBLIC + ACC_STATIC, "onBefore", desc.toString(), null, null);
         visitAnnotation(mv, "Lorg/glowroot/agent/plugin/api/weaving/OnBefore;");
-        if (config.isTransaction()) {
-            mv.visitParameterAnnotation(0,
-                    "Lorg/glowroot/agent/plugin/api/weaving/BindOptionalThreadContext;", true)
-                    .visitEnd();
-        } else {
-            mv.visitParameterAnnotation(0,
-                    "Lorg/glowroot/agent/plugin/api/weaving/BindThreadContext;", true).visitEnd();
-        }
         if (methodMetaInternalName != null) {
             mv.visitParameterAnnotation(1, "Lorg/glowroot/agent/plugin/api/weaving/BindReceiver;",
                     true).visitEnd();
@@ -431,18 +484,16 @@ class AdviceGenerator {
             checkNotNull(methodMetaInternalName);
             mv.visitMethodInsn(INVOKEVIRTUAL, methodMetaInternalName,
                     "getTransactionAttributeTemplate" + i++,
-                    "()Lorg/glowroot/agent/weaving/MessageTemplate;", false);
+                    "()Lorg/glowroot/agent/bytecode/api/MessageTemplate;", false);
             mv.visitVarInsn(ALOAD, 1);
             mv.visitVarInsn(ALOAD, 2);
             mv.visitVarInsn(ALOAD, 3);
-            mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/GenericMessageSupplier",
-                    "create",
-                    "(Lorg/glowroot/agent/weaving/MessageTemplate;"
+            mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/bytecode/api/Bytecode",
+                    "getMessageText",
+                    "(Lorg/glowroot/agent/bytecode/api/MessageTemplate;"
                             + "Ljava/lang/Object;Ljava/lang/String;[Ljava/lang/Object;)"
-                            + "Lorg/glowroot/agent/weaving/GenericMessageSupplier;",
+                            + "Ljava/lang/String;",
                     false);
-            mv.visitMethodInsn(INVOKEVIRTUAL, "org/glowroot/agent/weaving/GenericMessageSupplier",
-                    "getMessageText", "()Ljava/lang/String;", false);
             mv.visitMethodInsn(INVOKEINTERFACE, "org/glowroot/agent/plugin/api/ThreadContext",
                     "addTransactionAttribute", "(Ljava/lang/String;Ljava/lang/String;)V", true);
         }
@@ -461,21 +512,6 @@ class AdviceGenerator {
             mv.visitMethodInsn(INVOKEINTERFACE, "org/glowroot/agent/plugin/api/ThreadContext",
                     "setTransactionOuter", "()V", true);
         }
-    }
-
-    private void addOnAfterMethodTimerOnly(ClassWriter cw) {
-        MethodVisitor mv = cw.visitMethod(ACC_PUBLIC + ACC_STATIC, "onAfter",
-                "(Lorg/glowroot/agent/plugin/api/Timer;)V", null, null);
-        visitAnnotation(mv, "Lorg/glowroot/agent/plugin/api/weaving/OnAfter;");
-        mv.visitParameterAnnotation(0, "Lorg/glowroot/agent/plugin/api/weaving/BindTraveler;", true)
-                .visitEnd();
-        mv.visitCode();
-        mv.visitVarInsn(ALOAD, 0);
-        mv.visitMethodInsn(INVOKEINTERFACE, "org/glowroot/agent/plugin/api/Timer", "stop", "()V",
-                true);
-        mv.visitInsn(RETURN);
-        mv.visitMaxs(0, 0);
-        mv.visitEnd();
     }
 
     private void addOnReturnMethod(ClassWriter cw) {
@@ -520,7 +556,7 @@ class AdviceGenerator {
         mv.visitMethodInsn(INVOKEINTERFACE, "org/glowroot/agent/plugin/api/weaving/OptionalReturn",
                 "getValue", "()Ljava/lang/Object;", true);
         mv.visitLabel(endIfLabel);
-        mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/GenericMessageSupplier",
+        mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/bytecode/api/Bytecode",
                 "updateWithReturnValue",
                 "(Lorg/glowroot/agent/plugin/api/TraceEntry;Ljava/lang/Object;)V", false);
         mv.visitVarInsn(ALOAD, travelerParamIndex);
@@ -533,7 +569,7 @@ class AdviceGenerator {
             mv.visitFieldInsn(GETSTATIC, "java/util/concurrent/TimeUnit", "MILLISECONDS",
                     "Ljava/util/concurrent/TimeUnit;");
             mv.visitMethodInsn(INVOKEINTERFACE, "org/glowroot/agent/plugin/api/TraceEntry",
-                    "endWithStackTrace", "(JLjava/util/concurrent/TimeUnit;)V", true);
+                    "endWithLocationStackTrace", "(JLjava/util/concurrent/TimeUnit;)V", true);
         }
         mv.visitInsn(RETURN);
         mv.visitMaxs(0, 0);
@@ -566,24 +602,23 @@ class AdviceGenerator {
     }
 
     @RequiresNonNull("methodMetaInternalName")
-    private LazyDefinedClass generateMethodMetaClass(InstrumentationConfig config)
-            throws Exception {
+    private LazyDefinedClass generateMethodMetaClass(InstrumentationConfig config) {
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS + ClassWriter.COMPUTE_FRAMES);
         cw.visit(V1_5, ACC_PUBLIC + ACC_SUPER, methodMetaInternalName, null, "java/lang/Object",
                 null);
         cw.visitField(ACC_PRIVATE + ACC_FINAL, "messageTemplate",
-                "Lorg/glowroot/agent/weaving/MessageTemplate;", null, null).visitEnd();
+                "Lorg/glowroot/agent/bytecode/api/MessageTemplate;", null, null).visitEnd();
         if (!config.transactionNameTemplate().isEmpty()) {
             cw.visitField(ACC_PRIVATE + ACC_FINAL, "transactionNameTemplate",
-                    "Lorg/glowroot/agent/weaving/MessageTemplate;", null, null).visitEnd();
+                    "Lorg/glowroot/agent/bytecode/api/MessageTemplate;", null, null).visitEnd();
         }
         if (!config.transactionUserTemplate().isEmpty()) {
             cw.visitField(ACC_PRIVATE + ACC_FINAL, "transactionUserTemplate",
-                    "Lorg/glowroot/agent/weaving/MessageTemplate;", null, null).visitEnd();
+                    "Lorg/glowroot/agent/bytecode/api/MessageTemplate;", null, null).visitEnd();
         }
         for (int i = 0; i < config.transactionAttributeTemplates().size(); i++) {
             cw.visitField(ACC_PRIVATE + ACC_FINAL, "transactionAttributeTemplate" + i,
-                    "Lorg/glowroot/agent/weaving/MessageTemplate;", null, null).visitEnd();
+                    "Lorg/glowroot/agent/bytecode/api/MessageTemplate;", null, null).visitEnd();
         }
         generateMethodMetaConstructor(cw);
         generateMethodMetaGetter(cw, "messageTemplate", "getMessageTemplate");
@@ -612,18 +647,16 @@ class AdviceGenerator {
         // transactionUserTemplate are non-empty
         checkNotNull(methodMetaInternalName);
         mv.visitMethodInsn(INVOKEVIRTUAL, methodMetaInternalName, templateGetterName,
-                "()Lorg/glowroot/agent/weaving/MessageTemplate;", false);
+                "()Lorg/glowroot/agent/bytecode/api/MessageTemplate;", false);
         mv.visitVarInsn(ALOAD, 1);
         mv.visitVarInsn(ALOAD, 2);
         mv.visitVarInsn(ALOAD, 3);
-        mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/GenericMessageSupplier",
-                "create",
-                "(Lorg/glowroot/agent/weaving/MessageTemplate;Ljava/lang/Object;"
+        mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/bytecode/api/Bytecode",
+                "getMessageText",
+                "(Lorg/glowroot/agent/bytecode/api/MessageTemplate;Ljava/lang/Object;"
                         + "Ljava/lang/String;[Ljava/lang/Object;)"
-                        + "Lorg/glowroot/agent/weaving/GenericMessageSupplier;",
+                        + "Ljava/lang/String;",
                 false);
-        mv.visitMethodInsn(INVOKEVIRTUAL, "org/glowroot/agent/weaving/GenericMessageSupplier",
-                "getMessageText", "()Ljava/lang/String;", false);
         mv.visitLdcInsn(Priority.USER_CONFIG);
         mv.visitMethodInsn(INVOKEINTERFACE, "org/glowroot/agent/plugin/api/ThreadContext",
                 threadContextSetterName, "(Ljava/lang/String;I)V", true);
@@ -648,49 +681,49 @@ class AdviceGenerator {
                 mv.visitLdcInsn(messageTemplate);
             }
             mv.visitVarInsn(ALOAD, 1);
-            mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/MessageTemplate",
-                    "create", "(Ljava/lang/String;Ljava/lang/reflect/Method;)"
-                            + "Lorg/glowroot/agent/weaving/MessageTemplate;",
+            mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/bytecode/api/Bytecode",
+                    "createMessageTemplate", "(Ljava/lang/String;Ljava/lang/reflect/Method;)"
+                            + "Lorg/glowroot/agent/bytecode/api/MessageTemplate;",
                     false);
         } else {
             mv.visitInsn(ACONST_NULL);
         }
         mv.visitFieldInsn(PUTFIELD, methodMetaInternalName, "messageTemplate",
-                "Lorg/glowroot/agent/weaving/MessageTemplate;");
+                "Lorg/glowroot/agent/bytecode/api/MessageTemplate;");
         if (!config.transactionNameTemplate().isEmpty()) {
             mv.visitVarInsn(ALOAD, 0);
             mv.visitLdcInsn(config.transactionNameTemplate());
             mv.visitVarInsn(ALOAD, 1);
-            mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/MessageTemplate",
-                    "create", "(Ljava/lang/String;Ljava/lang/reflect/Method;)"
-                            + "Lorg/glowroot/agent/weaving/MessageTemplate;",
+            mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/bytecode/api/Bytecode",
+                    "createMessageTemplate", "(Ljava/lang/String;Ljava/lang/reflect/Method;)"
+                            + "Lorg/glowroot/agent/bytecode/api/MessageTemplate;",
                     false);
             mv.visitFieldInsn(PUTFIELD, methodMetaInternalName, "transactionNameTemplate",
-                    "Lorg/glowroot/agent/weaving/MessageTemplate;");
+                    "Lorg/glowroot/agent/bytecode/api/MessageTemplate;");
         }
         if (!config.transactionUserTemplate().isEmpty()) {
             mv.visitVarInsn(ALOAD, 0);
             mv.visitLdcInsn(config.transactionUserTemplate());
             mv.visitVarInsn(ALOAD, 1);
-            mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/MessageTemplate",
-                    "create", "(Ljava/lang/String;Ljava/lang/reflect/Method;)"
-                            + "Lorg/glowroot/agent/weaving/MessageTemplate;",
+            mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/bytecode/api/Bytecode",
+                    "createMessageTemplate", "(Ljava/lang/String;Ljava/lang/reflect/Method;)"
+                            + "Lorg/glowroot/agent/bytecode/api/MessageTemplate;",
                     false);
             mv.visitFieldInsn(PUTFIELD, methodMetaInternalName, "transactionUserTemplate",
-                    "Lorg/glowroot/agent/weaving/MessageTemplate;");
+                    "Lorg/glowroot/agent/bytecode/api/MessageTemplate;");
         }
         int i = 0;
         for (String attrTemplate : config.transactionAttributeTemplates().values()) {
             mv.visitVarInsn(ALOAD, 0);
             mv.visitLdcInsn(attrTemplate);
             mv.visitVarInsn(ALOAD, 1);
-            mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/weaving/MessageTemplate",
-                    "create", "(Ljava/lang/String;Ljava/lang/reflect/Method;)"
-                            + "Lorg/glowroot/agent/weaving/MessageTemplate;",
+            mv.visitMethodInsn(INVOKESTATIC, "org/glowroot/agent/bytecode/api/Bytecode",
+                    "createMessageTemplate", "(Ljava/lang/String;Ljava/lang/reflect/Method;)"
+                            + "Lorg/glowroot/agent/bytecode/api/MessageTemplate;",
                     false);
             mv.visitFieldInsn(PUTFIELD, methodMetaInternalName,
                     "transactionAttributeTemplate" + i++,
-                    "Lorg/glowroot/agent/weaving/MessageTemplate;");
+                    "Lorg/glowroot/agent/bytecode/api/MessageTemplate;");
         }
         mv.visitInsn(RETURN);
         mv.visitMaxs(0, 0);
@@ -700,12 +733,27 @@ class AdviceGenerator {
     @RequiresNonNull("methodMetaInternalName")
     private void generateMethodMetaGetter(ClassWriter cw, String fieldName, String methodName) {
         MethodVisitor mv = cw.visitMethod(ACC_PUBLIC, methodName,
-                "()Lorg/glowroot/agent/weaving/MessageTemplate;", null, null);
+                "()Lorg/glowroot/agent/bytecode/api/MessageTemplate;", null, null);
         mv.visitCode();
         mv.visitVarInsn(ALOAD, 0);
         mv.visitFieldInsn(GETFIELD, methodMetaInternalName, fieldName,
-                "Lorg/glowroot/agent/weaving/MessageTemplate;");
+                "Lorg/glowroot/agent/bytecode/api/MessageTemplate;");
         mv.visitInsn(ARETURN);
+        mv.visitMaxs(0, 0);
+        mv.visitEnd();
+    }
+
+    private static void addOnAfterMethodTimerOnly(ClassWriter cw) {
+        MethodVisitor mv = cw.visitMethod(ACC_PUBLIC + ACC_STATIC, "onAfter",
+                "(Lorg/glowroot/agent/plugin/api/Timer;)V", null, null);
+        visitAnnotation(mv, "Lorg/glowroot/agent/plugin/api/weaving/OnAfter;");
+        mv.visitParameterAnnotation(0, "Lorg/glowroot/agent/plugin/api/weaving/BindTraveler;", true)
+                .visitEnd();
+        mv.visitCode();
+        mv.visitVarInsn(ALOAD, 0);
+        mv.visitMethodInsn(INVOKEINTERFACE, "org/glowroot/agent/plugin/api/Timer", "stop", "()V",
+                true);
+        mv.visitInsn(RETURN);
         mv.visitMaxs(0, 0);
         mv.visitEnd();
     }

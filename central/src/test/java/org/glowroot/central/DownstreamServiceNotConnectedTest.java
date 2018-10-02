@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2017 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,27 +16,42 @@
 package org.glowroot.central;
 
 import com.google.common.collect.ImmutableList;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
-import org.glowroot.central.repo.AgentDao;
+import org.glowroot.central.util.ClusterManager;
 import org.glowroot.common.live.LiveJvmService.AgentNotConnectedException;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig;
 import org.glowroot.wire.api.model.DownstreamServiceOuterClass.MBeanDumpRequest.MBeanDumpKind;
 
 import static org.mockito.Mockito.mock;
 
 public class DownstreamServiceNotConnectedTest {
 
+    private static ClusterManager clusterManager;
+
     private DownstreamServiceImpl downstreamService =
-            new DownstreamServiceImpl(mock(AgentDao.class));
+            new DownstreamServiceImpl(mock(GrpcCommon.class), clusterManager);
 
     @Rule
     public ExpectedException thrown = ExpectedException.none();
 
+    @BeforeClass
+    public static void setUp() throws Exception {
+        clusterManager = ClusterManager.create();
+    }
+
+    @AfterClass
+    public static void tearDown() throws Exception {
+        clusterManager.close();
+    }
+
     @Test
     public void shouldNotThrowAgentNotConnectExceptionOnUpdateAgentConfig() throws Exception {
-        downstreamService.updateAgentConfigIfConnectedAndNeeded("a");
+        downstreamService.updateAgentConfigIfConnected("a", AgentConfig.getDefaultInstance());
     }
 
     @Test
@@ -58,9 +73,15 @@ public class DownstreamServiceNotConnectedTest {
     }
 
     @Test
+    public void shouldThrowAgentNotConnectExceptionOnExplicitGcDisabled() throws Exception {
+        thrown.expect(AgentNotConnectedException.class);
+        downstreamService.isExplicitGcDisabled("a");
+    }
+
+    @Test
     public void shouldThrowAgentNotConnectExceptionOnGc() throws Exception {
         thrown.expect(AgentNotConnectedException.class);
-        downstreamService.gc("a");
+        downstreamService.forceGC("a");
     }
 
     @Test

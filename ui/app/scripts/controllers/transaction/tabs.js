@@ -21,15 +21,17 @@ glowroot.controller('TransactionTabCtrl', [
   '$location',
   '$http',
   '$timeout',
+  '$filter',
   'queryStrings',
   'httpErrors',
   'shortName',
-  function ($scope, $location, $http, $timeout, queryStrings, httpErrors, shortName) {
+  function ($scope, $location, $http, $timeout, $filter, queryStrings, httpErrors, shortName) {
 
-    var filteredTraceTabCount;
     var concurrentUpdateCount = 0;
 
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh', 'range.chartAutoRefresh', 'transactionName'],
+    // using $watch instead of $watchGroup because $watchGroup has confusing behavior regarding oldValues
+    // (see https://github.com/angular/angular.js/pull/12643)
+    $scope.$watch('[range.chartFrom, range.chartTo, range.chartRefresh, range.chartAutoRefresh, transactionName]',
         function (newValues, oldValues) {
           if (newValues !== oldValues) {
             $timeout(function () {
@@ -39,18 +41,11 @@ glowroot.controller('TransactionTabCtrl', [
           }
         });
 
-    $scope.$on('updateTraceTabCount', function (event, traceCount) {
-      filteredTraceTabCount = traceCount;
-    });
-
     $scope.traceCountDisplay = function () {
       if ($scope.traceCount === undefined) {
         return '...';
       }
-      if (filteredTraceTabCount !== undefined) {
-        return filteredTraceTabCount;
-      }
-      return $scope.traceCount;
+      return $filter('number')($scope.traceCount);
     };
 
     $scope.clickTab = function (tabItem, event) {
@@ -60,6 +55,7 @@ glowroot.controller('TransactionTabCtrl', [
         event.preventDefault();
         return false;
       }
+      return true;
     };
 
     $scope.keydownTab = function (left, right, event) {
@@ -83,15 +79,7 @@ glowroot.controller('TransactionTabCtrl', [
     };
 
     var initialStateChangeSuccess = true;
-    $scope.$on('$stateChangeSuccess', function () {
-      // don't let the active tab selection get out of sync (which can happen after using the back button)
-      var activeElement = document.activeElement;
-      if (activeElement && $(activeElement).closest('.gt-transaction-tabs').length) {
-        var ngHref = activeElement.getAttribute('ng-href');
-        if (ngHref && ngHref !== $location.url().substring(1)) {
-          activeElement.blur();
-        }
-      }
+    $scope.$on('gtStateChangeSuccess', function () {
       if ($scope.range.last && !initialStateChangeSuccess) {
         $timeout(function () {
           // slight delay to de-prioritize summaries data request
@@ -102,7 +90,7 @@ glowroot.controller('TransactionTabCtrl', [
     });
 
     function updateTabBarData(autoRefresh) {
-      if (!$scope.agentPermissions || !$scope.agentPermissions[shortName].traces) {
+      if (!$scope.agentRollup || !$scope.agentRollup.permissions[shortName].traces) {
         return;
       }
       if (($scope.layout.central && !$scope.agentRollupId) || !$scope.transactionType) {
@@ -125,9 +113,6 @@ glowroot.controller('TransactionTabCtrl', [
             concurrentUpdateCount--;
             if (concurrentUpdateCount) {
               return;
-            }
-            if ($scope.activeTabItem !== 'traces') {
-              filteredTraceTabCount = undefined;
             }
             $scope.traceCount = response.data;
           }, function (response) {

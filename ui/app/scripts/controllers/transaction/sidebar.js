@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2017 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,9 +38,14 @@ glowroot.controller('TransactionSidebarCtrl', [
 
     $scope.summariesNoSearch = true;
 
+    $scope.showSpinner = 0;
+
     $scope.overallSummaryValue = function () {
       if ($scope.overallSummary) {
         return summaryValueFn($scope.overallSummary, lastSortOrder, $scope.overallSummary, lastDurationMillis);
+      } else {
+        // hasn't loaded yet
+        return '';
       }
     };
 
@@ -60,14 +65,22 @@ glowroot.controller('TransactionSidebarCtrl', [
       updateSummaries(false, true);
     };
 
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh', 'range.chartAutoRefresh', 'summarySortOrder'],
+    $scope.summarySortQueryString = function (summarySortOrder) {
+      var query = $scope.buildQueryObject(true);
+      delete query.summarySortOrder;
+      if (summarySortOrder !== $scope.defaultSummarySortOrder) {
+        query['summary-sort-order'] = summarySortOrder;
+      } else {
+        delete query['summary-sort-order'];
+      }
+      return queryStrings.encodeObject(query);
+    };
+
+    // using $watch instead of $watchGroup because $watchGroup has confusing behavior regarding oldValues
+    // (see https://github.com/angular/angular.js/pull/12643)
+    $scope.$watch('[range.chartFrom, range.chartTo, range.chartRefresh, range.chartAutoRefresh, summarySortOrder]',
         function (newValues, oldValues) {
           if (newValues !== oldValues) {
-            if (newValues[4] !== oldValues[4]) {
-              $scope.summariesNoSearch = true;
-              $scope.transactionSummaries = undefined;
-              $scope.moreSummariesAvailable = undefined;
-            }
             $timeout(function () {
               // slight delay to de-prioritize summaries data request
               updateSummaries(newValues[3] !== oldValues[3]);
@@ -76,16 +89,10 @@ glowroot.controller('TransactionSidebarCtrl', [
         });
 
     var initialStateChangeSuccess = true;
-    $scope.$on('$stateChangeSuccess', function () {
-      // don't let the active sidebar selection get out of sync (which can happen after using the back button)
-      var activeElement = document.activeElement;
-      if (activeElement && $(activeElement).closest('.gt-sidebar').length) {
-        var gtUrl = activeElement.getAttribute('gt-url');
-        if (gtUrl && gtUrl !== $location.url()) {
-          activeElement.blur();
-        }
-      }
+    $scope.$on('gtStateChangeSuccess', function () {
       if ($scope.range.last && !initialStateChangeSuccess) {
+        // need to update selectpicker dropdown with current tab url
+        $('#summarySortDropdown').selectpicker('refresh');
         // refresh on tab change
         $timeout(function () {
           // slight delay to de-prioritize summaries data request
@@ -100,7 +107,7 @@ glowroot.controller('TransactionSidebarCtrl', [
         $scope.summariesNoSearch = true;
         return;
       }
-      $scope.showSpinner = $scope.summariesNoSearch;
+      $scope.showSpinner++;
       var query = {
         agentRollupId: $scope.agentRollupId,
         transactionType: $scope.transactionType,
@@ -119,6 +126,7 @@ glowroot.controller('TransactionSidebarCtrl', [
       concurrentUpdateCount++;
       $http.get('backend/' + $scope.shortName + '/summaries' + queryStrings.encodeObject(query))
           .then(function (response) {
+            $scope.showSpinner--;
             if (moreLoading) {
               $scope.summariesLoadingMore--;
             }
@@ -126,7 +134,6 @@ glowroot.controller('TransactionSidebarCtrl', [
             if (concurrentUpdateCount) {
               return;
             }
-            $scope.showSpinner = false;
             $scope.summariesNoSearch = false;
 
             lastSortOrder = query.sortOrder;
@@ -137,7 +144,7 @@ glowroot.controller('TransactionSidebarCtrl', [
             $scope.transactionSummaries = data.transactions;
             $scope.moreSummariesAvailable = data.moreAvailable;
           }, function (response) {
-            $scope.showSpinner = false;
+            $scope.showSpinner--;
             if (moreLoading) {
               $scope.summariesLoadingMore--;
             }

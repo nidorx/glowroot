@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2017 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,90 +29,257 @@ glowroot.controller('ConfigAlertCtrl', [
 
     var version = $location.search().v;
 
-    function onNewData(data) {
-      $scope.config = data;
-      $scope.originalConfig = angular.copy(data);
+    var gaugeUnits = {};
 
-      if (data.emailAddresses.length) {
-        $scope.page.timePeriodMinutes = data.timePeriodSeconds / 60;
-        if (data.kind === 'transaction') {
-          $scope.heading = data.transactionType + ' - ' + data.transactionPercentile
-              + $scope.percentileSuffix(data.transactionPercentile) + ' percentile over a '
-              + data.timePeriodSeconds + ' minute period';
+    $scope.conditionThresholdByteUnits = [
+      {
+        display: 'bytes',
+        value: 'bytes'
+      },
+      {
+        display: 'KB',
+        value: 'KB'
+      },
+      {
+        display: 'MB',
+        value: 'MB'
+      },
+      {
+        display: 'GB',
+        value: 'GB'
+      }
+    ];
+
+    $scope.metrics = angular.copy($scope.METRICS);
+    $scope.metrics.push({
+      id: 'gauge:select',
+      display: '(select one or more agents to see available gauges)',
+      disabled: true
+    });
+
+    function showTransactionTypeAndName(metric) {
+      return metric && (metric.lastIndexOf('transaction:', 0) === 0 || metric.lastIndexOf('error:', 0) === 0);
+    }
+
+    function showMinTransactionCount(metric) {
+      return showTransactionTypeAndName(metric) && metric !== 'transaction:count' && metric !== 'error:count';
+    }
+
+    $scope.showTransactionTypeAndName = function () {
+      return showTransactionTypeAndName($scope.config.condition.metric);
+    };
+
+    $scope.showMinTransactionCount = function () {
+      return showMinTransactionCount($scope.config.condition.metric);
+    };
+
+    $scope.$watch('config.condition.metric', function (newValue, oldValue) {
+      if (!$scope.config) {
+        return;
+      }
+      if (showTransactionTypeAndName(newValue)) {
+        if ($scope.config.condition.transactionType === undefined) {
+          $scope.config.condition.transactionType = $scope.defaultTransactionType();
         }
-        if (data.kind === 'gauge') {
-          $scope.heading = data.gaugeDisplay + ' - average over a ' + data.timePeriodSeconds / 60 + ' minute period';
+        if ($scope.config.condition.transactionName === undefined) {
+          $scope.config.condition.transactionName = '';
         }
-        $scope.emailAddresses = data.emailAddresses.join(', ');
+      } else {
+        delete $scope.config.condition.transactionType;
+        delete $scope.config.condition.transactionName;
+      }
+      if (showMinTransactionCount(newValue)) {
+        if ($scope.config.condition.minTransactionCount === undefined) {
+          $scope.config.condition.minTransactionCount = '';
+        }
+      } else {
+        delete $scope.config.condition.minTransactionCount;
+      }
+      if (newValue !== 'transaction:x-percentile') {
+        delete $scope.config.condition.percentile;
+      }
+      // update unit
+      if (newValue === 'transaction:average' || newValue === 'transaction:x-percentile') {
+        $scope.unit = 'milliseconds';
+      } else if (newValue === 'error:rate') {
+        $scope.unit = 'percent';
+      } else if (newValue && newValue.lastIndexOf('gauge:', 0) === 0) {
+        var gaugeName = newValue.substring('gauge:'.length);
+        $scope.unit = gaugeUnits[gaugeName];
+      } else {
+        // e.g. 'transaction:count'
+        $scope.unit = '';
+      }
+      if (oldValue) {
+        // clear existing threshold
+        delete $scope.config.condition.threshold;
+        delete $scope.page.conditionThreshold;
+      }
+      if ($scope.unit === ' bytes') {
+        if ($scope.page.conditionThresholdByteUnit === undefined) {
+          // e.g. open new alert, then switch to HeapMemoryUsage
+          $scope.page.conditionThresholdByteUnit = 'MB';
+        }
+      } else {
+        delete $scope.page.conditionThresholdByteUnit;
+      }
+    });
+
+    $scope.phraseForValue = function () {
+      var metric = $scope.config.condition.metric;
+      if (metric === 'transaction:average') {
+        return 'average response time';
+      } else if (metric === 'transaction:x-percentile') {
+        return 'X\u1d57\u02b0 percentile response time';
+      } else if (metric === 'transaction:count') {
+        return 'transaction count';
+      } else if (metric === 'error:rate') {
+        return 'error rate';
+      } else if (metric === 'error:count') {
+        return 'error count';
+      } else if (metric && metric.lastIndexOf('gauge:', 0) === 0) {
+        return 'average gauge value';
+      } else {
+        // unexpected metric
+        return 'value';
+      }
+    };
+
+    function onNewData(data) {
+      // need to populate notification objects before making originalConfig copy
+      if (!data.config.emailNotification) {
+        data.config.emailNotification = {
+          emailAddresses: []
+        };
+      }
+      if (!data.config.pagerDutyNotification) {
+        data.config.pagerDutyNotification = {
+          pagerDutyIntegrationKey: ''
+        };
+      }
+      $scope.config = data.config;
+      $scope.originalConfig = angular.copy(data.config);
+
+      if (data.heading) {
+        if (data.config.condition.timePeriodSeconds === undefined) {
+          delete $scope.page.timePeriodMinutes;
+        } else {
+          $scope.page.timePeriodMinutes = data.config.condition.timePeriodSeconds / 60;
+        }
+        $scope.heading = data.heading;
+        $scope.page.emailAddresses = data.config.emailNotification.emailAddresses.join(', ');
       } else {
         $scope.heading = '<New>';
       }
-    }
-
-    $scope.unit = function () {
-      if (!$scope.gauges) {
-        // list of gauges hasn't loaded yet
-        return '';
-      }
-      var i;
-      for (i = 0; i < $scope.gauges.length; i++) {
-        if ($scope.gauges[i].name === $scope.config.gaugeName) {
-          return $scope.gauges[i].unit;
+      $scope.metrics = angular.copy($scope.METRICS);
+      gaugeUnits = {};
+      angular.forEach(data.gauges, function (gauge) {
+        $scope.metrics.push({
+          id: 'gauge:' + gauge.name,
+          display: gauge.display
+        });
+        if (gauge.unit) {
+          gaugeUnits[gauge.name] = ' ' + gauge.unit;
+        } else {
+          gaugeUnits[gauge.name] = '';
+        }
+      });
+      $scope.page.conditionThreshold = $scope.config.condition.threshold;
+      delete $scope.page.conditionThresholdByteUnit;
+      if ($scope.config.condition.conditionType === 'metric'
+          && $scope.config.condition.metric.lastIndexOf('gauge:', 0) === 0) {
+        var gaugeName = $scope.config.condition.metric.substring('gauge:'.length);
+        var gaugeUnit = gaugeUnits[gaugeName];
+        if (gaugeUnit === undefined) {
+          $scope.metrics.push({
+            id: '-empty9-',
+            display: '',
+            disabled: true
+          });
+          $scope.metrics.push({
+            id: 'gauge:' + gaugeName,
+            display: gaugeName + ' (not available)',
+            disabled: true
+          });
+        } else if (gaugeUnit === ' bytes') {
+          var threshold = $scope.config.condition.threshold;
+          if (threshold === 0) {
+            $scope.page.conditionThreshold = threshold;
+            $scope.page.conditionThresholdByteUnit = 'bytes';
+          } else if (threshold % (1024 * 1024 * 1024) === 0) {
+            $scope.page.conditionThreshold = threshold / (1024 * 1024 * 1024);
+            $scope.page.conditionThresholdByteUnit = 'GB';
+          } else if (threshold % (1024 * 1024) === 0) {
+            $scope.page.conditionThreshold = threshold / (1024 * 1024);
+            $scope.page.conditionThresholdByteUnit = 'MB';
+          } else if (threshold % 1024 === 0) {
+            $scope.page.conditionThreshold = threshold / 1024;
+            $scope.page.conditionThresholdByteUnit = 'KB';
+          } else {
+            $scope.page.conditionThreshold = threshold;
+            $scope.page.conditionThresholdByteUnit = 'bytes';
+          }
         }
       }
-      return '';
-    };
-
-    var halfLoaded;
-
-    function onHalfLoad() {
-      if (halfLoaded) {
-        $scope.loaded = true;
-      } else {
-        halfLoaded = true;
-      }
+      $scope.syntheticMonitors = data.syntheticMonitors;
+      $scope.pagerDutyIntegrationKeys = data.pagerDutyIntegrationKeys;
     }
 
-    $http.get('backend/jvm/all-gauges?agent-rollup-id=' + encodeURIComponent($scope.agentRollupId))
-        .then(function (response) {
-          onHalfLoad();
-          $scope.gaugeNames = [];
-          $scope.gauges = response.data;
-        }, function (response) {
-          httpErrors.handle(response, $scope);
-        });
-
     if (version) {
-      $http.get('backend/config/alerts?agent-id=' + encodeURIComponent($scope.agentId) + '&version=' + version)
+      $http.get('backend/config/alerts?agent-rollup-id=' + encodeURIComponent($scope.agentRollupId) + '&version=' + version)
           .then(function (response) {
-            onHalfLoad();
             onNewData(response.data);
+            $scope.loaded = true;
           }, function (response) {
             httpErrors.handle(response, $scope);
           });
     } else {
-      onHalfLoad();
-      onNewData({
-        kind: 'transaction',
-        transactionType: $scope.defaultTransactionType(),
-        emailAddresses: []
-      });
+      var url = 'backend/config/alert-dropdowns?agent-rollup-id=' + encodeURIComponent($scope.agentRollupId)
+          + '&version=' + version;
+      $http.get(url)
+          .then(function (response) {
+            onNewData({
+              config: {
+                condition: {
+                  conditionType: 'metric',
+                  metric: ''
+                }
+              },
+              gauges: response.data.gauges,
+              syntheticMonitors: response.data.syntheticMonitors,
+              pagerDutyIntegrationKeys: response.data.pagerDutyIntegrationKeys
+            });
+            $scope.loaded = true;
+          }, function (response) {
+            httpErrors.handle(response, $scope);
+          });
     }
 
-    $scope.$watch('config.kind', function (newValue) {
+    $scope.$watchGroup(['page.conditionThreshold', 'page.conditionThresholdByteUnit'], function () {
+      if ($scope.page.conditionThresholdByteUnit === 'KB') {
+        $scope.config.condition.threshold = $scope.page.conditionThreshold * 1024;
+      } else if ($scope.page.conditionThresholdByteUnit === 'MB') {
+        $scope.config.condition.threshold = $scope.page.conditionThreshold * 1024 * 1024;
+      } else if ($scope.page.conditionThresholdByteUnit === 'GB') {
+        $scope.config.condition.threshold = $scope.page.conditionThreshold * 1024 * 1024 * 1024;
+      } else if ($scope.config) {
+        $scope.config.condition.threshold = $scope.page.conditionThreshold;
+      }
+    });
+
+    $scope.$watch('config.condition.conditionType', function (newValue, oldValue) {
       if (!$scope.config) {
         return;
       }
-      if (newValue === 'transaction') {
-        $scope.config.gaugeName = undefined;
-        $scope.config.gaugeThreshold = undefined;
-        $scope.config.transactionType = $scope.defaultTransactionType();
+      if (oldValue === undefined) {
+        return;
       }
-      if (newValue === 'gauge') {
-        $scope.config.transactionType = undefined;
-        $scope.config.transactionPercentile = undefined;
-        $scope.config.transactionThresholdMillis = undefined;
-        $scope.config.minTransactionCount = undefined;
+      $scope.config.condition = {
+        conditionType: newValue
+      };
+      delete $scope.page.timePeriodMinutes;
+      if ($scope.showTransactionTypeAndName()) {
+        $scope.config.condition.transactionType = $scope.defaultTransactionType();
       }
     });
 
@@ -121,13 +288,13 @@ glowroot.controller('ConfigAlertCtrl', [
         return;
       }
       if (newValue === undefined) {
-        $scope.config.timePeriodSeconds = undefined;
+        delete $scope.config.condition.timePeriodSeconds;
       } else {
-        $scope.config.timePeriodSeconds = newValue * 60;
+        $scope.config.condition.timePeriodSeconds = newValue * 60;
       }
     });
 
-    $scope.$watch('emailAddresses', function (newValue) {
+    $scope.$watch('page.emailAddresses', function (newValue) {
       if (newValue) {
         var emailAddresses = [];
         angular.forEach(newValue.split(','), function (emailAddress) {
@@ -136,11 +303,24 @@ glowroot.controller('ConfigAlertCtrl', [
             emailAddresses.push(emailAddress);
           }
         });
-        $scope.config.emailAddresses = emailAddresses;
+        $scope.config.emailNotification.emailAddresses = emailAddresses;
       } else if ($scope.config) {
-        $scope.config.emailAddresses = [];
+        $scope.config.emailNotification.emailAddresses = [];
       }
     });
+
+    $scope.displayUnavailablePagerDutyIntegrationKey = function () {
+      if (!$scope.config.pagerDutyNotification.pagerDutyIntegrationKey) {
+        return false;
+      }
+      var i;
+      for (i = 0; i < $scope.pagerDutyIntegrationKeys.length; i++) {
+        if ($scope.pagerDutyIntegrationKeys[i].key === $scope.config.pagerDutyNotification.pagerDutyIntegrationKey) {
+          return false;
+        }
+      }
+      return true;
+    };
 
     $scope.hasChanges = function () {
       return !angular.equals($scope.config, $scope.originalConfig);
@@ -149,6 +329,12 @@ glowroot.controller('ConfigAlertCtrl', [
 
     $scope.save = function (deferred) {
       var postData = angular.copy($scope.config);
+      if (!postData.emailNotification.emailAddresses.length) {
+        delete postData.emailNotification;
+      }
+      if (!postData.pagerDutyNotification.pagerDutyIntegrationKey) {
+        delete postData.pagerDutyNotification;
+      }
       var url;
       if (version) {
         url = 'backend/config/alerts/update';
@@ -156,14 +342,17 @@ glowroot.controller('ConfigAlertCtrl', [
         url = 'backend/config/alerts/add';
       }
       var agentId = $scope.agentId;
-      $http.post(url + '?agent-id=' + encodeURIComponent(agentId), postData)
+      var agentRollupId = $scope.agentRollupId;
+      $http.post(url + '?agent-rollup-id=' + encodeURIComponent(agentRollupId), postData)
           .then(function (response) {
             onNewData(response.data);
             deferred.resolve(version ? 'Saved' : 'Added');
-            version = response.data.version;
+            version = response.data.config.version;
             // fix current url (with updated version) before returning to list page in case back button is used later
             if (agentId) {
               $location.search({'agent-id': agentId, v: version}).replace();
+            } else if (agentRollupId) {
+              $location.search({'agent-rollup-id': agentRollupId, v: version}).replace();
             } else {
               $location.search({v: version}).replace();
             }
@@ -177,11 +366,14 @@ glowroot.controller('ConfigAlertCtrl', [
         version: $scope.config.version
       };
       var agentId = $scope.agentId;
-      $http.post('backend/config/alerts/remove?agent-id=' + encodeURIComponent(agentId), postData)
+      var agentRollupId = $scope.agentRollupId;
+      $http.post('backend/config/alerts/remove?agent-rollup-id=' + encodeURIComponent(agentRollupId), postData)
           .then(function () {
             removeConfirmIfHasChangesListener();
-            if (postData) {
+            if (agentId) {
               $location.url('config/alert-list?agent-id=' + encodeURIComponent(agentId)).replace();
+            } else if (agentRollupId) {
+              $location.url('config/alert-list?agent-rollup-id=' + encodeURIComponent(agentRollupId)).replace();
             } else {
               $location.url('config/alert-list').replace();
             }

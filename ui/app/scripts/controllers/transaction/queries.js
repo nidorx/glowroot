@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,11 +51,11 @@ glowroot.controller('TransactionQueriesCtrl', [
 
     $scope.smallScreen = function () {
       // using innerWidth so it will match to screen media queries
-      return window.innerWidth < 992;
+      return window.innerWidth < 1200;
     };
 
     $scope.sortQueryString = function (attributeName) {
-      var query = $scope.buildQueryObject({});
+      var query = $scope.buildQueryObject();
       if (attributeName !== 'total-time' || ($scope.sortAttribute === 'total-time' && !$scope.sortAsc)) {
         query['sort-attribute'] = attributeName;
       }
@@ -73,10 +73,17 @@ glowroot.controller('TransactionQueriesCtrl', [
         return '';
       }
       if ($scope.sortAsc) {
-        return 'caret gt-caret-sort-ascending';
+        return 'gt-caret gt-caret-sort-ascending';
       } else {
-        return 'caret';
+        return 'gt-caret';
       }
+    };
+
+    $scope.ngAttrAriaSort = function (sortAttribute) {
+      if (sortAttribute !== $scope.sortAttribute) {
+        return undefined;
+      }
+      return $scope.sortAsc ? 'ascending' : 'descending';
     };
 
     locationChanges.on($scope, function () {
@@ -203,10 +210,9 @@ glowroot.controller('TransactionQueriesCtrl', [
         $unformattedQuery.text($scope.unformattedQuery);
         $unformattedQuery.show();
         $formattedQuery.hide();
+        $('#queryModal').find('.gt-clip').removeClass('d-none');
 
-        gtClipboard($clipboardIcon, function () {
-          return $scope.showFormatted ? $formattedQuery[0] : $unformattedQuery[0];
-        }, function () {
+        gtClipboard($clipboardIcon, '#queryModal', function () {
           return $scope.showFormatted ? $scope.formattedQuery : $scope.unformattedQuery;
         });
 
@@ -222,12 +228,8 @@ glowroot.controller('TransactionQueriesCtrl', [
         }
         var formatted = SqlPrettyPrinter.format(fullText);
         if (typeof formatted === 'object') {
-          // intentional console logging
-          // need conditional since console does not exist in IE9 unless dev tools is open
-          if (window.console) {
-            console.log(formatted.message);
-            console.log(fullText);
-          }
+          console.log(formatted.message);
+          console.log(fullText);
           return;
         }
         if (comment.length) {
@@ -311,7 +313,9 @@ glowroot.controller('TransactionQueriesCtrl', [
             var queryTypes = {};
             angular.forEach($scope.queries, function (query) {
               query.timePerExecution = query.totalDurationNanos / (1000000 * query.executionCount);
-              if (query.totalRows !== undefined) {
+              if (query.totalRows === undefined) {
+                query.rowsPerExecution = undefined;
+              } else {
                 query.rowsPerExecution = query.totalRows / query.executionCount;
               }
               if (queryTypes[query.queryType] === undefined) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2017 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,64 +15,50 @@
  */
 package org.glowroot.central;
 
-import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import javax.annotation.Nullable;
-
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.glowroot.agent.api.Glowroot;
 import org.glowroot.agent.api.Instrumentation;
-import org.glowroot.central.repo.AgentDao;
+import org.glowroot.central.repo.ActiveAgentDao;
 import org.glowroot.central.repo.AggregateDao;
-import org.glowroot.central.repo.ConfigRepositoryImpl;
 import org.glowroot.central.repo.GaugeValueDao;
-import org.glowroot.central.repo.HeartbeatDao;
-import org.glowroot.common.config.SmtpConfig;
-import org.glowroot.common.repo.AgentRepository.AgentRollup;
-import org.glowroot.common.repo.util.AlertingService;
+import org.glowroot.central.repo.SyntheticResultDao;
 import org.glowroot.common.util.Clock;
-import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AlertConfig;
-import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AlertConfig.AlertKind;
+import org.glowroot.common2.repo.ActiveAgentRepository.AgentRollup;
 
-import static java.util.concurrent.TimeUnit.MINUTES;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 class RollupService implements Runnable {
 
     private static final Logger logger = LoggerFactory.getLogger(RollupService.class);
 
-    private final AgentDao agentDao;
+    private final ActiveAgentDao activeAgentDao;
     private final AggregateDao aggregateDao;
     private final GaugeValueDao gaugeValueDao;
-    private final HeartbeatDao heartbeatDao;
-    private final ConfigRepositoryImpl configRepository;
-    private final AlertingService alertingService;
-    private final DownstreamServiceImpl downstreamService;
+    private final SyntheticResultDao syntheticResultDao;
+    private final CentralAlertingService centralAlertingService;
     private final Clock clock;
 
     private final ExecutorService executor;
 
-    private final Stopwatch stopwatch = Stopwatch.createStarted();
-
     private volatile boolean closed;
 
-    RollupService(AgentDao agentDao, AggregateDao aggregateDao, GaugeValueDao gaugeValueDao,
-            HeartbeatDao heartbeatDao, ConfigRepositoryImpl configRepository,
-            AlertingService alertingService, DownstreamServiceImpl downstreamService, Clock clock) {
-        this.agentDao = agentDao;
+    RollupService(ActiveAgentDao activeAgentDao, AggregateDao aggregateDao,
+            GaugeValueDao gaugeValueDao, SyntheticResultDao syntheticResultDao,
+            CentralAlertingService centralAlertingService, Clock clock) {
+        this.activeAgentDao = activeAgentDao;
         this.aggregateDao = aggregateDao;
         this.gaugeValueDao = gaugeValueDao;
-        this.heartbeatDao = heartbeatDao;
-        this.configRepository = configRepository;
-        this.alertingService = alertingService;
-        this.downstreamService = downstreamService;
+        this.syntheticResultDao = syntheticResultDao;
+        this.centralAlertingService = centralAlertingService;
         this.clock = clock;
         executor = Executors.newSingleThreadExecutor();
         executor.execute(castInitialized(this));
@@ -82,9 +68,11 @@ class RollupService implements Runnable {
     public void run() {
         while (!closed) {
             try {
-                Thread.sleep(millisUntilNextRollup(clock.currentTimeMillis()));
+                MILLISECONDS.sleep(millisUntilNextRollup(clock.currentTimeMillis()));
                 runInternal();
             } catch (InterruptedException e) {
+                // probably shutdown requested (see close method below)
+                logger.debug(e.getMessage(), e);
                 continue;
             } catch (Throwable t) {
                 logger.error(t.getMessage(), t);
@@ -97,41 +85,44 @@ class RollupService implements Runnable {
         // shutdownNow() is needed here to send interrupt to RollupService thread
         executor.shutdownNow();
         if (!executor.awaitTermination(10, SECONDS)) {
-            throw new IllegalStateException("Could not terminate executor");
+            throw new IllegalStateException("Timed out waiting for rollup thread to terminate");
         }
     }
 
     @Instrumentation.Transaction(transactionType = "Background",
             transactionName = "Outer rollup loop", traceHeadline = "Outer rollup loop",
             timer = "outer rollup loop")
-    private void runInternal() throws InterruptedException {
-        Glowroot.setTransactionOuter();
-        for (AgentRollup agentRollup : agentDao.readAgentRollups()) {
-            rollupAggregates(agentRollup, null);
-            rollupGauges(agentRollup, null);
-            checkHierarchy(agentRollup, AlertKind.TRANSACTION, this::checkTransactionAlerts);
-            checkHierarchy(agentRollup, AlertKind.GAUGE, this::checkGaugeAlerts);
-            if (stopwatch.elapsed(MINUTES) >= 4) {
-                // give agents plenty of time to re-connect after central start-up
-                // needs to be at least enough time for grpc max reconnect backoff
-                // which is 2 minutes +/- 20% jitter (see io.grpc.internal.ExponentialBackoffPolicy)
-                // but better to give a bit extra (4 minutes above) to avoid false heartbeat alert
-                checkHierarchy(agentRollup, AlertKind.HEARTBEAT, this::checkHeartbeatAlerts);
-            }
-            updateAgentConfigIfConnectedAndNeeded(agentRollup);
+    private void runInternal() throws Exception {
+        // randomize order so that multiple central collector nodes will be less likely to perform
+        // duplicative work
+        for (AgentRollup agentRollup : shuffle(activeAgentDao.readRecentlyActiveAgentRollups(7))) {
+            rollupAggregates(agentRollup);
+            rollupGauges(agentRollup);
+            rollupSyntheticMonitors(agentRollup);
+            // checking aggregate and gauge alerts after rollup since their calculation can depend
+            // on rollups depending on time period length (and alerts on rollups are not checked
+            // anywhere else)
+            //
+            // agent (not rollup) alerts are also checked right after receiving the respective data
+            // (aggregate/gauge/heartbeat) from the agent, but need to also check these once a
+            // minute in case no data has been received from the agent recently
+            checkAggregateAndGaugeAndHeartbeatAlertsAsync(agentRollup);
         }
+        // FIXME keep this here as fallback, but also resolve alerts immediately when they are
+        // deleted (or when their condition is updated)
+        centralAlertingService.checkForAllDeletedAlerts();
     }
 
-    private void rollupAggregates(AgentRollup agentRollup, @Nullable String parentAgentRollupId)
-            throws InterruptedException {
-        for (AgentRollup childAgentRollup : agentRollup.children()) {
-            rollupAggregates(childAgentRollup, agentRollup.id());
+    private void rollupAggregates(AgentRollup agentRollup) throws InterruptedException {
+        // randomize order so that multiple central collector nodes will be less likely to perform
+        // duplicative work
+        for (AgentRollup childAgentRollup : shuffle(agentRollup.children())) {
+            rollupAggregates(childAgentRollup);
         }
         try {
-            aggregateDao.rollup(agentRollup.id(), parentAgentRollupId,
-                    agentRollup.children().isEmpty());
+            aggregateDao.rollup(agentRollup.id());
         } catch (InterruptedException e) {
-            // shutdown requested
+            // probably shutdown requested (see close method above)
             throw e;
         } catch (Exception e) {
             logger.error("{} - {}", agentRollup.id(), e.getMessage(), e);
@@ -139,27 +130,25 @@ class RollupService implements Runnable {
     }
 
     // returns true on success, false on failure
-    private boolean rollupGauges(AgentRollup agentRollup, @Nullable String parentAgentRollupId)
-            throws InterruptedException {
-        // important to roll up children first, since gauge values initial roll up from children is
+    private boolean rollupGauges(AgentRollup agentRollup) throws InterruptedException {
+        // need to roll up children first, since gauge values initial roll up from children is
         // done on the 1-min aggregates of the children
         boolean success = true;
         for (AgentRollup childAgentRollup : agentRollup.children()) {
-            boolean childSuccess = rollupGauges(childAgentRollup, agentRollup.id());
+            boolean childSuccess = rollupGauges(childAgentRollup);
             success = success && childSuccess;
         }
         if (!success) {
-            // also important to not roll up parent if exception occurs while rolling up a child,
-            // since gauge values initial roll up from children is done on the 1-min aggregates of
-            // the children
+            // need to _not_ roll up parent if exception occurs while rolling up a child, since
+            // gauge values initial roll up from children is done on the 1-min aggregates of the
+            // children
             return false;
         }
         try {
-            gaugeValueDao.rollup(agentRollup.id(), parentAgentRollupId,
-                    agentRollup.children().isEmpty());
+            gaugeValueDao.rollup(agentRollup.id());
             return true;
         } catch (InterruptedException e) {
-            // shutdown requested
+            // probably shutdown requested (see close method above)
             throw e;
         } catch (Exception e) {
             logger.error("{} - {}", agentRollup.id(), e.getMessage(), e);
@@ -167,112 +156,33 @@ class RollupService implements Runnable {
         }
     }
 
-    private void checkHierarchy(AgentRollup agentRollup, AlertKind alertKind, Consumer check)
-            throws InterruptedException {
+    private void rollupSyntheticMonitors(AgentRollup agentRollup) throws Exception {
         for (AgentRollup childAgentRollup : agentRollup.children()) {
-            checkHierarchy(childAgentRollup, alertKind, check);
+            rollupSyntheticMonitors(childAgentRollup);
         }
-        check.accept(agentRollup);
-    }
-
-    private void checkTransactionAlerts(AgentRollup agentRollup) throws InterruptedException {
-        for (AgentRollup childAgentRollup : agentRollup.children()) {
-            checkTransactionAlerts(childAgentRollup);
-        }
-        checkAlerts(agentRollup.id(), agentRollup.display(), AlertKind.TRANSACTION,
-                (alertConfig, smtpConfig) -> checkTransactionAlert(agentRollup.id(),
-                        agentRollup.display(), alertConfig, clock.currentTimeMillis(), smtpConfig));
-    }
-
-    private void checkGaugeAlerts(AgentRollup agentRollup) throws InterruptedException {
-        for (AgentRollup childAgentRollup : agentRollup.children()) {
-            checkGaugeAlerts(childAgentRollup);
-        }
-        checkAlerts(agentRollup.id(), agentRollup.display(), AlertKind.GAUGE,
-                (alertConfig, smtpConfig) -> checkGaugeAlert(agentRollup.id(),
-                        agentRollup.display(), alertConfig, clock.currentTimeMillis(), smtpConfig));
-    }
-
-    private void checkHeartbeatAlerts(AgentRollup agentRollup) throws InterruptedException {
-        for (AgentRollup childAgentRollup : agentRollup.children()) {
-            checkHeartbeatAlerts(childAgentRollup);
-        }
-        checkAlerts(agentRollup.id(), agentRollup.display(), AlertKind.HEARTBEAT,
-                (alertConfig, smtpConfig) -> checkHeartbeatAlert(agentRollup.id(),
-                        agentRollup.display(), alertConfig, clock.currentTimeMillis(), smtpConfig));
-    }
-
-    private void updateAgentConfigIfConnectedAndNeeded(AgentRollup agentRollup)
-            throws InterruptedException {
-        for (AgentRollup childAgentRollup : agentRollup.children()) {
-            updateAgentConfigIfConnectedAndNeeded(childAgentRollup);
-        }
-        if (agentRollup.children().isEmpty()) {
-            try {
-                downstreamService.updateAgentConfigIfConnectedAndNeeded(agentRollup.id());
-            } catch (InterruptedException e) {
-                // shutdown requested
-                throw e;
-            } catch (Exception e) {
-                logger.error("{} - {}", agentRollup.id(), e.getMessage(), e);
-            }
-        }
-    }
-
-    private void checkAlerts(String agentId, String agentDisplay, AlertKind alertKind,
-            BiConsumer check) throws InterruptedException {
-        SmtpConfig smtpConfig = configRepository.getSmtpConfig();
-        if (smtpConfig.host().isEmpty()) {
-            return;
-        }
-        List<AlertConfig> alertConfigs;
         try {
-            alertConfigs = configRepository.getAlertConfigs(agentId, alertKind);
-        } catch (IOException e) {
-            logger.error("{} - {}", agentDisplay, e.getMessage(), e);
-            return;
-        }
-        if (alertConfigs.isEmpty()) {
-            return;
-        }
-        for (AlertConfig alertConfig : alertConfigs) {
-            try {
-                check.accept(alertConfig, smtpConfig);
-            } catch (InterruptedException e) {
-                // shutdown requested
-                throw e;
-            } catch (Exception e) {
-                logger.error("{} - {}", agentDisplay, e.getMessage(), e);
-            }
+            syntheticResultDao.rollup(agentRollup.id());
+        } catch (InterruptedException e) {
+            // probably shutdown requested (see close method above)
+            throw e;
+        } catch (Exception e) {
+            logger.error("{} - {}", agentRollup.id(), e.getMessage(), e);
         }
     }
 
-    @Instrumentation.Transaction(transactionType = "Background",
-            transactionName = "Check transaction alert",
-            traceHeadline = "Check transaction alert: {{0}}", timer = "check transaction alert")
-    private void checkTransactionAlert(String agentId, String agentDisplay, AlertConfig alertConfig,
-            long endTime, SmtpConfig smtpConfig) throws Exception {
-        alertingService.checkTransactionAlert(agentId, agentDisplay, alertConfig, endTime,
-                smtpConfig);
+    private void checkAggregateAndGaugeAndHeartbeatAlertsAsync(AgentRollup agentRollup)
+            throws InterruptedException {
+        for (AgentRollup childAgentRollup : agentRollup.children()) {
+            checkAggregateAndGaugeAndHeartbeatAlertsAsync(childAgentRollup);
+        }
+        centralAlertingService.checkAggregateAndGaugeAndHeartbeatAlertsAsync(agentRollup.id(),
+                agentRollup.display(), clock.currentTimeMillis());
     }
 
-    @Instrumentation.Transaction(transactionType = "Background",
-            transactionName = "Check gauge alert",
-            traceHeadline = "Check gauge alert: {{0}}", timer = "check gauge alert")
-    private void checkGaugeAlert(String agentId, String agentDisplay, AlertConfig alertConfig,
-            long endTime, SmtpConfig smtpConfig) throws Exception {
-        alertingService.checkGaugeAlert(agentId, agentDisplay, alertConfig, endTime, smtpConfig);
-    }
-
-    @Instrumentation.Transaction(transactionType = "Background",
-            transactionName = "Check heartbeat alert",
-            traceHeadline = "Check heartbeat alert: {{0}}", timer = "check heartbeat alert")
-    private void checkHeartbeatAlert(String agentId, String agentDisplay, AlertConfig alertConfig,
-            long endTime, SmtpConfig smtpConfig) throws Exception {
-        long startTime = endTime - SECONDS.toMillis(alertConfig.getTimePeriodSeconds());
-        boolean currentlyTriggered = !heartbeatDao.exists(agentId, startTime, endTime);
-        alertingService.checkHeartbeatAlert(agentId, agentDisplay, alertConfig, currentlyTriggered,
-                smtpConfig);
+    private static <T> List<T> shuffle(List<T> agentRollups) {
+        List<T> mutable = new ArrayList<>(agentRollups);
+        Collections.shuffle(mutable);
+        return mutable;
     }
 
     @VisibleForTesting
@@ -286,12 +196,7 @@ class RollupService implements Runnable {
     }
 
     @FunctionalInterface
-    interface Consumer {
-        void accept(AgentRollup agentRollup) throws InterruptedException;
-    }
-
-    @FunctionalInterface
-    interface BiConsumer {
-        void accept(AlertConfig alertConfig, SmtpConfig smtpConfig) throws Exception;
+    interface AgentRollupConsumer {
+        void accept(AgentRollup agentRollup) throws Exception;
     }
 }

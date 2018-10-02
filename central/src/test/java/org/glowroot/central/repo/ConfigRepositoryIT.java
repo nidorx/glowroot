@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2017 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,41 +19,46 @@ import java.util.List;
 import java.util.UUID;
 
 import com.datastax.driver.core.Cluster;
-import com.datastax.driver.core.KeyspaceMetadata;
-import com.datastax.driver.core.Session;
 import com.google.common.collect.ImmutableList;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.glowroot.central.util.Sessions;
-import org.glowroot.common.config.CentralStorageConfig;
-import org.glowroot.common.config.ImmutableCentralStorageConfig;
-import org.glowroot.common.config.ImmutableLdapConfig;
-import org.glowroot.common.config.ImmutableRoleConfig;
-import org.glowroot.common.config.ImmutableSmtpConfig;
-import org.glowroot.common.config.ImmutableUserConfig;
-import org.glowroot.common.config.ImmutableWebConfig;
-import org.glowroot.common.config.LdapConfig;
-import org.glowroot.common.config.RoleConfig;
-import org.glowroot.common.config.SmtpConfig;
-import org.glowroot.common.config.UserConfig;
-import org.glowroot.common.config.WebConfig;
-import org.glowroot.common.repo.ConfigRepository;
+import org.glowroot.central.util.ClusterManager;
+import org.glowroot.central.util.Session;
 import org.glowroot.common.util.Versions;
+import org.glowroot.common2.config.CentralStorageConfig;
+import org.glowroot.common2.config.CentralWebConfig;
+import org.glowroot.common2.config.HttpProxyConfig;
+import org.glowroot.common2.config.ImmutableCentralStorageConfig;
+import org.glowroot.common2.config.ImmutableCentralWebConfig;
+import org.glowroot.common2.config.ImmutableHttpProxyConfig;
+import org.glowroot.common2.config.ImmutableLdapConfig;
+import org.glowroot.common2.config.ImmutableRoleConfig;
+import org.glowroot.common2.config.ImmutableSmtpConfig;
+import org.glowroot.common2.config.ImmutableUserConfig;
+import org.glowroot.common2.config.LdapConfig;
+import org.glowroot.common2.config.RoleConfig;
+import org.glowroot.common2.config.SmtpConfig;
+import org.glowroot.common2.config.SmtpConfig.ConnectionSecurity;
+import org.glowroot.common2.config.UserConfig;
+import org.glowroot.common2.repo.ConfigRepository;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AdvancedConfig;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AlertConfig;
-import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AlertConfig.AlertKind;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AlertConfig.AlertCondition;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AlertConfig.AlertCondition.MetricCondition;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AlertConfig.AlertNotification;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AlertConfig.AlertNotification.EmailNotification;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.GaugeConfig;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig.CaptureKind;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig.MethodModifier;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.JvmConfig;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.MBeanAttribute;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.TransactionConfig;
-import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.UiConfig;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.UiDefaultsConfig;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.UserRecordingConfig;
-import org.glowroot.wire.api.model.Proto.OptionalDouble;
 import org.glowroot.wire.api.model.Proto.OptionalInt32;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,84 +67,48 @@ public class ConfigRepositoryIT {
 
     private static Cluster cluster;
     private static Session session;
+    private static ClusterManager clusterManager;
     private static ConfigRepository configRepository;
-    private static AgentDao agentDao;
+    private static AgentConfigDao agentConfigDao;
 
     @BeforeClass
     public static void setUp() throws Exception {
         SharedSetupRunListener.startCassandra();
         cluster = Clusters.newCluster();
-        session = cluster.newSession();
-        Sessions.createKeyspaceIfNotExists(session, "glowroot_unit_tests");
-        session.execute("use glowroot_unit_tests");
-        KeyspaceMetadata keyspace = cluster.getMetadata().getKeyspace("glowroot_unit_tests");
+        session = new Session(cluster.newSession(), "glowroot_unit_tests");
+        session.updateSchemaWithRetry("drop table if exists agent_config");
+        session.updateSchemaWithRetry("drop table if exists user");
+        session.updateSchemaWithRetry("drop table if exists role");
+        session.updateSchemaWithRetry("drop table if exists central_config");
+        session.updateSchemaWithRetry("drop table if exists agent");
 
-        session.execute("drop table if exists agent");
-        session.execute("drop table if exists agent_rollup");
-        session.execute("drop table if exists user");
-        session.execute("drop table if exists role");
-        session.execute("drop table if exists central_config");
-
-        CentralConfigDao centralConfigDao = new CentralConfigDao(session);
-        agentDao = new AgentDao(session);
-        UserDao userDao = new UserDao(session, keyspace);
-        RoleDao roleDao = new RoleDao(session, keyspace);
-        configRepository = new ConfigRepositoryImpl(centralConfigDao, agentDao, userDao, roleDao);
+        clusterManager = ClusterManager.create();
+        CentralConfigDao centralConfigDao = new CentralConfigDao(session, clusterManager);
+        agentConfigDao = new AgentConfigDao(session, clusterManager);
+        UserDao userDao = new UserDao(session, clusterManager);
+        RoleDao roleDao = new RoleDao(session, clusterManager);
+        configRepository =
+                new ConfigRepositoryImpl(centralConfigDao, agentConfigDao, userDao, roleDao, "");
     }
 
     @AfterClass
     public static void tearDown() throws Exception {
+        clusterManager.close();
         // remove bad data so other tests don't have issue
-        session.execute("drop table agent");
-        session.execute("drop table agent_rollup");
-        session.execute("drop table user");
-        session.execute("drop table role");
-        session.execute("drop table central_config");
+        session.updateSchemaWithRetry("drop table if exists agent_config");
+        session.updateSchemaWithRetry("drop table if exists user");
+        session.updateSchemaWithRetry("drop table if exists role");
+        session.updateSchemaWithRetry("drop table if exists central_config");
         session.close();
         cluster.close();
         SharedSetupRunListener.stopCassandra();
     }
 
     @Test
-    public void shouldReadConfigForNonExistentAgentId() throws Exception {
-        String agentId = UUID.randomUUID().toString();
-        assertThat(configRepository.getTransactionConfig(agentId)).isNull();
-        assertThat(configRepository.getUiConfig(agentId)).isNull();
-        assertThat(configRepository.getUserRecordingConfig(agentId)).isNull();
-        assertThat(configRepository.getAdvancedConfig(agentId)).isNull();
-        assertThat(configRepository.getGaugeConfigs(agentId)).isEmpty();
-        boolean exception = false;
-        try {
-            configRepository.getGaugeConfig(agentId, "dummy");
-        } catch (IllegalStateException e) {
-            exception = true;
-        }
-        assertThat(exception).isTrue();
-        assertThat(configRepository.getAlertConfigs(agentId)).isEmpty();
-        assertThat(configRepository.getAlertConfig(agentId, "dummy")).isNull();
-        assertThat(configRepository.getPluginConfigs(agentId)).isEmpty();
-        exception = false;
-        try {
-            configRepository.getPluginConfig(agentId, "dummy");
-        } catch (IllegalStateException e) {
-            exception = true;
-        }
-        assertThat(exception).isTrue();
-        assertThat(configRepository.getInstrumentationConfigs(agentId)).isEmpty();
-        exception = false;
-        try {
-            configRepository.getInstrumentationConfig(agentId, "dummy");
-        } catch (IllegalStateException e) {
-            exception = true;
-        }
-        assertThat(exception).isTrue();
-    }
-
-    @Test
     public void shouldUpdateTransactionConfig() throws Exception {
         // given
         String agentId = UUID.randomUUID().toString();
-        agentDao.storeAgentConfig(agentId, AgentConfig.getDefaultInstance());
+        agentConfigDao.store(agentId, AgentConfig.getDefaultInstance());
         TransactionConfig config = configRepository.getTransactionConfig(agentId);
         TransactionConfig updatedConfig = TransactionConfig.newBuilder()
                 .setSlowThresholdMillis(OptionalInt32.newBuilder().setValue(1234))
@@ -157,21 +126,43 @@ public class ConfigRepositoryIT {
     }
 
     @Test
-    public void shouldUpdateUiConfig() throws Exception {
+    public void shouldUpdateJvmConfig() throws Exception {
         // given
         String agentId = UUID.randomUUID().toString();
-        agentDao.storeAgentConfig(agentId, AgentConfig.getDefaultInstance());
-        UiConfig config = configRepository.getUiConfig(agentId);
-        UiConfig updatedConfig = UiConfig.newBuilder()
-                .setDefaultDisplayedTransactionType("xyz")
-                .addDefaultDisplayedPercentile(99.0)
-                .addDefaultDisplayedPercentile(99.9)
-                .addDefaultDisplayedPercentile(99.99)
+        agentConfigDao.store(agentId, AgentConfig.getDefaultInstance());
+        JvmConfig config = configRepository.getJvmConfig(agentId);
+        JvmConfig updatedConfig = JvmConfig.newBuilder()
+                .addMaskSystemProperty("x")
+                .addMaskSystemProperty("y")
+                .addMaskSystemProperty("z")
                 .build();
 
         // when
-        configRepository.updateUiConfig(agentId, updatedConfig, Versions.getVersion(config));
-        config = configRepository.getUiConfig(agentId);
+        configRepository.updateJvmConfig(agentId, updatedConfig,
+                Versions.getVersion(config));
+        config = configRepository.getJvmConfig(agentId);
+
+        // then
+        assertThat(config).isEqualTo(updatedConfig);
+    }
+
+    @Test
+    public void shouldUpdateUiConfig() throws Exception {
+        // given
+        String agentId = UUID.randomUUID().toString();
+        agentConfigDao.store(agentId, AgentConfig.getDefaultInstance());
+        UiDefaultsConfig config = configRepository.getUiDefaultsConfig(agentId);
+        UiDefaultsConfig updatedConfig = UiDefaultsConfig.newBuilder()
+                .setDefaultTransactionType("xyz")
+                .addDefaultPercentile(99.0)
+                .addDefaultPercentile(99.9)
+                .addDefaultPercentile(99.99)
+                .build();
+
+        // when
+        configRepository.updateUiDefaultsConfig(agentId, updatedConfig,
+                Versions.getVersion(config));
+        config = configRepository.getUiDefaultsConfig(agentId);
 
         // then
         assertThat(config).isEqualTo(updatedConfig);
@@ -181,7 +172,7 @@ public class ConfigRepositoryIT {
     public void shouldUpdateUserRecordingConfig() throws Exception {
         // given
         String agentId = UUID.randomUUID().toString();
-        agentDao.storeAgentConfig(agentId, AgentConfig.getDefaultInstance());
+        agentConfigDao.store(agentId, AgentConfig.getDefaultInstance());
         UserRecordingConfig config = configRepository.getUserRecordingConfig(agentId);
         UserRecordingConfig updatedConfig = UserRecordingConfig.newBuilder()
                 .addUser("x")
@@ -203,16 +194,16 @@ public class ConfigRepositoryIT {
     public void shouldUpdateAdvancedConfig() throws Exception {
         // given
         String agentId = UUID.randomUUID().toString();
-        agentDao.storeAgentConfig(agentId, AgentConfig.getDefaultInstance());
+        agentConfigDao.store(agentId, AgentConfig.getDefaultInstance());
         AdvancedConfig config = configRepository.getAdvancedConfig(agentId);
         AdvancedConfig updatedConfig = AdvancedConfig.newBuilder()
                 .setWeavingTimer(true)
                 .setImmediatePartialStoreThresholdSeconds(OptionalInt32.newBuilder().setValue(1))
-                .setMaxAggregateTransactionsPerType(OptionalInt32.newBuilder().setValue(2))
-                .setMaxAggregateQueriesPerType(OptionalInt32.newBuilder().setValue(3))
-                .setMaxAggregateServiceCallsPerType(OptionalInt32.newBuilder().setValue(4))
+                .setMaxTransactionAggregates(OptionalInt32.newBuilder().setValue(2))
+                .setMaxQueryAggregates(OptionalInt32.newBuilder().setValue(3))
+                .setMaxServiceCallAggregates(OptionalInt32.newBuilder().setValue(4))
                 .setMaxTraceEntriesPerTransaction(OptionalInt32.newBuilder().setValue(5))
-                .setMaxStackTraceSamplesPerTransaction(OptionalInt32.newBuilder().setValue(6))
+                .setMaxProfileSamplesPerTransaction(OptionalInt32.newBuilder().setValue(6))
                 .setMbeanGaugeNotFoundDelaySeconds(OptionalInt32.newBuilder().setValue(7))
                 .build();
 
@@ -228,7 +219,7 @@ public class ConfigRepositoryIT {
     public void shouldCrudGaugeConfig() throws Exception {
         // given
         String agentId = UUID.randomUUID().toString();
-        agentDao.storeAgentConfig(agentId, AgentConfig.getDefaultInstance());
+        agentConfigDao.store(agentId, AgentConfig.getDefaultInstance());
         GaugeConfig gaugeConfig = GaugeConfig.newBuilder()
                 .setMbeanObjectName("x")
                 .addMbeanAttribute(MBeanAttribute.newBuilder()
@@ -276,13 +267,17 @@ public class ConfigRepositoryIT {
     public void shouldCrudAlertConfig() throws Exception {
         // given
         String agentId = UUID.randomUUID().toString();
-        agentDao.storeAgentConfig(agentId, AgentConfig.getDefaultInstance());
+        agentConfigDao.store(agentId, AgentConfig.getDefaultInstance());
         AlertConfig alertConfig = AlertConfig.newBuilder()
-                .setKind(AlertKind.GAUGE)
-                .setGaugeName("abc")
-                .setGaugeThreshold(OptionalDouble.newBuilder().setValue(111))
-                .setTimePeriodSeconds(60)
-                .addEmailAddress("noone@example.org")
+                .setCondition(AlertCondition.newBuilder()
+                        .setMetricCondition(MetricCondition.newBuilder()
+                                .setMetric("gauge:abc")
+                                .setThreshold(111)
+                                .setTimePeriodSeconds(60))
+                        .build())
+                .setNotification(AlertNotification.newBuilder()
+                        .setEmailNotification(EmailNotification.newBuilder()
+                                .addEmailAddress("noone@example.org")))
                 .build();
 
         // when
@@ -297,11 +292,15 @@ public class ConfigRepositoryIT {
 
         // given
         AlertConfig updatedAlertConfig = AlertConfig.newBuilder()
-                .setKind(AlertKind.GAUGE)
-                .setGaugeName("abc2")
-                .setGaugeThreshold(OptionalDouble.newBuilder().setValue(222))
-                .setTimePeriodSeconds(62)
-                .addEmailAddress("noone2@example.org")
+                .setCondition(AlertCondition.newBuilder()
+                        .setMetricCondition(MetricCondition.newBuilder()
+                                .setMetric("gauge:abc2")
+                                .setThreshold(222)
+                                .setTimePeriodSeconds(62))
+                        .build())
+                .setNotification(AlertNotification.newBuilder()
+                        .setEmailNotification(EmailNotification.newBuilder()
+                                .addEmailAddress("noone2@example.org")))
                 .build();
 
         // when
@@ -327,7 +326,7 @@ public class ConfigRepositoryIT {
     public void shouldCrudInstrumentationConfig() throws Exception {
         // given
         String agentId = UUID.randomUUID().toString();
-        agentDao.storeAgentConfig(agentId, AgentConfig.getDefaultInstance());
+        agentConfigDao.store(agentId, AgentConfig.getDefaultInstance());
         InstrumentationConfig instrumentationConfig = InstrumentationConfig.newBuilder()
                 .setClassName("a")
                 .setMethodName("b")
@@ -407,6 +406,17 @@ public class ConfigRepositoryIT {
         // and further
 
         // given
+        String username = "auser";
+
+        // when
+        UserConfig readUserConfig = configRepository.getUserConfig(username);
+
+        // then
+        assertThat(readUserConfig).isNotNull();
+
+        // and further
+
+        // given
         UserConfig updatedUserConfig = ImmutableUserConfig.builder()
                 .username("auser")
                 .addRoles("brole2")
@@ -482,16 +492,15 @@ public class ConfigRepositoryIT {
     @Test
     public void shouldUpdateWebConfig() throws Exception {
         // given
-        WebConfig config = configRepository.getWebConfig();
-        WebConfig updatedConfig = ImmutableWebConfig.builder()
-                .port(4001)
+        CentralWebConfig config = configRepository.getCentralWebConfig();
+        CentralWebConfig updatedConfig = ImmutableCentralWebConfig.builder()
                 .sessionTimeoutMinutes(31)
                 .sessionCookieName("GLOWROOT_SESSION_ID2")
                 .build();
 
         // when
-        configRepository.updateWebConfig(updatedConfig, config.version());
-        config = configRepository.getWebConfig();
+        configRepository.updateCentralWebConfig(updatedConfig, config.version());
+        config = configRepository.getCentralWebConfig();
 
         // then
         assertThat(config).isEqualTo(updatedConfig);
@@ -506,8 +515,15 @@ public class ConfigRepositoryIT {
                 .addRollupExpirationHours(2)
                 .addRollupExpirationHours(3)
                 .addRollupExpirationHours(4)
+                .addQueryAndServiceCallRollupExpirationHours(5)
+                .addQueryAndServiceCallRollupExpirationHours(6)
+                .addQueryAndServiceCallRollupExpirationHours(7)
+                .addQueryAndServiceCallRollupExpirationHours(8)
+                .addProfileRollupExpirationHours(9)
+                .addProfileRollupExpirationHours(10)
+                .addProfileRollupExpirationHours(11)
+                .addProfileRollupExpirationHours(12)
                 .traceExpirationHours(100)
-                .fullQueryTextExpirationHours(100)
                 .build();
 
         // when
@@ -525,7 +541,7 @@ public class ConfigRepositoryIT {
         SmtpConfig updatedConfig = ImmutableSmtpConfig.builder()
                 .host("a")
                 .port(555)
-                .ssl(true)
+                .connectionSecurity(ConnectionSecurity.SSL_TLS)
                 .username("b")
                 .password("c")
                 .putAdditionalProperties("f", "g")
@@ -537,6 +553,25 @@ public class ConfigRepositoryIT {
         // when
         configRepository.updateSmtpConfig(updatedConfig, config.version());
         config = configRepository.getSmtpConfig();
+
+        // then
+        assertThat(config).isEqualTo(updatedConfig);
+    }
+
+    @Test
+    public void shouldUpdateHttpProxyConfig() throws Exception {
+        // given
+        HttpProxyConfig config = configRepository.getHttpProxyConfig();
+        HttpProxyConfig updatedConfig = ImmutableHttpProxyConfig.builder()
+                .host("a")
+                .port(555)
+                .username("b")
+                .password("c")
+                .build();
+
+        // when
+        configRepository.updateHttpProxyConfig(updatedConfig, config.version());
+        config = configRepository.getHttpProxyConfig();
 
         // then
         assertThat(config).isEqualTo(updatedConfig);

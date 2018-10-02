@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,31 +17,25 @@ package org.glowroot.ui;
 
 import java.io.File;
 import java.nio.charset.Charset;
+import java.util.Collection;
 import java.util.List;
+import java.util.regex.Pattern;
 
-import javax.annotation.Nullable;
-
+import com.google.common.collect.EvictingQueue;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.google.common.io.Files;
+import com.google.common.io.LineProcessor;
+import com.google.common.net.MediaType;
 import com.google.common.primitives.Longs;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.handler.codec.http.DefaultFullHttpResponse;
-import io.netty.handler.codec.http.DefaultHttpResponse;
-import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpHeaderNames;
-import io.netty.handler.codec.http.HttpHeaderValues;
-import io.netty.handler.codec.http.HttpRequest;
-import io.netty.handler.codec.http.HttpResponse;
-import io.netty.handler.codec.http.HttpUtil;
-import io.netty.handler.codec.http.QueryStringDecoder;
 
+import org.glowroot.ui.CommonHandler.CommonRequest;
+import org.glowroot.ui.CommonHandler.CommonResponse;
 import org.glowroot.ui.HttpSessionManager.Authentication;
 
 import static io.netty.handler.codec.http.HttpResponseStatus.FOUND;
 import static io.netty.handler.codec.http.HttpResponseStatus.OK;
-import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 class GlowrootLogHttpService implements HttpService {
 
@@ -55,9 +49,11 @@ class GlowrootLogHttpService implements HttpService {
     };
 
     private final File logDir;
+    private final Pattern logFileNamePattern;
 
-    GlowrootLogHttpService(File logDir) {
+    GlowrootLogHttpService(File logDir, Pattern logFileNamePattern) {
         this.logDir = logDir;
+        this.logFileNamePattern = logFileNamePattern;
     }
 
     @Override
@@ -66,13 +62,12 @@ class GlowrootLogHttpService implements HttpService {
     }
 
     @Override
-    public @Nullable FullHttpResponse handleRequest(ChannelHandlerContext ctx, HttpRequest request,
-            Authentication authentication) throws Exception {
-        QueryStringDecoder decoder = new QueryStringDecoder(request.uri());
-        List<String> maxLinesParams = decoder.parameters().get("max-lines");
-        if (maxLinesParams == null) {
-            DefaultFullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, FOUND);
-            response.headers().set(HttpHeaderNames.LOCATION, "log?max-lines=" + DEFAULT_MAX_LINES);
+    public CommonResponse handleRequest(CommonRequest request, Authentication authentication)
+            throws Exception {
+        List<String> maxLinesParams = request.getParameters("max-lines");
+        if (maxLinesParams.isEmpty()) {
+            CommonResponse response = new CommonResponse(FOUND);
+            response.setHeader(HttpHeaderNames.LOCATION, "log?max-lines=" + DEFAULT_MAX_LINES);
             return response;
         }
         int maxLines = Integer.parseInt(maxLinesParams.get(0));
@@ -84,18 +79,23 @@ class GlowrootLogHttpService implements HttpService {
         }
         List<File> files = Lists.newArrayList();
         for (File file : list) {
-            if (file.isFile() && file.getName().matches("glowroot.*\\.log")) {
+            if (file.isFile() && logFileNamePattern.matcher(file.getName()).matches()) {
                 files.add(file);
             }
         }
         files = byLastModified.reverse().sortedCopy(files);
         List<String> lines = Lists.newArrayList();
         for (File file : files) {
+            // don't read entire file into memory at once, even though rollover may be 10mb, a flood
+            // of logging can create a much much much larger file before rollover occurs
+            // (see ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy call to isTooSoon())
+
             // logback writes logs in default charset
-            List<String> olderLines = Files.readLines(file, Charset.defaultCharset());
-            olderLines.addAll(lines);
-            lines = olderLines;
-            if (lines.size() >= maxLines) {
+            // "+ 1" is to read extra line to know whether to add "[earlier log entries truncated]"
+            Collection<String> olderLines = Files.readLines(file, Charset.defaultCharset(),
+                    new ReadLastNLines(maxLines + 1 - lines.size()));
+            lines.addAll(0, olderLines);
+            if (lines.size() > maxLines) {
                 break;
             }
         }
@@ -108,21 +108,26 @@ class GlowrootLogHttpService implements HttpService {
         for (String line : lines) {
             chunkSources.add(ChunkSource.wrap(line + '\n'));
         }
-        HttpResponse response = new DefaultHttpResponse(HTTP_1_1, OK);
-        response.headers().set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED);
-        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/plain; charset=UTF-8");
-        boolean keepAlive = HttpUtil.isKeepAlive(request);
-        if (keepAlive && !request.protocolVersion().isKeepAliveDefault()) {
-            response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
+        return new CommonResponse(OK, MediaType.PLAIN_TEXT_UTF_8, ChunkSource.concat(chunkSources));
+    }
+
+    private static class ReadLastNLines implements LineProcessor<Collection<String>> {
+
+        private final Collection<String> queue;
+
+        private ReadLastNLines(int nLines) {
+            queue = EvictingQueue.create(nLines);
         }
-        HttpServices.preventCaching(response);
-        ctx.write(response);
-        ChannelFuture future = ctx.write(ChunkedInputs.create(ChunkSource.concat(chunkSources)));
-        HttpServices.addErrorListener(future);
-        if (!keepAlive) {
-            HttpServices.addCloseListener(future);
+
+        @Override
+        public boolean processLine(String line) {
+            queue.add(line);
+            return true;
         }
-        // return null to indicate streaming
-        return null;
+
+        @Override
+        public Collection<String> getResult() {
+            return queue;
+        }
     }
 }

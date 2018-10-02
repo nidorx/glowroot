@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2017 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,8 +57,14 @@ glowroot.controller('TracesCtrl', [
       {text: '5,000', value: 5000}
     ];
 
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh', 'range.chartAutoRefresh'],
+    // using $watch instead of $watchGroup because $watchGroup has confusing behavior regarding oldValues
+    // (see https://github.com/angular/angular.js/pull/12643)
+    $scope.$watch('[range.chartFrom, range.chartTo, range.chartRefresh, range.chartAutoRefresh]',
         function (newValues, oldValues) {
+          if ($scope.formCtrl.$invalid) {
+            // TODO display message to user
+            return;
+          }
           appliedFilter.from = $scope.range.chartFrom;
           appliedFilter.to = $scope.range.chartTo;
           updateLocation();
@@ -69,13 +75,25 @@ glowroot.controller('TracesCtrl', [
           refreshChart(newValues[3] !== oldValues[3]);
         });
 
-    function refreshChart(autoRefresh, deferred) {
+    function refreshChart(autoRefresh) {
       if ((!$scope.agentRollupId && $scope.layout.central) || !$scope.transactionType) {
         return;
       }
       var from = appliedFilter.from;
       var to = appliedFilter.to;
       var limit = appliedFilter.limit;
+      if (appliedFilter.durationMillisLow) {
+        appliedFilter.durationMillisLow = Number(appliedFilter.durationMillisLow);
+      } else if (appliedFilter.durationMillisLow === '') {
+        appliedFilter.durationMillisLow = 0;
+      }
+      if (appliedFilter.durationMillisHigh) {
+        appliedFilter.durationMillisHigh = Number(appliedFilter.durationMillisHigh);
+      } else if (appliedFilter.durationMillisHigh === '') {
+        appliedFilter.durationMillisHigh = undefined;
+      }
+      var durationMillisLow = appliedFilter.durationMillisLow;
+      var durationMillisHigh = appliedFilter.durationMillisHigh;
       var query = angular.copy(appliedFilter);
       query.agentRollupId = $scope.agentRollupId;
       if ($scope.transactionName) {
@@ -89,6 +107,7 @@ glowroot.controller('TracesCtrl', [
         $scope.showChartSpinner++;
       }
       $scope.suppressChartSpinner = false;
+
       $http.get('backend/' + traceKind + '/points' + queryStrings.encodeObject(query))
           .then(function (response) {
             var data = response.data;
@@ -132,6 +151,8 @@ glowroot.controller('TracesCtrl', [
             // user clicked on Refresh button, need to reset axes
             plot.getAxes().xaxis.options.min = from;
             plot.getAxes().xaxis.options.max = to;
+            plot.getAxes().yaxis.options.min = durationMillisLow;
+            plot.getAxes().yaxis.options.max = durationMillisHigh;
             plot.setData([data.normalPoints, data.errorPoints, data.partialPoints]);
             // setupGrid is needed in case yaxis.max === undefined
             if (highlightedTraceId) {
@@ -142,38 +163,27 @@ glowroot.controller('TracesCtrl', [
             if (highlightedTraceId) {
               highlight();
             }
-            broadcastTraceTabCount();
-            if (deferred) {
-              deferred.resolve('Success');
-            }
           }, function (response) {
             if (showChartSpinner) {
               $scope.showChartSpinner--;
             }
-            httpErrors.handle(response, $scope, deferred);
+            httpErrors.handle(response, $scope);
           });
     }
 
-    function broadcastTraceTabCount() {
-      var data = plot.getData();
-      var traceCount = data[0].data.length + data[1].data.length + data[2].data.length;
-      // parent scope can be null if user has moved on to another controller by the time http get returns
-      if ($scope.$parent) {
-        if ($scope.chartLimitExceeded) {
-          $scope.$parent.$broadcast('updateTraceTabCount', undefined);
-        } else {
-          $scope.$parent.$broadcast('updateTraceTabCount', traceCount);
-        }
+    $scope.refresh = function (deferred) {
+      if (deferred) {
+        deferred.resolve();
       }
-    }
-
-    $scope.refresh = function () {
-      $scope.applyLast();
+      charts.applyLast($scope);
       angular.extend(appliedFilter, $scope.filter);
       $scope.range.chartRefresh++;
     };
 
     $scope.clearCriteria = function () {
+      $scope.filter.durationMillisLow = 0;
+      $scope.filter.durationMillisHigh = undefined;
+      $scope.filterDurationComparator = 'greater';
       $scope.filter.headlineComparator = 'begins';
       $scope.filter.headline = '';
       $scope.filter.errorMessageComparator = 'begins';
@@ -194,7 +204,8 @@ glowroot.controller('TracesCtrl', [
         var to = plot.getAxes().xaxis.options.max;
         charts.updateRange($scope, from, to, zoomingOut, false, false, true);
         if (zoomingOut) {
-          updateFilter($scope.range.chartFrom, $scope.range.chartTo);
+          // scroll zooming out, reset duration limits
+          updateFilter($scope.range.chartFrom, $scope.range.chartTo, 0, undefined);
         } else {
           // only update from/to
           appliedFilter.from = $scope.range.chartFrom;
@@ -217,7 +228,6 @@ glowroot.controller('TracesCtrl', [
           plot.setData(data);
           plot.setupGrid();
           plot.draw();
-          broadcastTraceTabCount();
           updateLocation();
         }
       });
@@ -231,7 +241,7 @@ glowroot.controller('TracesCtrl', [
           to: ranges.xaxis.to
         };
         charts.updateRange($scope, range.from, range.to, false, true, true, true);
-        updateFilter(range.from, range.to);
+        updateFilter(range.from, range.to, ranges.yaxis.from, ranges.yaxis.to);
         if ($scope.chartLimitExceeded) {
           updateLocation();
         } else {
@@ -240,12 +250,11 @@ glowroot.controller('TracesCtrl', [
           plot.getAxes().xaxis.options.min = range.from;
           plot.getAxes().xaxis.options.max = range.to;
           plot.getAxes().yaxis.options.min = ranges.yaxis.from;
-          plot.getAxes().yaxis.options.realMax = ranges.yaxis.to;
+          plot.getAxes().yaxis.options.max = ranges.yaxis.to;
           plot.setData(getFilteredData());
           // setupGrid needs to be after setData
           plot.setupGrid();
           plot.draw();
-          broadcastTraceTabCount();
           updateLocation();
         }
       });
@@ -260,17 +269,32 @@ glowroot.controller('TracesCtrl', [
         to: currMax + currRange / 2
       };
       charts.updateRange($scope, range.from, range.to, true, false, false, true);
-      updateFilter($scope.range.chartFrom, $scope.range.chartTo);
+      // scroll zooming out, reset duration limits
+      updateFilter($scope.range.chartFrom, $scope.range.chartTo, 0, undefined);
     };
 
-    function updateFilter(from, to) {
+    function updateFilter(from, to, durationMillisLow, durationMillisHigh) {
       appliedFilter.from = from;
       appliedFilter.to = to;
+      // set both appliedFilter and $scope.filter durationMillisLow/durationMillisHigh
+      appliedFilter.durationMillisLow = $scope.filter.durationMillisLow = durationMillisLow;
+      if (durationMillisHigh !== plot.getAxes().yaxis.max) {
+        appliedFilter.durationMillisHigh = $scope.filter.durationMillisHigh = durationMillisHigh;
+      }
+      if (durationMillisHigh && durationMillisLow !== 0) {
+        $scope.filterDurationComparator = 'between';
+      } else if (durationMillisHigh) {
+        $scope.filterDurationComparator = 'less';
+      } else {
+        $scope.filterDurationComparator = 'greater';
+      }
     }
 
     function getFilteredData() {
       var from = plot.getAxes().xaxis.options.min;
       var to = plot.getAxes().xaxis.options.max;
+      var durationMillisLow = plot.getAxes().yaxis.options.min;
+      var durationMillisHigh = plot.getAxes().yaxis.options.max || Number.MAX_VALUE;
       var data = [];
       var i, j;
       var nodata = true;
@@ -279,7 +303,7 @@ glowroot.controller('TracesCtrl', [
         var points = plot.getData()[i].data;
         for (j = 0; j < points.length; j++) {
           var point = points[j];
-          if (point[0] >= from && point[0] <= to) {
+          if (point[0] >= from && point[0] <= to && point[1] >= durationMillisLow && point[1] <= durationMillisHigh) {
             data[i].push(point);
             nodata = false;
           }
@@ -304,9 +328,6 @@ glowroot.controller('TracesCtrl', [
             url += '&';
           }
           if (agentId) {
-            if ($scope.agentRollupId !== agentId) {
-              url += 'modal-agent-rollup-id=' + encodeURIComponent($scope.agentRollupId) + '&';
-            }
             url += 'modal-agent-id=' + encodeURIComponent(agentId) + '&';
           }
           url += 'modal-trace-id=' + traceId;
@@ -317,9 +338,6 @@ glowroot.controller('TracesCtrl', [
         } else {
           $scope.$apply(function () {
             if (agentId) {
-              if ($scope.agentRollupId !== agentId) {
-                $location.search('modal-agent-rollup-id', $scope.agentRollupId);
-              }
               $location.search('modal-agent-id', agentId);
             }
             $location.search('modal-trace-id', traceId);
@@ -328,9 +346,23 @@ glowroot.controller('TracesCtrl', [
             }
           });
         }
-        highlightedTraceId = item.seriesIndex === 2 ? traceId : null;
       }
     });
+
+    $scope.filterDurationComparatorOptions = [
+      {
+        display: 'Greater than',
+        value: 'greater'
+      },
+      {
+        display: 'Less than',
+        value: 'less'
+      },
+      {
+        display: 'Between',
+        value: 'between'
+      }
+    ];
 
     $scope.filterTextComparatorOptions = [
       {
@@ -357,14 +389,15 @@ glowroot.controller('TracesCtrl', [
 
     locationChanges.on($scope, function () {
 
-      $scope.traceAttributeNames = $scope.layout.agentRollups[$scope.agentRollupId]
-          .traceAttributeNames[$scope.transactionType];
+      $scope.traceAttributeNames = $scope.agentRollup.traceAttributeNames[$scope.transactionType];
 
       var priorAppliedFilter = appliedFilter;
       appliedFilter = {};
       appliedFilter.transactionType = $scope.transactionType;
       appliedFilter.from = $scope.range.chartFrom;
       appliedFilter.to = $scope.range.chartTo;
+      appliedFilter.durationMillisLow = Number($location.search()['duration-millis-low']) || 0;
+      appliedFilter.durationMillisHigh = Number($location.search()['duration-millis-high']) || undefined;
       appliedFilter.headlineComparator = $location.search()['headline-comparator'] || 'begins';
       appliedFilter.headline = $location.search().headline || '';
       appliedFilter.errorMessageComparator = $location.search()['error-message-comparator'] || 'begins';
@@ -386,22 +419,42 @@ glowroot.controller('TracesCtrl', [
       delete $scope.filter.from;
       delete $scope.filter.to;
 
-      var modalAgentRollup = $location.search()['modal-agent-rollup-id'] || $location.search()['modal-agent-id'] || '';
+      if (appliedFilter.durationMillisLow !== 0 && appliedFilter.durationMillisHigh) {
+        $scope.filterDurationComparator = 'between';
+      } else if (appliedFilter.durationMillisHigh) {
+        $scope.filterDurationComparator = 'less';
+      } else {
+        $scope.filterDurationComparator = 'greater';
+      }
+
       var modalAgentId = $location.search()['modal-agent-id'] || '';
       var modalTraceId = $location.search()['modal-trace-id'];
       var modalCheckLiveTraces = $location.search()['modal-check-live-traces'];
       if (modalTraceId) {
         highlightedTraceId = modalTraceId;
-        $('#traceModal').data('location-query',
-            ['modal-agent-rollup-id', 'modal-agent-id', 'modal-trace-id', 'modal-check-live-traces']);
-        traceModal.displayModal(modalAgentRollup, modalAgentId, modalTraceId, modalCheckLiveTraces);
+        $('#traceModal').data('location-query', ['modal-agent-id', 'modal-trace-id', 'modal-check-live-traces']);
+        traceModal.displayModal(modalAgentId, modalTraceId, modalCheckLiveTraces);
       } else {
         $('#traceModal').modal('hide');
       }
     });
 
+    $scope.$watch('filterDurationComparator', function (value) {
+      if (value === 'greater') {
+        $scope.filter.durationMillisHigh = undefined;
+      } else if (value === 'less') {
+        $scope.filter.durationMillisLow = 0;
+      }
+    });
+
     function updateLocation() {
-      var query = $scope.buildQueryObject({}, true);
+      var query = $scope.buildQueryObjectForTraceTab();
+      if (Number(appliedFilter.durationMillisLow)) {
+        query['duration-millis-low'] = appliedFilter.durationMillisLow;
+      }
+      if (Number(appliedFilter.durationMillisHigh)) {
+        query['duration-millis-high'] = appliedFilter.durationMillisHigh;
+      }
       if (appliedFilter.headline) {
         query['headline-comparator'] = appliedFilter.headlineComparator;
         query.headline = appliedFilter.headline;
@@ -425,7 +478,6 @@ glowroot.controller('TracesCtrl', [
         query.limit = appliedFilter.limit;
       }
       // preserve modal-*, otherwise refresh on modal trace does not work
-      query['modal-agent-rollup-id'] = $location.search()['modal-agent-rollup-id'];
       query['modal-agent-id'] = $location.search()['modal-agent-id'];
       query['modal-trace-id'] = $location.search()['modal-trace-id'];
       query['modal-check-live-traces'] = $location.search()['modal-check-live-traces'];
@@ -469,7 +521,11 @@ glowroot.controller('TracesCtrl', [
           min: 0,
           // 10 second yaxis max just for initial empty chart rendering
           max: 10,
-          label: 'milliseconds'
+          label: 'milliseconds',
+          labelPadding: 7,
+          tickFormatter: function (val) {
+            return val.toLocaleString(undefined, {maximumSignificantDigits: 15});
+          }
         },
         zoom: {
           interactive: true,
@@ -483,7 +539,7 @@ glowroot.controller('TracesCtrl', [
           $('#offscreenActiveColor').css('border-top-color')
         ],
         selection: {
-          mode: 'x'
+          mode: 'xory'
         }
       };
       // render chart with no data points

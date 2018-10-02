@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2016 the original author or authors.
+ * Copyright 2014-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,26 +17,29 @@ package org.glowroot.agent.plugin.servlet;
 
 import java.lang.reflect.Method;
 
-import javax.annotation.Nullable;
-
-import com.google.common.annotations.VisibleForTesting;
-
-import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.Logger;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.util.Reflection;
 
 public class ResponseInvoker {
 
-    private static final Logger logger = Agent.getLogger(ResponseInvoker.class);
+    private static final Logger logger = Logger.getLogger(ResponseInvoker.class);
 
+    // ServletResponse.getContentType() was introduced in Servlet 2.4
     private final @Nullable Method getContentTypeMethod;
+    // HttpServletResponse.getHeader() was introduced in Servlet 3.0
+    private final @Nullable Method getHeaderMethod;
+    // HttpServletResponse.getStatus() was introduced in Servlet 3.0
+    private final @Nullable Method getStatusMethod;
 
     public ResponseInvoker(Class<?> clazz) {
         Class<?> servletResponseClass = getServletResponseClass(clazz);
         getContentTypeMethod = Reflection.getMethod(servletResponseClass, "getContentType");
+        Class<?> httpServletResponseClass = getHttpServletResponseClass(clazz);
+        getHeaderMethod = Reflection.getMethod(httpServletResponseClass, "getHeader", String.class);
+        getStatusMethod = Reflection.getMethod(httpServletResponseClass, "getStatus");
     }
 
-    // ServletResponse.getContentType() was introduced in Servlet 2.4 (e.g. since Tomcat 5.5.x)
     boolean hasGetContentTypeMethod() {
         return getContentTypeMethod != null;
     }
@@ -45,10 +48,37 @@ public class ResponseInvoker {
         return Reflection.invokeWithDefault(getContentTypeMethod, response, "");
     }
 
-    @VisibleForTesting
+    boolean hasGetHeaderMethod() {
+        return getHeaderMethod != null;
+    }
+
+    String getHeader(Object response, String name) {
+        return Reflection.invokeWithDefault(getHeaderMethod, response, "", name);
+    }
+
+    boolean hasGetStatusMethod() {
+        return getStatusMethod != null;
+    }
+
+    int getStatus(Object response) {
+        return Reflection.invokeWithDefault(getStatusMethod, response, -1);
+    }
+
+    // visible for testing
     static @Nullable Class<?> getServletResponseClass(Class<?> clazz) {
         try {
             return Class.forName("javax.servlet.ServletResponse", false, clazz.getClassLoader());
+        } catch (ClassNotFoundException e) {
+            logger.warn(e.getMessage(), e);
+        }
+        return null;
+    }
+
+    // visible for testing
+    static @Nullable Class<?> getHttpServletResponseClass(Class<?> clazz) {
+        try {
+            return Class.forName("javax.servlet.http.HttpServletResponse", false,
+                    clazz.getClassLoader());
         } catch (ClassNotFoundException e) {
             logger.warn(e.getMessage(), e);
         }

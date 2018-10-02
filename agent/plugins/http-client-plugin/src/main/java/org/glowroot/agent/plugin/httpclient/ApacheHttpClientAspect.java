@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,13 +17,12 @@ package org.glowroot.agent.plugin.httpclient;
 
 import java.net.URI;
 
-import javax.annotation.Nullable;
-
 import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.MessageSupplier;
 import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.TimerName;
 import org.glowroot.agent.plugin.api.TraceEntry;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
 import org.glowroot.agent.plugin.api.weaving.BindThrowable;
 import org.glowroot.agent.plugin.api.weaving.BindTraveler;
@@ -35,37 +34,61 @@ import org.glowroot.agent.plugin.api.weaving.Shim;
 
 public class ApacheHttpClientAspect {
 
-    @Shim("org.apache.http.client.methods.HttpUriRequest")
-    public interface HttpUriRequest {
-        @Nullable
-        String getMethod();
-        @Nullable
-        URI getURI();
-    }
-
-    @Shim("org.apache.http.HttpHost")
-    public interface HttpHost {
-        @Nullable
-        String toURI();
-    }
-
     @Shim("org.apache.http.HttpRequest")
-    public interface HttpRequest {
+    public interface UnshadedHttpRequest extends HttpRequest {
+
+        @Override
         @Shim("org.apache.http.RequestLine getRequestLine()")
         @Nullable
         RequestLine glowroot$getRequestLine();
     }
 
-    @Shim("org.apache.http.RequestLine")
+    @Shim("wiremock.org.apache.http.HttpRequest")
+    public interface WireMockShadedHttpRequest extends HttpRequest {
+
+        @Override
+        @Shim("wiremock.org.apache.http.RequestLine getRequestLine()")
+        @Nullable
+        RequestLine glowroot$getRequestLine();
+    }
+
+    public interface HttpRequest {
+
+        @Nullable
+        RequestLine glowroot$getRequestLine();
+    }
+
+    @Shim({"org.apache.http.RequestLine", "wiremock.org.apache.http.RequestLine"})
     public interface RequestLine {
+
         @Nullable
         String getMethod();
+
         @Nullable
         String getUri();
     }
 
-    @Pointcut(className = "org.apache.http.client.HttpClient", methodName = "execute",
-            methodParameterTypes = {"org.apache.http.client.methods.HttpUriRequest", ".."},
+    @Shim({"org.apache.http.HttpHost", "wiremock.org.apache.http.HttpHost"})
+    public interface HttpHost {
+        @Nullable
+        String toURI();
+    }
+
+    @Shim({"org.apache.http.client.methods.HttpUriRequest",
+            "wiremock.org.apache.http.client.methods.HttpUriRequest"})
+    public interface HttpUriRequest {
+
+        @Nullable
+        String getMethod();
+
+        @Nullable
+        URI getURI();
+    }
+
+    @Pointcut(className = "org.apache.http.client.HttpClient"
+            + "|wiremock.org.apache.http.client.HttpClient", methodName = "execute",
+            methodParameterTypes = {"org.apache.http.client.methods.HttpUriRequest"
+                    + "|wiremock.org.apache.http.client.methods.HttpUriRequest", ".."},
             nestingGroup = "http-client", timerName = "http client request")
     public static class ExecuteAdvice {
         private static final TimerName timerName = Agent.getTimerName(ExecuteAdvice.class);
@@ -99,17 +122,18 @@ public class ApacheHttpClientAspect {
             }
         }
         @OnThrow
-        public static void onThrow(@BindThrowable Throwable throwable,
+        public static void onThrow(@BindThrowable Throwable t,
                 @BindTraveler @Nullable TraceEntry traceEntry) {
             if (traceEntry != null) {
-                traceEntry.endWithError(throwable);
+                traceEntry.endWithError(t);
             }
         }
     }
 
-    @Pointcut(className = "org.apache.http.client.HttpClient", methodName = "execute",
-            methodParameterTypes = {"org.apache.http.HttpHost", "org.apache.http.HttpRequest",
-                    ".."},
+    @Pointcut(className = "org.apache.http.client.HttpClient"
+            + "|wiremock.org.apache.http.client.HttpClient", methodName = "execute",
+            methodParameterTypes = {"org.apache.http.HttpHost|wiremock.org.apache.http.HttpHost",
+                    "org.apache.http.HttpRequest|wiremock.org.apache.http.HttpRequest", ".."},
             nestingGroup = "http-client", timerName = "http client request")
     public static class ExecuteWithHostAdvice {
         private static final TimerName timerName = Agent.getTimerName(ExecuteWithHostAdvice.class);
@@ -146,9 +170,9 @@ public class ApacheHttpClientAspect {
             }
         }
         @OnThrow
-        public static void onThrow(@BindThrowable Throwable throwable,
+        public static void onThrow(@BindThrowable Throwable t,
                 @BindTraveler TraceEntry traceEntry) {
-            traceEntry.endWithError(throwable);
+            traceEntry.endWithError(t);
         }
     }
 }

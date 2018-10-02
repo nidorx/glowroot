@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@
 package org.glowroot.agent.live;
 
 import java.lang.instrument.Instrumentation;
+import java.lang.instrument.UnmodifiableClassException;
 import java.lang.reflect.Modifier;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-
-import javax.annotation.Nullable;
+import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Splitter;
@@ -34,22 +34,29 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.glowroot.agent.config.ConfigService;
 import org.glowroot.agent.config.InstrumentationConfig;
 import org.glowroot.agent.live.ClasspathCache.UiAnalyzedMethod;
+import org.glowroot.agent.util.MaybePatterns;
 import org.glowroot.agent.weaving.AdviceCache;
 import org.glowroot.agent.weaving.AnalyzedWorld;
 import org.glowroot.common.live.LiveWeavingService;
 import org.glowroot.wire.api.model.DownstreamServiceOuterClass.GlobalMeta;
 import org.glowroot.wire.api.model.DownstreamServiceOuterClass.MethodSignature;
 
+import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 import static org.objectweb.asm.Opcodes.ACC_FINAL;
 import static org.objectweb.asm.Opcodes.ACC_SYNCHRONIZED;
 
 public class LiveWeavingServiceImpl implements LiveWeavingService {
+
+    private static final Logger logger = LoggerFactory.getLogger(LiveWeavingServiceImpl.class);
 
     private static final String THE_SINGLE_KEY = "THE_SINGLE_KEY";
     private static final Splitter splitter = Splitter.on(' ').omitEmptyStrings();
@@ -91,7 +98,17 @@ public class LiveWeavingServiceImpl implements LiveWeavingService {
 
     @Override
     public void preloadClasspathCache(String agentId) {
-        getClasspathCache().updateCache();
+        // run in background and return immediate so as not to block single UI thread (when running
+        // embedded) or single gRPC thread (when reporting to central collector)
+        Thread thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                getClasspathCache().updateCache();
+            }
+        });
+        thread.setName("Glowroot-Preload-Classpath-Cache");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     @Override
@@ -118,7 +135,7 @@ public class LiveWeavingServiceImpl implements LiveWeavingService {
             }
         }
         ImmutableList<String> sortedMethodNames =
-                Ordering.from(String.CASE_INSENSITIVE_ORDER).immutableSortedCopy(methodNames);
+                Ordering.natural().immutableSortedCopy(methodNames);
         if (methodNames.size() > limit) {
             return sortedMethodNames.subList(0, limit);
         } else {
@@ -184,15 +201,23 @@ public class LiveWeavingServiceImpl implements LiveWeavingService {
     private int reweaveInternal() throws Exception {
         List<InstrumentationConfig> configs = configService.getInstrumentationConfigs();
         adviceCache.updateAdvisors(configs);
-        Set<String> classNames = Sets.newHashSet();
+        Set<PointcutClassName> pointcutClassNames = Sets.newHashSet();
         for (InstrumentationConfig config : configs) {
+            PointcutClassName subTypeRestrictionPointClassName = null;
+            String subTypeRestriction = config.subTypeRestriction();
+            if (!subTypeRestriction.isEmpty()) {
+                subTypeRestrictionPointClassName =
+                        PointcutClassName.fromMaybePattern(subTypeRestriction, null, false);
+            }
             String className = config.className();
             if (!className.isEmpty()) {
-                classNames.add(className);
+                pointcutClassNames.add(PointcutClassName.fromMaybePattern(className,
+                        subTypeRestrictionPointClassName, config.methodName().equals("<init>")));
             }
         }
         Set<Class<?>> classes = Sets.newHashSet();
-        List<Class<?>> possibleNewReweavableClasses = getExistingSubClasses(classNames);
+        List<Class<?>> possibleNewReweavableClasses = getExistingModifiableSubClasses(
+                pointcutClassNames, instrumentation.getAllLoadedClasses(), instrumentation);
         // need to remove these classes from AnalyzedWorld, otherwise if a subclass and its parent
         // class are both in the list and the subclass is re-transformed first, it will use the
         // old cached AnalyzedClass for its parent which will have the old AnalyzedMethod advisors
@@ -219,31 +244,43 @@ public class LiveWeavingServiceImpl implements LiveWeavingService {
         return count;
     }
 
-    @RequiresNonNull("instrumentation")
-    private List<Class<?>> getExistingSubClasses(Set<String> classNames) {
-        List<Class<?>> classes = Lists.newArrayList();
-        for (Class<?> clazz : instrumentation.getAllLoadedClasses()) {
-            if (isSubClassOfOneOf(clazz, classNames)) {
-                classes.add(clazz);
+    public static void initialReweave(Set<PointcutClassName> pointcutClassNames,
+            Class<?>[] initialLoadedClasses, Instrumentation instrumentation) {
+        if (!instrumentation.isRetransformClassesSupported()) {
+            return;
+        }
+        List<Class<?>> classes = getExistingModifiableSubClasses(pointcutClassNames,
+                initialLoadedClasses, instrumentation);
+        for (Class<?> clazz : classes) {
+            if (clazz.isInterface()) {
+                continue;
+            }
+            try {
+                instrumentation.retransformClasses(clazz);
+            } catch (UnmodifiableClassException e) {
+                // IBM JDK 6 throws UnmodifiableClassException even though call to
+                // isModifiableClass() in getExistingModifiableSubClasses() returns true
+                logger.debug(e.getMessage(), e);
             }
         }
-        return classes;
     }
 
-    private static boolean isSubClassOfOneOf(Class<?> clazz, Set<String> classNames) {
-        if (classNames.contains(clazz.getName())) {
-            return true;
-        }
-        Class<?> superclass = clazz.getSuperclass();
-        if (superclass != null && isSubClassOfOneOf(superclass, classNames)) {
-            return true;
-        }
-        for (Class<?> iface : clazz.getInterfaces()) {
-            if (isSubClassOfOneOf(iface, classNames)) {
-                return true;
+    private static List<Class<?>> getExistingModifiableSubClasses(
+            Set<PointcutClassName> pointcutClassNames, Class<?>[] classes,
+            Instrumentation instrumentation) {
+        List<Class<?>> existingModifiableSubClasses = Lists.newArrayList();
+        for (Class<?> clazz : classes) {
+            if (!instrumentation.isModifiableClass(clazz)) {
+                continue;
+            }
+            for (PointcutClassName pointcutClassName : pointcutClassNames) {
+                if (pointcutClassName.appliesTo(clazz)) {
+                    existingModifiableSubClasses.add(clazz);
+                    break;
+                }
             }
         }
-        return false;
+        return existingModifiableSubClasses;
     }
 
     @VisibleForTesting
@@ -269,6 +306,80 @@ public class LiveWeavingServiceImpl implements LiveWeavingService {
             } else {
                 // package-private
                 return 3;
+            }
+        }
+    }
+
+    public static class PointcutClassName {
+
+        private final @Nullable Pattern pattern;
+        private final @Nullable String nonPattern;
+
+        private final @Nullable PointcutClassName subTypeRestriction;
+
+        private final boolean doNotMatchSubClasses;
+
+        public static PointcutClassName fromPattern(Pattern pattern,
+                @Nullable PointcutClassName subTypeRestrictionPointcutClassName,
+                boolean doNotMatchSubClasses) {
+            return new PointcutClassName(pattern, null, subTypeRestrictionPointcutClassName,
+                    doNotMatchSubClasses);
+        }
+
+        public static PointcutClassName fromNonPattern(String nonPattern,
+                @Nullable PointcutClassName subTypeRestrictionPointcutClassName,
+                boolean doNotMatchSubClasses) {
+            return new PointcutClassName(null, nonPattern, subTypeRestrictionPointcutClassName,
+                    doNotMatchSubClasses);
+        }
+
+        public static PointcutClassName fromMaybePattern(String maybePattern,
+                @Nullable PointcutClassName subTypeRestriction, boolean doNotMatchSubClasses) {
+            Pattern pattern = MaybePatterns.buildPattern(maybePattern);
+            if (pattern == null) {
+                return new PointcutClassName(null, maybePattern, subTypeRestriction,
+                        doNotMatchSubClasses);
+            } else {
+                return new PointcutClassName(pattern, null, subTypeRestriction,
+                        doNotMatchSubClasses);
+            }
+        }
+
+        private PointcutClassName(@Nullable Pattern pattern, @Nullable String nonPattern,
+                @Nullable PointcutClassName subTypeRestriction, boolean doNotMatchSubClasses) {
+            this.pattern = pattern;
+            this.nonPattern = nonPattern;
+            this.subTypeRestriction = subTypeRestriction;
+            this.doNotMatchSubClasses = doNotMatchSubClasses;
+        }
+
+        private boolean appliesTo(Class<?> clazz) {
+            if (appliesTo(clazz.getName())) {
+                return true;
+            }
+            if (doNotMatchSubClasses) {
+                return false;
+            }
+            Class<?> superclass = clazz.getSuperclass();
+            if (superclass != null && appliesTo(superclass)) {
+                return true;
+            }
+            for (Class<?> iface : clazz.getInterfaces()) {
+                if (appliesTo(iface)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private boolean appliesTo(String className) {
+            if (subTypeRestriction != null && !subTypeRestriction.appliesTo(className)) {
+                return false;
+            }
+            if (pattern != null) {
+                return pattern.matcher(className).matches();
+            } else {
+                return checkNotNull(nonPattern).equals(className);
             }
         }
     }

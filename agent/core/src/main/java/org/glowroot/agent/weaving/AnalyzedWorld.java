@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,19 +18,16 @@ package org.glowroot.agent.weaving;
 import java.io.IOException;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.net.URL;
 import java.security.CodeSource;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import javax.annotation.Nullable;
-
-import com.google.common.base.Charsets;
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -38,6 +35,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.io.Resources;
 import com.google.common.primitives.Bytes;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Type;
@@ -48,6 +46,8 @@ import org.glowroot.agent.config.InstrumentationConfig;
 import org.glowroot.agent.weaving.ClassLoaders.LazyDefinedClass;
 import org.glowroot.common.util.Styles;
 
+import static com.google.common.base.Charsets.UTF_8;
+
 public class AnalyzedWorld {
 
     private static final Logger logger = LoggerFactory.getLogger(AnalyzedWorld.class);
@@ -56,8 +56,8 @@ public class AnalyzedWorld {
 
     static {
         try {
-            findLoadedClassMethod = ClassLoader.class.getDeclaredMethod("findLoadedClass",
-                    new Class[] {String.class});
+            findLoadedClassMethod =
+                    ClassLoader.class.getDeclaredMethod("findLoadedClass", String.class);
             findLoadedClassMethod.setAccessible(true);
         } catch (Exception e) {
             // unrecoverable error
@@ -138,16 +138,9 @@ public class AnalyzedWorld {
         return getSuperClasses(className, loader, parseContext);
     }
 
-    AnalyzedClass getAnalyzedClass(String className, @Nullable ClassLoader loader)
-            throws ClassNotFoundException, IOException {
-        return getOrCreateAnalyzedClass(className, loader);
-    }
-
-    List<Advice> mergeInstrumentationAnnotations(List<Advice> advisors, byte[] classBytes,
+    static List<Advice> mergeInstrumentationAnnotations(List<Advice> advisors, byte[] classBytes,
             @Nullable ClassLoader loader, String className) {
-        // TODO after removing deprecated @Instrument, change marker to
-        // "Lorg/glowroot/agent/api/Instrumentation$"
-        byte[] marker = "Lorg/glowroot/agent/api/Instrument".getBytes(Charsets.UTF_8);
+        byte[] marker = "Lorg/glowroot/agent/api/Instrumentation$".getBytes(UTF_8);
         if (Bytes.indexOf(classBytes, marker) == -1) {
             return advisors;
         }
@@ -234,23 +227,11 @@ public class AnalyzedWorld {
         return analyzedClass;
     }
 
-    private AnalyzedClass putAnalyzedClass(
-            ConcurrentMap<String, AnalyzedClass> loaderAnalyzedClasses,
-            AnalyzedClass analyzedClass) {
-        AnalyzedClass existingAnalyzedClass =
-                loaderAnalyzedClasses.putIfAbsent(analyzedClass.name(), analyzedClass);
-        if (existingAnalyzedClass != null) {
-            // (rare) concurrent AnalyzedClass creation, use the one that made it into the map
-            return existingAnalyzedClass;
-        }
-        return analyzedClass;
-    }
-
     private List<Class<?>> getClassesWithReweavableAdvice(@Nullable ClassLoader loader,
             boolean remove) {
         List<Class<?>> classes = Lists.newArrayList();
         ConcurrentMap<String, AnalyzedClass> loaderAnalyzedClasses = getAnalyzedClasses(loader);
-        for (Entry<String, AnalyzedClass> innerEntry : loaderAnalyzedClasses.entrySet()) {
+        for (Map.Entry<String, AnalyzedClass> innerEntry : loaderAnalyzedClasses.entrySet()) {
             if (innerEntry.getValue().hasReweavableAdvice()) {
                 try {
                     classes.add(Class.forName(innerEntry.getKey(), false, loader));
@@ -265,32 +246,6 @@ public class AnalyzedWorld {
             }
         }
         return classes;
-    }
-
-    private @Nullable ClassLoader getAnalyzedLoader(String className,
-            @Nullable ClassLoader loader) {
-        if (loader == null) {
-            return null;
-        }
-        // can't call Class.forName() since that bypasses ClassFileTransformer.transform() if the
-        // class hasn't already been loaded, so instead, call the package protected
-        // ClassLoader.findLoadClass()
-        Class<?> clazz = null;
-        try {
-            clazz = (Class<?>) findLoadedClassMethod.invoke(loader, className);
-        } catch (Exception e) {
-            logger.error(e.getMessage(), e);
-        }
-        ClassLoader analyzedLoader = loader;
-        if (clazz != null) {
-            // this class has already been loaded, so the corresponding analyzedClass should already
-            // be in the cache under its class loader
-            //
-            // this helps in cases where the .class files are not available via
-            // ClassLoader.getResource(), as well as being a good optimization in other cases
-            analyzedLoader = clazz.getClassLoader();
-        }
-        return analyzedLoader;
     }
 
     private AnalyzedClass createAnalyzedClass(String className, @Nullable ClassLoader loader)
@@ -316,24 +271,14 @@ public class AnalyzedWorld {
             // org.codehaus.groovy.runtime.callsite.CallSiteClassLoader
             return createAnalyzedClassPlanB(className, loader);
         }
-        byte[] bytes;
-        if (loader == null) {
-            bytes = Resources.toByteArray(url);
-        } else {
-            // synchronizing on the class loader here has saved at least one deadlock
-            synchronized (loader) {
-                bytes = Resources.toByteArray(url);
-            }
-        }
+        byte[] bytes = Resources.toByteArray(url);
         List<Advice> advisors =
                 mergeInstrumentationAnnotations(this.advisors.get(), bytes, loader, className);
         ThinClassVisitor accv = new ThinClassVisitor();
         new ClassReader(bytes).accept(accv, ClassReader.SKIP_FRAMES + ClassReader.SKIP_CODE);
+        // passing noLongerNeedToWeaveMainMethods=true since not really weaving bytecode here
         ClassAnalyzer classAnalyzer = new ClassAnalyzer(accv.getThinClass(), advisors, shimTypes,
-                mixinTypes, loader, this, null, bytes);
-        if (classAnalyzer.isShortCircuitBeforeAnalyzeMethods()) {
-            return classAnalyzer.getAnalyzedClass();
-        }
+                mixinTypes, loader, this, null, bytes, null, true);
         classAnalyzer.analyzeMethods();
         return classAnalyzer.getAnalyzedClass();
     }
@@ -381,6 +326,7 @@ public class AnalyzedWorld {
         // weaving was bypassed since ClassFileTransformer.transform() is not re-entrant
         analyzedClass = createAnalyzedClassPlanC(clazz, advisors.get());
         if (analyzedClass.isInterface()) {
+            // FIXME log warning if any default methods have advice
             return analyzedClass;
         }
         if (!analyzedClass.analyzedMethods().isEmpty()) {
@@ -419,6 +365,44 @@ public class AnalyzedWorld {
         }
     }
 
+    private static AnalyzedClass putAnalyzedClass(
+            ConcurrentMap<String, AnalyzedClass> loaderAnalyzedClasses,
+            AnalyzedClass analyzedClass) {
+        AnalyzedClass existingAnalyzedClass =
+                loaderAnalyzedClasses.putIfAbsent(analyzedClass.name(), analyzedClass);
+        if (existingAnalyzedClass != null) {
+            // (rare) concurrent AnalyzedClass creation, use the one that made it into the map
+            return existingAnalyzedClass;
+        }
+        return analyzedClass;
+    }
+
+    private static @Nullable ClassLoader getAnalyzedLoader(String className,
+            @Nullable ClassLoader loader) {
+        if (loader == null) {
+            return null;
+        }
+        // can't call Class.forName() since that bypasses ClassFileTransformer.transform() if the
+        // class hasn't already been loaded, so instead, call the package protected
+        // ClassLoader.findLoadClass()
+        Class<?> clazz = null;
+        try {
+            clazz = (Class<?>) findLoadedClassMethod.invoke(loader, className);
+        } catch (Exception e) {
+            logger.error(e.getMessage(), e);
+        }
+        ClassLoader analyzedLoader = loader;
+        if (clazz != null) {
+            // this class has already been loaded, so the corresponding analyzedClass should already
+            // be in the cache under its class loader
+            //
+            // this helps in cases where the .class files are not available via
+            // ClassLoader.getResource(), as well as being a good optimization in other cases
+            analyzedLoader = clazz.getClassLoader();
+        }
+        return analyzedLoader;
+    }
+
     // now that the type has been loaded anyways, build the analyzed class via reflection
     private static AnalyzedClass createAnalyzedClassPlanC(Class<?> clazz, List<Advice> advisors) {
         ImmutableAnalyzedClass.Builder classBuilder = ImmutableAnalyzedClass.builder();
@@ -427,16 +411,24 @@ public class AnalyzedWorld {
         Class<?> superClass = clazz.getSuperclass();
         String superName = superClass == null ? null : superClass.getName();
         classBuilder.superName(superName);
+        List<String> superClassNames = Lists.newArrayList();
+        if (superName != null) {
+            superClassNames.add(superName);
+        }
         for (Class<?> interfaceClass : clazz.getInterfaces()) {
-            classBuilder.addInterfaceNames(interfaceClass.getName());
+            String interfaceClassName = interfaceClass.getName();
+            classBuilder.addInterfaceNames(interfaceClassName);
+            superClassNames.add(interfaceClassName);
         }
         // FIXME handle @Instrumentation.*
         List<String> classAnnotations = Lists.newArrayList();
         for (Annotation annotation : clazz.getAnnotations()) {
             classAnnotations.add(annotation.annotationType().getName());
         }
-        List<AdviceMatcher> adviceMatchers =
-                AdviceMatcher.getAdviceMatchers(clazz.getName(), classAnnotations, advisors);
+        // TODO document limitations of superClassNames only containing first level super classes
+        // (e.g. doesn't include super class's super class)
+        List<AdviceMatcher> adviceMatchers = AdviceMatcher.getAdviceMatchers(clazz.getName(),
+                classAnnotations, superClassNames, advisors);
         Map<Method, List<Advice>> bridgeTargetAdvisors = Maps.newHashMap();
         for (Method method : clazz.getDeclaredMethods()) {
             if (!method.isBridge()) {
@@ -461,11 +453,13 @@ public class AnalyzedWorld {
                 }
             }
         }
+        boolean intf = clazz.isInterface();
         for (Method method : clazz.getDeclaredMethods()) {
             if (method.isSynthetic()) {
                 // don't add synthetic methods to the analyzed model
                 continue;
             }
+            int modifiers = method.getModifiers();
             List<String> methodAnnotations = Lists.newArrayList();
             for (Annotation annotation : method.getAnnotations()) {
                 methodAnnotations.add(annotation.annotationType().getName());
@@ -475,22 +469,22 @@ public class AnalyzedWorld {
                 parameterTypes.add(Type.getType(parameterType));
             }
             Type returnType = Type.getType(method.getReturnType());
-            List<Advice> matchingAdvisors =
-                    getMatchingAdvisors(method.getModifiers(), method.getName(), methodAnnotations,
-                            parameterTypes, returnType, adviceMatchers);
+            List<Advice> matchingAdvisors = getMatchingAdvisors(modifiers, method.getName(),
+                    methodAnnotations, parameterTypes, returnType, adviceMatchers);
             List<Advice> extraAdvisors = bridgeTargetAdvisors.get(method);
             if (extraAdvisors != null) {
                 matchingAdvisors.addAll(extraAdvisors);
             }
             ClassAnalyzer.sortAdvisors(matchingAdvisors);
-            if (!matchingAdvisors.isEmpty()) {
+            boolean intfMethod = intf && !Modifier.isStatic(modifiers);
+            if (!matchingAdvisors.isEmpty() || intfMethod) {
                 ImmutableAnalyzedMethod.Builder methodBuilder = ImmutableAnalyzedMethod.builder();
                 methodBuilder.name(method.getName());
                 for (Type parameterType : parameterTypes) {
                     methodBuilder.addParameterTypes(parameterType.getClassName());
                 }
                 methodBuilder.returnType(returnType.getClassName());
-                methodBuilder.modifiers(method.getModifiers());
+                methodBuilder.modifiers(modifiers);
                 // FIXME re-build signature and set in AnalyzedMethod.signature()
                 for (Class<?> exceptionType : method.getExceptionTypes()) {
                     methodBuilder.addExceptions(exceptionType.getName());
@@ -498,8 +492,25 @@ public class AnalyzedWorld {
                 methodBuilder.addAllAdvisors(matchingAdvisors);
                 classBuilder.addAnalyzedMethods(methodBuilder.build());
             }
+            if (Modifier.isFinal(modifiers) && Modifier.isPublic(modifiers)) {
+                ImmutablePublicFinalMethod.Builder publicFinalMethodBuilder =
+                        ImmutablePublicFinalMethod.builder()
+                                .name(method.getName());
+                for (Type parameterType : parameterTypes) {
+                    publicFinalMethodBuilder.addParameterTypes(parameterType.getClassName());
+                }
+                classBuilder.addPublicFinalMethods(publicFinalMethodBuilder.build());
+            }
         }
-        return classBuilder.build();
+        boolean ejbRemote = false;
+        for (Annotation annotation : clazz.getDeclaredAnnotations()) {
+            if (annotation.annotationType().getName().equals("javax.ejb.Remote")) {
+                ejbRemote = true;
+                break;
+            }
+        }
+        return classBuilder.ejbRemote(ejbRemote)
+                .build();
     }
 
     private static @Nullable Method getTargetMethod(Method bridgeMethod, Class<?> clazz) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.context.request.async.DeferredResult;
 
+import org.glowroot.agent.it.harness.AppUnderTest;
 import org.glowroot.agent.it.harness.Container;
 import org.glowroot.agent.it.harness.Containers;
 import org.glowroot.agent.it.harness.TraceEntryMarker;
@@ -58,12 +59,33 @@ public class AsyncControllerIT {
 
     @Test
     public void shouldCaptureCallableAsyncController() throws Exception {
+        shouldCaptureCallableAsyncController("", CallableAsyncServlet.class);
+    }
+
+    @Test
+    public void shouldCaptureDeferredResultAsyncController() throws Exception {
+        shouldCaptureDeferredResultAsyncController("", DeferredResultAsyncServlet.class);
+    }
+
+    @Test
+    public void shouldCaptureCallableAsyncControllerWithContextPath() throws Exception {
+        shouldCaptureCallableAsyncController("/zzz", CallableAsyncServletWithContextPath.class);
+    }
+
+    @Test
+    public void shouldCaptureDeferredResultAsyncControllerWithContextPath() throws Exception {
+        shouldCaptureDeferredResultAsyncController("/zzz",
+                DeferredResultAsyncServletWithContextPath.class);
+    }
+
+    private void shouldCaptureCallableAsyncController(String contextPath,
+            Class<? extends AppUnderTest> appUnderTestClass) throws Exception {
         // when
-        Trace trace = container.execute(CallableAsyncServlet.class);
+        Trace trace = container.execute(appUnderTestClass, "Web");
 
         // then
         assertThat(trace.getHeader().getAsync()).isTrue();
-        assertThat(trace.getHeader().getTransactionName()).isEqualTo("/async");
+        assertThat(trace.getHeader().getTransactionName()).isEqualTo(contextPath + "/async");
 
         Iterator<Trace.Entry> i = trace.getEntryList().iterator();
 
@@ -85,17 +107,50 @@ public class AsyncControllerIT {
         assertThat(entry.getDepth()).isEqualTo(1);
         assertThat(entry.getMessage()).isEqualTo("trace entry marker / CreateTraceEntry");
 
+        if (i.hasNext()) {
+            // this happens sporadically on travis ci because the auxiliary thread is demarcated by
+            // WebAsyncManager$4.run(), which calls both CallableAsyncController$1.call() and
+            // calls javax.servlet.AsyncContext.dispatch(), and sporadically dispatch() can process
+            // and returns the response before WebAsyncManager$4.run() completes, leading to
+            // glowroot adding a trace entry under the auxiliary thread to note that
+            // "this auxiliary thread was still running when the transaction ended"
+
+            // this is the stack trace for the call to CallableAsyncController$1.call():
+
+            // org.glowroot.agent.plugin.spring.AsyncControllerIT$CallableAsyncController$1.call()
+            // org.springframework.web.context.request.async.WebAsyncManager$4.run(WebAsyncManager.java:316)
+            // java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:471)
+            // java.util.concurrent.FutureTask.run(FutureTask.java:262)
+
+            // this is the stack trace for the call to javax.servlet.AsyncContext.dispatch():
+
+            // org.apache.catalina.core.AsyncContextImpl.dispatch(AsyncContextImpl.java)
+            // org.springframework.web.context.request.async.StandardServletAsyncWebRequest.dispatch(StandardServletAsyncWebRequest.java:123)
+            // org.springframework.web.context.request.async.WebAsyncManager.setConcurrentResultAndDispatch(WebAsyncManager.java:353)
+            // org.springframework.web.context.request.async.WebAsyncManager.access$200(WebAsyncManager.java:58)
+            // org.springframework.web.context.request.async.WebAsyncManager$4.run(WebAsyncManager.java:324)
+            // java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:471)
+            // java.util.concurrent.FutureTask.run(FutureTask.java:262)
+
+            // see similar issue in org.glowroot.agent.plugin.servlet.AsyncServletIT
+
+            entry = i.next();
+            assertThat(entry.getDepth()).isEqualTo(1);
+            assertThat(entry.getMessage()).isEqualTo(
+                    "this auxiliary thread was still running when the transaction ended");
+        }
+
         assertThat(i.hasNext()).isFalse();
     }
 
-    @Test
-    public void shouldCaptureDeferredResultAsyncController() throws Exception {
+    private void shouldCaptureDeferredResultAsyncController(String contextPath,
+            Class<? extends AppUnderTest> appUnderTestClass) throws Exception {
         // when
-        Trace trace = container.execute(DeferredResultAsyncServlet.class);
+        Trace trace = container.execute(appUnderTestClass, "Web");
 
         // then
         assertThat(trace.getHeader().getAsync()).isTrue();
-        assertThat(trace.getHeader().getTransactionName()).isEqualTo("/async2");
+        assertThat(trace.getHeader().getTransactionName()).isEqualTo(contextPath + "/async2");
 
         Iterator<Trace.Entry> i = trace.getEntryList().iterator();
 
@@ -117,27 +172,58 @@ public class AsyncControllerIT {
         assertThat(entry.getDepth()).isEqualTo(2);
         assertThat(entry.getMessage()).isEqualTo("trace entry marker / CreateTraceEntry");
 
+        if (i.hasNext()) {
+            // this happens sporadically on travis ci because the auxiliary thread
+            // (DeferredResultAsyncController$1) calls javax.servlet.AsyncContext.dispatch(), and
+            // sporadically dispatch() can process and returns the response before
+            // DeferredResultAsyncController$1.run() completes, leading to glowroot adding a trace
+            // entry under the auxiliary thread to note that "this auxiliary thread was still
+            // running when the transaction ended"
+
+            // see similar issue in org.glowroot.agent.plugin.spring.AsyncControllerIT
+
+            entry = i.next();
+            assertThat(entry.getDepth()).isEqualTo(2);
+            assertThat(entry.getMessage()).isEqualTo(
+                    "this auxiliary thread was still running when the transaction ended");
+        }
+
         assertThat(i.hasNext()).isFalse();
     }
 
     public static class CallableAsyncServlet extends InvokeSpringControllerInTomcat {
         @Override
         public void executeApp() throws Exception {
-            executeApp("webapp1", "/async");
+            executeApp("webapp1", "", "/async");
         }
     }
 
     public static class DeferredResultAsyncServlet extends InvokeSpringControllerInTomcat {
         @Override
         public void executeApp() throws Exception {
-            executeApp("webapp1", "/async2");
+            executeApp("webapp1", "", "/async2");
+        }
+    }
+
+    public static class CallableAsyncServletWithContextPath extends InvokeSpringControllerInTomcat {
+        @Override
+        public void executeApp() throws Exception {
+            executeApp("webapp1", "/zzz", "/async");
+        }
+    }
+
+    public static class DeferredResultAsyncServletWithContextPath
+            extends InvokeSpringControllerInTomcat {
+        @Override
+        public void executeApp() throws Exception {
+            executeApp("webapp1", "/zzz", "/async2");
         }
     }
 
     @Controller
     public static class CallableAsyncController {
 
-        @RequestMapping(value = "async")
+        @RequestMapping("async")
         public @ResponseBody Callable<String> test() throws InterruptedException {
             new CreateTraceEntry().traceEntryMarker();
             return new Callable<String>() {
@@ -153,7 +239,7 @@ public class AsyncControllerIT {
     @Controller
     public static class DeferredResultAsyncController {
 
-        @RequestMapping(value = "async2")
+        @RequestMapping("async2")
         public @ResponseBody DeferredResult<String> test() throws InterruptedException {
             new CreateTraceEntry().traceEntryMarker();
             final DeferredResult<String> result = new DeferredResult<String>();

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,20 +44,18 @@ public class Hibernate {
         for (int i = 0; i <= 11; i++) {
             run("4.3." + i + ".Final");
         }
-        for (int i = 0; i <= 11; i++) {
+        for (int i = 0; i <= 12; i++) {
             runJava7("5.0." + i + ".Final");
         }
-        runJava7("5.1.0.Final");
-        runJava7("5.1.1.Final");
-        runJava7("5.1.2.Final");
-        runJava7("5.1.3.Final");
-        runJava8("5.2.0.Final");
-        runJava8("5.2.1.Final");
-        runJava8("5.2.2.Final");
-        runJava8("5.2.3.Final");
-        runJava8("5.2.4.Final");
-        runJava8("5.2.5.Final");
-        runJava8("5.2.6.Final");
+        for (int i = 0; i <= 16; i++) {
+            runJava8("5.1." + i + ".Final");
+        }
+        for (int i = 0; i <= 17; i++) {
+            runJava8("5.2." + i + ".Final");
+        }
+        for (int i = 0; i <= 6; i++) {
+            runJava8("5.3." + i + ".Final");
+        }
     }
 
     private static void run(String version, String annotationsVersion, String... profiles)

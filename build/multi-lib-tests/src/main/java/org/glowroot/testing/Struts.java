@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -120,6 +120,12 @@ public class Struts {
         run(test);
         updateLibVersion("struts2.version", "2.3.31");
         run(test);
+        updateLibVersion("struts2.version", "2.3.32");
+        run(test);
+        updateLibVersion("struts2.version", "2.3.33");
+        run(test);
+        updateLibVersion("struts2.version", "2.3.34");
+        run(test);
         updateLibVersion("struts2.version", "2.5");
         runJava7(test);
         updateLibVersion("struts2.version", "2.5.1");
@@ -129,6 +135,22 @@ public class Struts {
         updateLibVersion("struts2.version", "2.5.5");
         runJava7(test);
         updateLibVersion("struts2.version", "2.5.8");
+        runJava7(test);
+        updateLibVersion("struts2.version", "2.5.10");
+        runJava7(test);
+        updateLibVersion("struts2.version", "2.5.10.1");
+        runJava7(test);
+        updateLibVersion("struts2.version", "2.5.12");
+        runJava7(test);
+        updateLibVersion("struts2.version", "2.5.13");
+        runJava7(test);
+        updateLibVersion("struts2.version", "2.5.14");
+        runJava7(test);
+        updateLibVersion("struts2.version", "2.5.14.1");
+        runJava7(test);
+        updateLibVersion("struts2.version", "2.5.16");
+        runJava7(test);
+        updateLibVersion("struts2.version", "2.5.17");
         runJava7(test);
     }
 

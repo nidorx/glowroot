@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,24 +15,29 @@
  */
 package org.glowroot.agent.plugin.spring;
 
+import java.net.URI;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import javax.annotation.Nullable;
-
 import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.MessageSupplier;
+import org.glowroot.agent.plugin.api.OptionalThreadContext;
 import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.ThreadContext.Priority;
+import org.glowroot.agent.plugin.api.ThreadContext.ServletRequestInfo;
 import org.glowroot.agent.plugin.api.TimerName;
 import org.glowroot.agent.plugin.api.TraceEntry;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.config.BooleanProperty;
 import org.glowroot.agent.plugin.api.util.FastThreadLocal;
+import org.glowroot.agent.plugin.api.util.FastThreadLocal.Holder;
 import org.glowroot.agent.plugin.api.weaving.BindMethodMeta;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
+import org.glowroot.agent.plugin.api.weaving.BindReceiver;
 import org.glowroot.agent.plugin.api.weaving.BindThrowable;
 import org.glowroot.agent.plugin.api.weaving.BindTraveler;
+import org.glowroot.agent.plugin.api.weaving.Mixin;
 import org.glowroot.agent.plugin.api.weaving.OnAfter;
 import org.glowroot.agent.plugin.api.weaving.OnBefore;
 import org.glowroot.agent.plugin.api.weaving.OnReturn;
@@ -40,12 +45,7 @@ import org.glowroot.agent.plugin.api.weaving.OnThrow;
 import org.glowroot.agent.plugin.api.weaving.Pointcut;
 import org.glowroot.agent.plugin.api.weaving.Shim;
 
-// TODO optimize away servletPath thread local, e.g. store servlet path in thread context via
-// servlet plugin and retrieve here
 public class ControllerAspect {
-
-    private static final FastThreadLocal</*@Nullable*/ String> servletPath =
-            new FastThreadLocal</*@Nullable*/ String>();
 
     private static final BooleanProperty useAltTransactionNaming =
             Agent.getConfigService("spring").getBooleanProperty("useAltTransactionNaming");
@@ -53,13 +53,11 @@ public class ControllerAspect {
     private static final ConcurrentMap<String, String> normalizedPatterns =
             new ConcurrentHashMap<String, String>();
 
-    @Shim("javax.servlet.http.HttpServletRequest")
-    public interface HttpServletRequest {
-        @Nullable
-        String getServletPath();
-        @Nullable
-        String getPathInfo();
-    }
+    private static final FastThreadLocal</*@Nullable*/ URI> webSocketUri =
+            new FastThreadLocal</*@Nullable*/ URI>();
+
+    private static final FastThreadLocal</*@Nullable*/ String> webSocketTransactionName =
+            new FastThreadLocal</*@Nullable*/ String>();
 
     @Shim("org.springframework.web.servlet.mvc.method.RequestMappingInfo")
     public interface RequestMappingInfo {
@@ -75,40 +73,58 @@ public class ControllerAspect {
         Set<String> getPatterns();
     }
 
-    @Pointcut(className = "org.springframework.web.servlet.DispatcherServlet",
-            methodDeclaringClassName = "javax.servlet.Servlet", methodName = "service",
-            methodParameterTypes = {"javax.servlet.ServletRequest",
-                    "javax.servlet.ServletResponse"})
-    public static class CaptureServletPathAdvice {
-        @OnBefore
-        public static @Nullable FastThreadLocal.Holder</*@Nullable*/ String> onBefore(
-                @BindParameter @Nullable Object req) {
-            if (req == null || !(req instanceof HttpServletRequest)) {
-                return null;
-            }
-            HttpServletRequest request = (HttpServletRequest) req;
-            String pathInfo = request.getPathInfo();
-            String servletPath;
-            if (pathInfo == null) {
-                // pathInfo is null when the dispatcher servlet is mapped to "/" (not "/*") and
-                // therefore it is replacing the default servlet and getServletPath() returns the
-                // full path
-                servletPath = "";
-            } else {
-                servletPath = request.getServletPath();
-            }
-            FastThreadLocal.Holder</*@Nullable*/ String> holder =
-                    ControllerAspect.servletPath.getHolder();
-            holder.set(servletPath);
-            return holder;
+    @Shim("org.springframework.web.socket.WebSocketSession")
+    public interface WebSocketSession {
+        @Nullable
+        URI getUri();
+    }
+
+    @Shim("org.springframework.messaging.handler.invocation.AbstractMethodMessageHandler")
+    public interface AbstractMethodMessageHandler {
+        @Shim("java.lang.String getDestination(org.springframework.messaging.Message)")
+        @Nullable
+        String glowroot$getDestination(Object message);
+    }
+
+    @Shim("org.springframework.messaging.simp.SimpMessageMappingInfo")
+    public interface SimpMessageMappingInfo {
+        @Shim("org.springframework.messaging.handler.DestinationPatternsMessageCondition"
+                + " getDestinationConditions()")
+        @Nullable
+        DestinationPatternsMessageCondition glowroot$getDestinationConditions();
+    }
+
+    @Shim("org.springframework.messaging.handler.DestinationPatternsMessageCondition")
+    public interface DestinationPatternsMessageCondition {
+        @Nullable
+        Set<String> getPatterns();
+    }
+
+    // the field and method names are verbose since they will be mixed in to existing classes
+    @Mixin({"org.springframework.messaging.support.ExecutorSubscribableChannel$SendTask",
+            "org.springframework.messaging.support.ExecutorSubscribableChannel$1"})
+    public static class WithWebSocketUriImpl implements WithWebSocketUri {
+
+        private transient @Nullable URI glowroot$webSocketUri;
+
+        @Override
+        public @Nullable URI glowroot$getWebSocketUri() {
+            return glowroot$webSocketUri;
         }
-        @OnAfter
-        public static void onAfter(
-                @BindTraveler @Nullable FastThreadLocal.Holder</*@Nullable*/ String> holder) {
-            if (holder != null) {
-                holder.set(null);
-            }
+
+        @Override
+        public void glowroot$setWebSocketUri(@Nullable URI uri) {
+            this.glowroot$webSocketUri = uri;
         }
+    }
+
+    // the field and method names are verbose since they will be mixed in to existing classes
+    public interface WithWebSocketUri {
+
+        @Nullable
+        URI glowroot$getWebSocketUri();
+
+        void glowroot$setWebSocketUri(@Nullable URI uri);
     }
 
     @Pointcut(className = "org.springframework.web.servlet.handler.AbstractHandlerMethodMapping",
@@ -133,7 +149,7 @@ public class ControllerAspect {
             if (patterns == null || patterns.isEmpty()) {
                 return;
             }
-            String prefix = servletPath.get();
+            String prefix = getServletPath(context.getServletRequestInfo());
             String pattern = patterns.iterator().next();
             if (pattern == null || pattern.isEmpty()) {
                 context.setTransactionName(prefix, Priority.CORE_PLUGIN);
@@ -162,7 +178,7 @@ public class ControllerAspect {
             if (useAltTransactionNaming.value()) {
                 return;
             }
-            String prefix = servletPath.get();
+            String prefix = getServletPath(context.getServletRequestInfo());
             if (bestMatchingPattern == null || bestMatchingPattern.isEmpty()) {
                 context.setTransactionName(prefix, Priority.CORE_PLUGIN);
                 return;
@@ -202,9 +218,162 @@ public class ControllerAspect {
             traceEntry.end();
         }
         @OnThrow
-        public static void onThrow(@BindThrowable Throwable throwable,
+        public static void onThrow(@BindThrowable Throwable t,
                 @BindTraveler TraceEntry traceEntry) {
-            traceEntry.endWithError(throwable);
+            traceEntry.endWithError(t);
+        }
+    }
+
+    @Pointcut(className = "org.springframework.web.socket.WebSocketHandler",
+            methodName = "handleMessage",
+            methodParameterTypes = {"org.springframework.web.socket.WebSocketSession", ".."})
+    public static class HandleMessageAdvice {
+        @OnBefore
+        public static Holder</*@Nullable*/ URI> onBefore(@BindParameter WebSocketSession session) {
+            Holder</*@Nullable*/ URI> holder = webSocketUri.getHolder();
+            holder.set(session.getUri());
+            return holder;
+        }
+        @OnAfter
+        public static void onAfter(@BindTraveler Holder</*@Nullable*/ URI> holder) {
+            holder.set(null);
+        }
+    }
+
+    @Pointcut(className = "org.springframework.messaging.support.ExecutorSubscribableChannel$*",
+            superTypeRestriction = "java.lang.Runnable", methodName = "<init>",
+            methodParameterTypes = {".."})
+    public static class SendTaskInitAdvice {
+        @OnReturn
+        public static void onReturn(@BindReceiver WithWebSocketUri withWebSocketUri) {
+            withWebSocketUri.glowroot$setWebSocketUri(webSocketUri.get());
+        }
+    }
+
+    @Pointcut(className = "org.springframework.messaging.support.ExecutorSubscribableChannel$*",
+            superTypeRestriction = "java.lang.Runnable", methodName = "run",
+            methodParameterTypes = {})
+    public static class SendTaskRunAdvice {
+        @OnBefore
+        public static Holder</*@Nullable*/ URI> onBefore(
+                @BindReceiver WithWebSocketUri withWebSocketUri) {
+            Holder</*@Nullable*/ URI> holder = webSocketUri.getHolder();
+            holder.set(withWebSocketUri.glowroot$getWebSocketUri());
+            return holder;
+        }
+        @OnAfter
+        public static void onAfter(@BindTraveler Holder</*@Nullable*/ URI> holder) {
+            holder.set(null);
+        }
+    }
+
+    @Pointcut(className = "org.springframework.messaging.simp.annotation.support"
+            + ".SimpAnnotationMethodMessageHandler", methodName = "handleMatch",
+            methodParameterTypes = {"java.lang.Object",
+                    "org.springframework.messaging.handler.HandlerMethod", "java.lang.String",
+                    "org.springframework.messaging.Message"})
+    public static class WebSocketMappingAdvice {
+        @OnBefore
+        public static @Nullable Holder</*@Nullable*/ String> onBefore(
+                @BindParameter @Nullable Object mapping,
+                @SuppressWarnings("unused") @BindParameter @Nullable Object handlerMethod,
+                @BindParameter @Nullable String lookupDestination,
+                @BindParameter @Nullable Object message,
+                @BindReceiver AbstractMethodMessageHandler messageHandler) {
+            if (useAltTransactionNaming.value()) {
+                return null;
+            }
+            if (!(mapping instanceof SimpMessageMappingInfo)) {
+                return null;
+            }
+            DestinationPatternsMessageCondition patternCondition =
+                    ((SimpMessageMappingInfo) mapping).glowroot$getDestinationConditions();
+            if (patternCondition == null) {
+                return null;
+            }
+            Set<String> patterns = patternCondition.getPatterns();
+            if (patterns == null || patterns.isEmpty()) {
+                return null;
+            }
+            StringBuilder sb = new StringBuilder();
+            URI uri = webSocketUri.get();
+            if (uri != null) {
+                sb.append(uri);
+            }
+            if (lookupDestination != null && message != null) {
+                String destination = messageHandler.glowroot$getDestination(message);
+                if (destination != null) {
+                    sb.append(destination.substring(0,
+                            destination.length() - lookupDestination.length()));
+                }
+            }
+            String pattern = patterns.iterator().next();
+            Holder</*@Nullable*/ String> holder = webSocketTransactionName.getHolder();
+            if (pattern == null || pattern.isEmpty()) {
+                holder.set(sb.toString());
+                return holder;
+            }
+            String normalizedPattern = normalizedPatterns.get(pattern);
+            if (normalizedPattern == null) {
+                normalizedPattern = pattern.replaceAll("\\{[^}]*\\}", "*");
+                normalizedPatterns.put(pattern, normalizedPattern);
+            }
+            sb.append(normalizedPattern);
+            holder.set(sb.toString());
+            return holder;
+        }
+        @OnAfter
+        public static void onAfter(@BindTraveler @Nullable Holder</*@Nullable*/ String> holder) {
+            if (holder != null) {
+                holder.set(null);
+            }
+        }
+    }
+
+    @Pointcut(classAnnotation = "org.springframework.stereotype.Controller",
+            methodAnnotation = "org.springframework.messaging.handler.annotation.MessageMapping",
+            methodParameterTypes = {".."}, timerName = "spring websocket controller")
+    public static class MessageMappingAdvice {
+        private static final TimerName timerName = Agent.getTimerName(ControllerAdvice.class);
+        @OnBefore
+        public static TraceEntry onBefore(OptionalThreadContext context,
+                @BindMethodMeta ControllerMethodMeta controllerMethodMeta) {
+            String transactionName;
+            if (useAltTransactionNaming.value()) {
+                transactionName = controllerMethodMeta.getAltTransactionName();
+            } else {
+                transactionName = webSocketTransactionName.get();
+                if (transactionName == null) {
+                    transactionName = "<unknown>"; // ???
+                }
+            }
+            return context.startTransaction("Web", transactionName,
+                    MessageSupplier.create("spring websocket controller: {}.{}()",
+                            controllerMethodMeta.getControllerClassName(),
+                            controllerMethodMeta.getMethodName()),
+                    timerName);
+        }
+        @OnReturn
+        public static void onReturn(@BindTraveler TraceEntry traceEntry) {
+            traceEntry.end();
+        }
+        @OnThrow
+        public static void onThrow(@BindThrowable Throwable t,
+                @BindTraveler TraceEntry traceEntry) {
+            traceEntry.endWithError(t);
+        }
+    }
+
+    private static String getServletPath(@Nullable ServletRequestInfo servletRequestInfo) {
+        if (servletRequestInfo == null) {
+            return "";
+        }
+        if (servletRequestInfo.getPathInfo() == null) {
+            // pathInfo is null when the servlet is mapped to "/" (not "/*") and therefore it is
+            // replacing the default servlet and getServletPath() returns the full path
+            return servletRequestInfo.getContextPath();
+        } else {
+            return servletRequestInfo.getContextPath() + servletRequestInfo.getServletPath();
         }
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package org.glowroot.agent.plugin.servlet;
 import java.io.IOException;
 import java.util.Iterator;
 
-import javax.annotation.Nullable;
 import javax.servlet.FilterChain;
 import javax.servlet.Servlet;
 import javax.servlet.ServletConfig;
@@ -44,6 +43,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 public class ServletPluginIT {
 
+    private static final String PLUGIN_ID = "servlet";
+
     private static Container container;
 
     @BeforeClass
@@ -64,76 +65,86 @@ public class ServletPluginIT {
     @Test
     public void testServlet() throws Exception {
         // when
-        Trace trace = container.execute(ExecuteServlet.class);
+        Trace trace = container.execute(ExecuteServlet.class, "Web");
 
         // then
         Trace.Header header = trace.getHeader();
         assertThat(header.getHeadline()).isEqualTo("/testservlet");
         assertThat(header.getTransactionName()).isEqualTo("/testservlet");
         assertThat(getDetailValue(header, "Request http method")).isEqualTo("GET");
+        assertThat(getDetailValueLong(header, "Response code")).isEqualTo(200);
         assertThat(header.getEntryCount()).isZero();
     }
 
     @Test
     public void testFilter() throws Exception {
         // when
-        Trace trace = container.execute(ExecuteFilter.class);
+        Trace trace = container.execute(ExecuteFilter.class, "Web");
 
         // then
         Trace.Header header = trace.getHeader();
         assertThat(header.getHeadline()).isEqualTo("/testfilter");
         assertThat(header.getTransactionName()).isEqualTo("/testfilter");
         assertThat(getDetailValue(header, "Request http method")).isEqualTo("GET");
+        assertThat(getDetailValueLong(header, "Response code")).isEqualTo(200);
         assertThat(header.getEntryCount()).isZero();
     }
 
     @Test
     public void testCombination() throws Exception {
         // when
-        Trace trace = container.execute(ExecuteFilterWithNestedServlet.class);
+        Trace trace = container.execute(ExecuteFilterWithNestedServlet.class, "Web");
 
         // then
         Trace.Header header = trace.getHeader();
         assertThat(header.getHeadline()).isEqualTo("/testfilter");
         assertThat(header.getTransactionName()).isEqualTo("/testfilter");
         assertThat(getDetailValue(header, "Request http method")).isEqualTo("GET");
+        assertThat(getDetailValueLong(header, "Response code")).isEqualTo(200);
         assertThat(header.getEntryCount()).isZero();
     }
 
     @Test
     public void testNoQueryString() throws Exception {
         // when
-        Trace trace = container.execute(TestNoQueryString.class);
+        Trace trace = container.execute(TestNoQueryString.class, "Web");
         // then
-        assertThat(getDetailValue(trace.getHeader(), "Request query string")).isNull();
-        assertThat(trace.getHeader().getEntryCount()).isZero();
+        Trace.Header header = trace.getHeader();
+        assertThat(getDetailValue(header, "Request query string")).isNull();
+        assertThat(getDetailValueLong(header, "Response code")).isEqualTo(200);
+        assertThat(header.getEntryCount()).isZero();
     }
 
     @Test
     public void testEmptyQueryString() throws Exception {
         // when
-        Trace trace = container.execute(TestEmptyQueryString.class);
+        Trace trace = container.execute(TestEmptyQueryString.class, "Web");
         // then
-        assertThat(getDetailValue(trace.getHeader(), "Request query string")).isEqualTo("");
-        assertThat(trace.getHeader().getEntryCount()).isZero();
+        Trace.Header header = trace.getHeader();
+        assertThat(getDetailValue(header, "Request query string")).isEqualTo("");
+        assertThat(getDetailValueLong(header, "Response code")).isEqualTo(200);
+        assertThat(header.getEntryCount()).isZero();
     }
 
     @Test
     public void testNonEmptyQueryString() throws Exception {
         // when
-        Trace trace = container.execute(TestNonEmptyQueryString.class);
+        Trace trace = container.execute(TestNonEmptyQueryString.class, "Web");
         // then
-        assertThat(getDetailValue(trace.getHeader(), "Request query string")).isEqualTo("a=b&c=d");
-        assertThat(trace.getHeader().getEntryCount()).isZero();
+        Trace.Header header = trace.getHeader();
+        assertThat(getDetailValue(header, "Request query string")).isEqualTo("a=b&c=d");
+        assertThat(getDetailValueLong(header, "Response code")).isEqualTo(200);
+        assertThat(header.getEntryCount()).isZero();
     }
 
     @Test
     public void testServletThrowsException() throws Exception {
         // when
-        Trace trace = container.execute(ServletThrowsException.class);
+        Trace trace = container.execute(ServletThrowsException.class, "Web");
 
         // then
         Trace.Header header = trace.getHeader();
+        assertThat(getDetailValueLong(header, "Response code")).isEqualTo(500);
         assertThat(header.getError().getMessage()).isNotEmpty();
         assertThat(header.getError().hasException()).isTrue();
         assertThat(header.getEntryCount()).isZero();
@@ -142,33 +153,43 @@ public class ServletPluginIT {
     @Test
     public void testFilterThrowsException() throws Exception {
         // when
-        Trace trace = container.execute(FilterThrowsException.class);
+        Trace trace = container.execute(FilterThrowsException.class, "Web");
 
         // then
         Trace.Header header = trace.getHeader();
+        assertThat(getDetailValueLong(header, "Response code")).isEqualTo(500);
         assertThat(header.getError().getMessage()).isNotEmpty();
         assertThat(header.getError().hasException()).isTrue();
         assertThat(header.getEntryCount()).isZero();
     }
 
     @Test
+    public void testSendRedirect() throws Exception {
+        // when
+        Trace trace = container.execute(SendRedirect.class, "Web");
+
+        // then
+        assertThat(getDetailValueLong(trace.getHeader(), "Response code")).isEqualTo(302);
+        assertThat(ResponseHeaderIT.getResponseHeaders(trace).get("Location")).isEqualTo("tohere");
+    }
+
+    @Test
     public void testSend500Error() throws Exception {
         // when
-        Trace trace = container.execute(Send500Error.class);
+        Trace trace = container.execute(Send500Error.class, "Web");
 
         // then
         assertThat(trace.getHeader().getError().getMessage())
                 .isEqualTo("sendError, HTTP status code 500");
         assertThat(trace.getHeader().getError().hasException()).isFalse();
 
+        assertThat(getDetailValueLong(trace.getHeader(), "Response code")).isEqualTo(500);
+
         Iterator<Trace.Entry> i = trace.getEntryList().iterator();
 
         Trace.Entry entry = i.next();
         assertThat(entry.getError().getMessage()).isEqualTo("sendError, HTTP status code 500");
         assertThat(entry.getError().hasException()).isFalse();
-        assertThat(entry.getLocationStackTraceElementList()).isNotEmpty();
-        assertThat(entry.getLocationStackTraceElementList().get(0).getMethodName())
-                .isEqualTo("sendError");
 
         assertThat(i.hasNext()).isFalse();
     }
@@ -176,20 +197,94 @@ public class ServletPluginIT {
     @Test
     public void testSetStatus500Error() throws Exception {
         // when
-        Trace trace = container.execute(SetStatus500Error.class);
+        Trace trace = container.execute(SetStatus500Error.class, "Web");
 
         // then
         assertThat(trace.getHeader().getError().getMessage())
                 .isEqualTo("setStatus, HTTP status code 500");
         assertThat(trace.getHeader().getError().hasException()).isFalse();
 
+        assertThat(getDetailValueLong(trace.getHeader(), "Response code")).isEqualTo(500);
+
         Iterator<Trace.Entry> i = trace.getEntryList().iterator();
 
         Trace.Entry entry = i.next();
         assertThat(entry.getError().getMessage()).isEqualTo("setStatus, HTTP status code 500");
         assertThat(entry.getError().hasException()).isFalse();
-        assertThat(entry.getLocationStackTraceElementList().get(0).getMethodName())
-                .isEqualTo("setStatus");
+
+        assertThat(i.hasNext()).isFalse();
+    }
+
+    @Test
+    public void testSend400Error() throws Exception {
+        // when
+        Trace trace = container.execute(Send400Error.class, "Web");
+
+        // then
+        assertThat(trace.getHeader().hasError()).isFalse();
+        assertThat(trace.getEntryList()).isEmpty();
+
+        assertThat(getDetailValueLong(trace.getHeader(), "Response code")).isEqualTo(400);
+    }
+
+    @Test
+    public void testSetStatus400Error() throws Exception {
+        // when
+        Trace trace = container.execute(SetStatus400Error.class, "Web");
+
+        // then
+        assertThat(trace.getHeader().hasError()).isFalse();
+        assertThat(trace.getEntryList()).isEmpty();
+
+        assertThat(getDetailValueLong(trace.getHeader(), "Response code")).isEqualTo(400);
+    }
+
+    @Test
+    public void testSend400ErrorWithCaptureOn() throws Exception {
+        // given
+        container.getConfigService().setPluginProperty(PLUGIN_ID, "traceErrorOn4xxResponseCode",
+                true);
+
+        // when
+        Trace trace = container.execute(Send400Error.class, "Web");
+
+        // then
+        assertThat(trace.getHeader().getError().getMessage())
+                .isEqualTo("sendError, HTTP status code 400");
+        assertThat(trace.getHeader().getError().hasException()).isFalse();
+
+        assertThat(getDetailValueLong(trace.getHeader(), "Response code")).isEqualTo(400);
+
+        Iterator<Trace.Entry> i = trace.getEntryList().iterator();
+
+        Trace.Entry entry = i.next();
+        assertThat(entry.getError().getMessage()).isEqualTo("sendError, HTTP status code 400");
+        assertThat(entry.getError().hasException()).isFalse();
+
+        assertThat(i.hasNext()).isFalse();
+    }
+
+    @Test
+    public void testSetStatus400ErrorWithCaptureOn() throws Exception {
+        // given
+        container.getConfigService().setPluginProperty(PLUGIN_ID, "traceErrorOn4xxResponseCode",
+                true);
+
+        // when
+        Trace trace = container.execute(SetStatus400Error.class, "Web");
+
+        // then
+        assertThat(trace.getHeader().getError().getMessage())
+                .isEqualTo("setStatus, HTTP status code 400");
+        assertThat(trace.getHeader().getError().hasException()).isFalse();
+
+        assertThat(getDetailValueLong(trace.getHeader(), "Response code")).isEqualTo(400);
+
+        Iterator<Trace.Entry> i = trace.getEntryList().iterator();
+
+        Trace.Entry entry = i.next();
+        assertThat(entry.getError().getMessage()).isEqualTo("setStatus, HTTP status code 400");
+        assertThat(entry.getError().hasException()).isFalse();
 
         assertThat(i.hasNext()).isFalse();
     }
@@ -208,10 +303,19 @@ public class ServletPluginIT {
         // then
     }
 
-    private static @Nullable String getDetailValue(Trace.Header header, String name) {
+    private static String getDetailValue(Trace.Header header, String name) {
         for (Trace.DetailEntry detail : header.getDetailEntryList()) {
             if (detail.getName().equals(name)) {
                 return detail.getValueList().get(0).getString();
+            }
+        }
+        return null;
+    }
+
+    private static Long getDetailValueLong(Trace.Header header, String name) {
+        for (Trace.DetailEntry detail : header.getDetailEntryList()) {
+            if (detail.getName().equals(name)) {
+                return detail.getValueList().get(0).getLong();
             }
         }
         return null;
@@ -226,7 +330,7 @@ public class ServletPluginIT {
         @Override
         public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
                 throws IOException, ServletException {
-            new TestFilter().doFilter(request, response, chain);
+            new TestServlet().service(request, response);
         }
     }
 
@@ -306,6 +410,15 @@ public class ServletPluginIT {
     }
 
     @SuppressWarnings("serial")
+    public static class SendRedirect extends TestServlet {
+        @Override
+        protected void doGet(HttpServletRequest request, HttpServletResponse response)
+                throws IOException {
+            response.sendRedirect("tohere");
+        }
+    }
+
+    @SuppressWarnings("serial")
     public static class Send500Error extends TestServlet {
         @Override
         protected void doGet(HttpServletRequest request, HttpServletResponse response)
@@ -320,6 +433,24 @@ public class ServletPluginIT {
         protected void doGet(HttpServletRequest request, HttpServletResponse response)
                 throws IOException {
             response.setStatus(500);
+        }
+    }
+
+    @SuppressWarnings("serial")
+    public static class Send400Error extends TestServlet {
+        @Override
+        protected void doGet(HttpServletRequest request, HttpServletResponse response)
+                throws IOException {
+            response.sendError(400);
+        }
+    }
+
+    @SuppressWarnings("serial")
+    public static class SetStatus400Error extends TestServlet {
+        @Override
+        protected void doGet(HttpServletRequest request, HttpServletResponse response)
+                throws IOException {
+            response.setStatus(400);
         }
     }
 

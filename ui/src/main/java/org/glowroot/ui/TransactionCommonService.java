@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2017 the original author or authors.
+ * Copyright 2014-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,44 +15,43 @@
  */
 package org.glowroot.ui;
 
-import java.io.IOException;
 import java.util.List;
-import java.util.Map;
-
-import javax.annotation.Nullable;
 
 import com.google.common.base.Function;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
-import org.glowroot.common.config.ConfigDefaults;
-import org.glowroot.common.live.ImmutableOverallQuery;
+import org.glowroot.common.ConfigDefaults;
+import org.glowroot.common.live.ImmutableAggregateQuery;
+import org.glowroot.common.live.ImmutableSummaryQuery;
 import org.glowroot.common.live.ImmutableThroughputAggregate;
-import org.glowroot.common.live.ImmutableTransactionQuery;
 import org.glowroot.common.live.LiveAggregateRepository;
+import org.glowroot.common.live.LiveAggregateRepository.AggregateQuery;
 import org.glowroot.common.live.LiveAggregateRepository.LiveResult;
-import org.glowroot.common.live.LiveAggregateRepository.OverallQuery;
 import org.glowroot.common.live.LiveAggregateRepository.OverviewAggregate;
 import org.glowroot.common.live.LiveAggregateRepository.PercentileAggregate;
+import org.glowroot.common.live.LiveAggregateRepository.SummaryQuery;
 import org.glowroot.common.live.LiveAggregateRepository.ThroughputAggregate;
-import org.glowroot.common.live.LiveAggregateRepository.TransactionQuery;
 import org.glowroot.common.model.MutableProfile;
-import org.glowroot.common.model.MutableQuery;
 import org.glowroot.common.model.OverallSummaryCollector;
-import org.glowroot.common.model.OverallSummaryCollector.OverallSummary;
 import org.glowroot.common.model.ProfileCollector;
 import org.glowroot.common.model.QueryCollector;
 import org.glowroot.common.model.Result;
 import org.glowroot.common.model.ServiceCallCollector;
-import org.glowroot.common.model.TransactionSummaryCollector;
-import org.glowroot.common.model.TransactionSummaryCollector.SummarySortOrder;
-import org.glowroot.common.model.TransactionSummaryCollector.TransactionSummary;
-import org.glowroot.common.repo.AggregateRepository;
-import org.glowroot.common.repo.ConfigRepository;
-import org.glowroot.common.repo.MutableAggregate;
-import org.glowroot.common.repo.Utils;
+import org.glowroot.common.model.TransactionNameSummaryCollector;
+import org.glowroot.common.model.TransactionNameSummaryCollector.SummarySortOrder;
+import org.glowroot.common.model.TransactionNameSummaryCollector.TransactionNameSummary;
+import org.glowroot.common.util.CaptureTimes;
 import org.glowroot.common.util.Clock;
+import org.glowroot.common2.repo.AggregateRepository;
+import org.glowroot.common2.repo.ConfigRepository;
+import org.glowroot.common2.repo.ConfigRepository.AgentConfigNotFoundException;
+import org.glowroot.common2.repo.MutableAggregate;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AdvancedConfig;
 import org.glowroot.wire.api.model.AggregateOuterClass.Aggregate;
+
+import static com.google.common.base.Preconditions.checkNotNull;
 
 class TransactionCommonService {
 
@@ -71,8 +70,8 @@ class TransactionCommonService {
     }
 
     // query.from() is non-inclusive
-    OverallSummary readOverallSummary(String agentRollupId, OverallQuery query, boolean autoRefresh)
-            throws Exception {
+    OverallSummaryCollector readOverallSummary(String agentRollupId, SummaryQuery query,
+            boolean autoRefresh) throws Exception {
         OverallSummaryCollector collector = new OverallSummaryCollector();
         long revisedFrom = query.from();
         long revisedTo;
@@ -83,7 +82,7 @@ class TransactionCommonService {
                     liveAggregateRepository.mergeInOverallSummary(agentRollupId, query, collector);
         }
         for (int rollupLevel = query.rollupLevel(); rollupLevel >= 0; rollupLevel--) {
-            OverallQuery revisedQuery = ImmutableOverallQuery.builder()
+            SummaryQuery revisedQuery = ImmutableSummaryQuery.builder()
                     .copyFrom(query)
                     .from(revisedFrom)
                     .to(revisedTo)
@@ -96,29 +95,31 @@ class TransactionCommonService {
                 break;
             }
         }
-        return collector.getOverallSummary();
+        return collector;
     }
 
     // query.from() is non-inclusive
-    Result<TransactionSummary> readTransactionSummaries(String agentRollupId, OverallQuery query,
-            SummarySortOrder sortOrder, int limit, boolean autoRefresh) throws Exception {
-        TransactionSummaryCollector collector = new TransactionSummaryCollector();
+    Result<TransactionNameSummary> readTransactionNameSummaries(String agentRollupId,
+            SummaryQuery query, SummarySortOrder sortOrder, int limit, boolean autoRefresh)
+            throws Exception {
+        TransactionNameSummaryCollector collector = new TransactionNameSummaryCollector();
         long revisedFrom = query.from();
         long revisedTo;
         if (autoRefresh) {
             revisedTo = query.to();
         } else {
-            revisedTo = liveAggregateRepository.mergeInTransactionSummaries(agentRollupId, query,
-                    collector);
+            revisedTo =
+                    liveAggregateRepository.mergeInTransactionNameSummaries(agentRollupId, query,
+                            collector);
         }
         for (int rollupLevel = query.rollupLevel(); rollupLevel >= 0; rollupLevel--) {
-            OverallQuery revisedQuery = ImmutableOverallQuery.builder()
+            SummaryQuery revisedQuery = ImmutableSummaryQuery.builder()
                     .copyFrom(query)
                     .from(revisedFrom)
                     .to(revisedTo)
                     .rollupLevel(rollupLevel)
                     .build();
-            aggregateRepository.mergeTransactionSummariesInto(agentRollupId, revisedQuery,
+            aggregateRepository.mergeTransactionNameSummariesInto(agentRollupId, revisedQuery,
                     sortOrder, limit, collector);
             long lastRolledUpTime = collector.getLastCaptureTime();
             revisedFrom = Math.max(revisedFrom, lastRolledUpTime + 1);
@@ -130,7 +131,7 @@ class TransactionCommonService {
     }
 
     // query.from() is INCLUSIVE
-    List<OverviewAggregate> getOverviewAggregates(String agentRollupId, TransactionQuery query,
+    List<OverviewAggregate> getOverviewAggregates(String agentRollupId, AggregateQuery query,
             boolean autoRefresh) throws Exception {
         LiveResult<OverviewAggregate> liveResult;
         long revisedTo;
@@ -141,7 +142,7 @@ class TransactionCommonService {
             liveResult = liveAggregateRepository.getOverviewAggregates(agentRollupId, query);
             revisedTo = liveResult == null ? query.to() : liveResult.revisedTo();
         }
-        TransactionQuery revisedQuery = ImmutableTransactionQuery.builder()
+        AggregateQuery revisedQuery = ImmutableAggregateQuery.builder()
                 .copyFrom(query)
                 .to(revisedTo)
                 .build();
@@ -156,14 +157,14 @@ class TransactionCommonService {
         }
         long nonRolledUpFrom = revisedQuery.from();
         if (!aggregates.isEmpty()) {
-            long lastRolledUpTime = aggregates.get(aggregates.size() - 1).captureTime();
+            long lastRolledUpTime = Iterables.getLast(aggregates).captureTime();
             nonRolledUpFrom = Math.max(nonRolledUpFrom, lastRolledUpTime + 1);
         }
         List<OverviewAggregate> orderedNonRolledUpAggregates = Lists.newArrayList();
         if (nonRolledUpFrom <= revisedTo) {
             orderedNonRolledUpAggregates.addAll(
                     aggregateRepository.readOverviewAggregates(agentRollupId,
-                            ImmutableTransactionQuery.builder()
+                            ImmutableAggregateQuery.builder()
                                     .copyFrom(revisedQuery)
                                     .from(nonRolledUpFrom)
                                     .rollupLevel(0)
@@ -188,7 +189,7 @@ class TransactionCommonService {
     }
 
     // query.from() is INCLUSIVE
-    List<PercentileAggregate> getPercentileAggregates(String agentRollupId, TransactionQuery query,
+    List<PercentileAggregate> getPercentileAggregates(String agentRollupId, AggregateQuery query,
             boolean autoRefresh) throws Exception {
         LiveResult<PercentileAggregate> liveResult;
         long revisedTo;
@@ -199,7 +200,7 @@ class TransactionCommonService {
             liveResult = liveAggregateRepository.getPercentileAggregates(agentRollupId, query);
             revisedTo = liveResult == null ? query.to() : liveResult.revisedTo();
         }
-        TransactionQuery revisedQuery = ImmutableTransactionQuery.builder()
+        AggregateQuery revisedQuery = ImmutableAggregateQuery.builder()
                 .copyFrom(query)
                 .to(revisedTo)
                 .build();
@@ -214,14 +215,14 @@ class TransactionCommonService {
         }
         long nonRolledUpFrom = revisedQuery.from();
         if (!aggregates.isEmpty()) {
-            long lastRolledUpTime = aggregates.get(aggregates.size() - 1).captureTime();
+            long lastRolledUpTime = Iterables.getLast(aggregates).captureTime();
             nonRolledUpFrom = Math.max(nonRolledUpFrom, lastRolledUpTime + 1);
         }
         List<PercentileAggregate> orderedNonRolledUpAggregates = Lists.newArrayList();
         if (nonRolledUpFrom <= revisedTo) {
             orderedNonRolledUpAggregates.addAll(
                     aggregateRepository.readPercentileAggregates(agentRollupId,
-                            ImmutableTransactionQuery.builder()
+                            ImmutableAggregateQuery.builder()
                                     .copyFrom(revisedQuery)
                                     .from(nonRolledUpFrom)
                                     .rollupLevel(0)
@@ -246,7 +247,7 @@ class TransactionCommonService {
     }
 
     // query.from() is INCLUSIVE
-    List<ThroughputAggregate> getThroughputAggregates(String agentRollupId, TransactionQuery query,
+    List<ThroughputAggregate> getThroughputAggregates(String agentRollupId, AggregateQuery query,
             boolean autoRefresh) throws Exception {
         LiveResult<ThroughputAggregate> liveResult;
         long revisedTo;
@@ -257,7 +258,7 @@ class TransactionCommonService {
             liveResult = liveAggregateRepository.getThroughputAggregates(agentRollupId, query);
             revisedTo = liveResult == null ? query.to() : liveResult.revisedTo();
         }
-        TransactionQuery revisedQuery = ImmutableTransactionQuery.builder()
+        AggregateQuery revisedQuery = ImmutableAggregateQuery.builder()
                 .copyFrom(query)
                 .to(revisedTo)
                 .build();
@@ -272,14 +273,14 @@ class TransactionCommonService {
         }
         long nonRolledUpFrom = revisedQuery.from();
         if (!aggregates.isEmpty()) {
-            long lastRolledUpTime = aggregates.get(aggregates.size() - 1).captureTime();
+            long lastRolledUpTime = Iterables.getLast(aggregates).captureTime();
             nonRolledUpFrom = Math.max(nonRolledUpFrom, lastRolledUpTime + 1);
         }
         List<ThroughputAggregate> orderedNonRolledUpAggregates = Lists.newArrayList();
         if (nonRolledUpFrom <= revisedTo) {
             orderedNonRolledUpAggregates.addAll(aggregateRepository
                     .readThroughputAggregates(agentRollupId,
-                            ImmutableTransactionQuery.builder()
+                            ImmutableAggregateQuery.builder()
                                     .copyFrom(revisedQuery)
                                     .from(nonRolledUpFrom)
                                     .rollupLevel(0)
@@ -304,15 +305,17 @@ class TransactionCommonService {
     }
 
     // query.from() is non-inclusive
-    Map<String, List<MutableQuery>> getMergedQueries(String agentRollupId,
-            TransactionQuery query) throws Exception {
-        int maxAggregateQueriesPerType = getMaxAggregateQueriesPerType(agentRollupId);
-        QueryCollector queryCollector = new QueryCollector(maxAggregateQueriesPerType);
+    QueryCollector getMergedQueries(String agentRollupId, AggregateQuery query)
+            throws Exception {
+        int maxQueryAggregatesPerTransactionAggregate =
+                getMaxQueryAggregatesPerTransactionAggregate(agentRollupId);
+        QueryCollector queryCollector =
+                new QueryCollector(maxQueryAggregatesPerTransactionAggregate);
         long revisedFrom = query.from();
         long revisedTo =
                 liveAggregateRepository.mergeInQueries(agentRollupId, query, queryCollector);
         for (int rollupLevel = query.rollupLevel(); rollupLevel >= 0; rollupLevel--) {
-            TransactionQuery revisedQuery = ImmutableTransactionQuery.builder()
+            AggregateQuery revisedQuery = ImmutableAggregateQuery.builder()
                     .copyFrom(query)
                     .from(revisedFrom)
                     .to(revisedTo)
@@ -325,7 +328,7 @@ class TransactionCommonService {
                 break;
             }
         }
-        return queryCollector.getSortedQueries();
+        return queryCollector;
     }
 
     @Nullable
@@ -341,18 +344,17 @@ class TransactionCommonService {
     }
 
     // query.from() is non-inclusive
-    List<Aggregate.ServiceCallsByType> getMergedServiceCalls(String agentRollupId,
-            TransactionQuery query)
+    ServiceCallCollector getMergedServiceCalls(String agentRollupId, AggregateQuery query)
             throws Exception {
-        int maxAggregateServiceCallsPerType =
-                getMaxAggregateServiceCallsPerType(agentRollupId);
+        int maxServiceCallAggregatesPerTransactionAggregate =
+                getMaxServiceCallAggregatesPerTransactionAggregate(agentRollupId);
         ServiceCallCollector serviceCallCollector =
-                new ServiceCallCollector(maxAggregateServiceCallsPerType, 0);
+                new ServiceCallCollector(maxServiceCallAggregatesPerTransactionAggregate);
         long revisedFrom = query.from();
         long revisedTo = liveAggregateRepository.mergeInServiceCalls(agentRollupId, query,
                 serviceCallCollector);
         for (int rollupLevel = query.rollupLevel(); rollupLevel >= 0; rollupLevel--) {
-            TransactionQuery revisedQuery = ImmutableTransactionQuery.builder()
+            AggregateQuery revisedQuery = ImmutableAggregateQuery.builder()
                     .copyFrom(query)
                     .from(revisedFrom)
                     .to(revisedTo)
@@ -366,14 +368,15 @@ class TransactionCommonService {
                 break;
             }
         }
-        return serviceCallCollector.toProto();
+        return serviceCallCollector;
     }
 
     // query.from() is non-inclusive
-    MutableProfile getMergedProfile(String agentRollupId, TransactionQuery query, boolean auxiliary,
+    ProfileCollector getMergedProfile(String agentRollupId, AggregateQuery query, boolean auxiliary,
             List<String> includes, List<String> excludes, double truncateBranchPercentage)
             throws Exception {
-        MutableProfile profile = getMergedProfile(agentRollupId, query, auxiliary);
+        ProfileCollector profileCollector = getMergedProfile(agentRollupId, query, auxiliary);
+        MutableProfile profile = profileCollector.getProfile();
         if (!includes.isEmpty() || !excludes.isEmpty()) {
             profile.filter(includes, excludes);
         }
@@ -383,12 +386,12 @@ class TransactionCommonService {
             // don't truncate any root nodes
             profile.truncateBranches(minSamples);
         }
-        return profile;
+        return profileCollector;
     }
 
-    boolean hasMainThreadProfile(String agentRollupId, TransactionQuery query) throws Exception {
+    boolean hasMainThreadProfile(String agentRollupId, AggregateQuery query) throws Exception {
         for (int rollupLevel = query.rollupLevel(); rollupLevel >= 0; rollupLevel--) {
-            TransactionQuery revisedQuery = ImmutableTransactionQuery.builder()
+            AggregateQuery revisedQuery = ImmutableAggregateQuery.builder()
                     .copyFrom(query)
                     .rollupLevel(rollupLevel)
                     .build();
@@ -399,9 +402,9 @@ class TransactionCommonService {
         return false;
     }
 
-    boolean hasAuxThreadProfile(String agentRollupId, TransactionQuery query) throws Exception {
+    boolean hasAuxThreadProfile(String agentRollupId, AggregateQuery query) throws Exception {
         for (int rollupLevel = query.rollupLevel(); rollupLevel >= 0; rollupLevel--) {
-            TransactionQuery revisedQuery = ImmutableTransactionQuery.builder()
+            AggregateQuery revisedQuery = ImmutableAggregateQuery.builder()
                     .copyFrom(query)
                     .rollupLevel(rollupLevel)
                     .build();
@@ -414,7 +417,7 @@ class TransactionCommonService {
 
     static List<OverviewAggregate> rollUpOverviewAggregates(
             List<OverviewAggregate> orderedNonRolledUpOverviewAggregates,
-            Function<Long, Long> rollupCaptureTimeFn) throws Exception {
+            Function<Long, Long> rollupCaptureTimeFn) {
         List<OverviewAggregate> rolledUpOverviewAggregates = Lists.newArrayList();
         MutableAggregate currMergedAggregate = new MutableAggregate(0, 0);
         long currRollupCaptureTime = Long.MIN_VALUE;
@@ -435,12 +438,15 @@ class TransactionCommonService {
             currMergedAggregate
                     .mergeMainThreadRootTimers(nonRolledUpOverviewAggregate.mainThreadRootTimers());
             currMergedAggregate
-                    .mergeAuxThreadRootTimers(nonRolledUpOverviewAggregate.auxThreadRootTimers());
-            currMergedAggregate
-                    .mergeAsyncTimers(nonRolledUpOverviewAggregate.asyncTimers());
-            currMergedAggregate
                     .mergeMainThreadStats(nonRolledUpOverviewAggregate.mainThreadStats());
-            currMergedAggregate.mergeAuxThreadStats(nonRolledUpOverviewAggregate.auxThreadStats());
+            Aggregate.Timer auxThreadRootTimer = nonRolledUpOverviewAggregate.auxThreadRootTimer();
+            if (auxThreadRootTimer != null) {
+                currMergedAggregate.mergeAuxThreadRootTimer(auxThreadRootTimer);
+                // aux thread stats is non-null when aux thread root timer is non-null
+                currMergedAggregate.mergeAuxThreadStats(
+                        checkNotNull(nonRolledUpOverviewAggregate.auxThreadStats()));
+            }
+            currMergedAggregate.mergeAsyncTimers(nonRolledUpOverviewAggregate.asyncTimers());
         }
         if (!currMergedAggregate.isEmpty()) {
             // roll up final one
@@ -451,7 +457,7 @@ class TransactionCommonService {
 
     static List<PercentileAggregate> rollUpPercentileAggregates(
             List<PercentileAggregate> orderedNonRolledUpPercentileAggregates,
-            Function<Long, Long> rollupCaptureTimeFn) throws Exception {
+            Function<Long, Long> rollupCaptureTimeFn) {
         List<PercentileAggregate> rolledUpPercentileAggregates = Lists.newArrayList();
         MutableAggregate currMergedAggregate = new MutableAggregate(0, 0);
         long currRollupCaptureTime = Long.MIN_VALUE;
@@ -482,46 +488,62 @@ class TransactionCommonService {
 
     static List<ThroughputAggregate> rollUpThroughputAggregates(
             List<ThroughputAggregate> orderedNonRolledUpThroughputAggregates,
-            Function<Long, Long> rollupCaptureTimeFn) throws Exception {
+            Function<Long, Long> rollupCaptureTimeFn) {
         List<ThroughputAggregate> rolledUpThroughputAggregates = Lists.newArrayList();
         long currTransactionCount = 0;
+        // error_count is null for data inserted prior to glowroot central 0.9.18
+        // rolling up any interval with null error_count should result in null error_count
+        boolean hasMissingErrorCount = false;
+        long currErrorCount = 0;
         long currRollupCaptureTime = Long.MIN_VALUE;
         long maxCaptureTime = Long.MIN_VALUE;
         for (ThroughputAggregate nonRolledUpThroughputAggregate : orderedNonRolledUpThroughputAggregates) {
             maxCaptureTime = nonRolledUpThroughputAggregate.captureTime();
             long rollupCaptureTime = rollupCaptureTimeFn.apply(maxCaptureTime);
             if (rollupCaptureTime != currRollupCaptureTime && currTransactionCount > 0) {
-                rolledUpThroughputAggregates
-                        .add(ImmutableThroughputAggregate.of(currRollupCaptureTime,
-                                currTransactionCount));
+                rolledUpThroughputAggregates.add(ImmutableThroughputAggregate.builder()
+                        .captureTime(currRollupCaptureTime)
+                        .transactionCount(currTransactionCount)
+                        .errorCount(hasMissingErrorCount ? null : currErrorCount)
+                        .build());
                 currTransactionCount = 0;
+                hasMissingErrorCount = false;
+                currErrorCount = 0;
             }
             currRollupCaptureTime = rollupCaptureTime;
             currTransactionCount += nonRolledUpThroughputAggregate.transactionCount();
+            Long errorCount = nonRolledUpThroughputAggregate.errorCount();
+            if (errorCount == null) {
+                hasMissingErrorCount = true;
+            } else {
+                currErrorCount += errorCount;
+            }
         }
         if (currTransactionCount > 0) {
             // roll up final one
-            rolledUpThroughputAggregates
-                    .add(ImmutableThroughputAggregate.of(maxCaptureTime, currTransactionCount));
+            rolledUpThroughputAggregates.add(ImmutableThroughputAggregate.builder()
+                    .captureTime(maxCaptureTime)
+                    .transactionCount(currTransactionCount)
+                    .errorCount(hasMissingErrorCount ? null : currErrorCount)
+                    .build());
         }
         return rolledUpThroughputAggregates;
     }
 
-    private MutableProfile getMergedProfile(String agentRollupId, TransactionQuery query,
+    private ProfileCollector getMergedProfile(String agentRollupId, AggregateQuery query,
             boolean auxiliary) throws Exception {
-        ProfileCollector collector = new ProfileCollector();
+        ProfileCollector profileCollector = new ProfileCollector();
         long revisedFrom = query.from();
         long revisedTo;
         if (auxiliary) {
-            revisedTo =
-                    liveAggregateRepository.mergeInAuxThreadProfiles(agentRollupId, query,
-                            collector);
+            revisedTo = liveAggregateRepository.mergeInAuxThreadProfiles(agentRollupId, query,
+                    profileCollector);
         } else {
             revisedTo = liveAggregateRepository.mergeInMainThreadProfiles(agentRollupId, query,
-                    collector);
+                    profileCollector);
         }
         for (int rollupLevel = query.rollupLevel(); rollupLevel >= 0; rollupLevel--) {
-            TransactionQuery revisedQuery = ImmutableTransactionQuery.builder()
+            AggregateQuery revisedQuery = ImmutableAggregateQuery.builder()
                     .copyFrom(query)
                     .from(revisedFrom)
                     .to(revisedTo)
@@ -529,35 +551,47 @@ class TransactionCommonService {
                     .build();
             if (auxiliary) {
                 aggregateRepository.mergeAuxThreadProfilesInto(agentRollupId, revisedQuery,
-                        collector);
+                        profileCollector);
             } else {
                 aggregateRepository.mergeMainThreadProfilesInto(agentRollupId, revisedQuery,
-                        collector);
+                        profileCollector);
             }
-            long lastRolledUpTime = collector.getLastCaptureTime();
+            long lastRolledUpTime = profileCollector.getLastCaptureTime();
             revisedFrom = Math.max(revisedFrom, lastRolledUpTime + 1);
             if (revisedFrom > revisedTo) {
                 break;
             }
         }
-        return collector.getProfile();
+        return profileCollector;
     }
 
-    private int getMaxAggregateQueriesPerType(String agentRollupId) throws IOException {
-        AdvancedConfig advancedConfig = configRepository.getAdvancedConfig(agentRollupId);
-        if (advancedConfig != null && advancedConfig.hasMaxAggregateQueriesPerType()) {
-            return advancedConfig.getMaxAggregateQueriesPerType().getValue();
+    private int getMaxQueryAggregatesPerTransactionAggregate(String agentRollupId)
+            throws Exception {
+        AdvancedConfig advancedConfig;
+        try {
+            advancedConfig = configRepository.getAdvancedConfig(agentRollupId);
+        } catch (AgentConfigNotFoundException e) {
+            return ConfigDefaults.ADVANCED_MAX_QUERY_AGGREGATES;
+        }
+        if (advancedConfig.hasMaxQueryAggregates()) {
+            return advancedConfig.getMaxQueryAggregates().getValue();
         } else {
-            return ConfigDefaults.MAX_AGGREGATE_QUERIES_PER_TYPE;
+            return ConfigDefaults.ADVANCED_MAX_QUERY_AGGREGATES;
         }
     }
 
-    private int getMaxAggregateServiceCallsPerType(String agentRollupId) throws IOException {
-        AdvancedConfig advancedConfig = configRepository.getAdvancedConfig(agentRollupId);
-        if (advancedConfig != null && advancedConfig.hasMaxAggregateServiceCallsPerType()) {
-            return advancedConfig.getMaxAggregateServiceCallsPerType().getValue();
+    private int getMaxServiceCallAggregatesPerTransactionAggregate(String agentRollupId)
+            throws Exception {
+        AdvancedConfig advancedConfig;
+        try {
+            advancedConfig = configRepository.getAdvancedConfig(agentRollupId);
+        } catch (AgentConfigNotFoundException e) {
+            return ConfigDefaults.ADVANCED_MAX_SERVICE_CALL_AGGREGATES;
+        }
+        if (advancedConfig.hasMaxServiceCallAggregates()) {
+            return advancedConfig.getMaxServiceCallAggregates().getValue();
         } else {
-            return ConfigDefaults.MAX_AGGREGATE_SERVICE_CALLS_PER_TYPE;
+            return ConfigDefaults.ADVANCED_MAX_SERVICE_CALL_AGGREGATES;
         }
     }
 
@@ -571,7 +605,7 @@ class TransactionCommonService {
 
         @Override
         public Long apply(Long captureTime) {
-            return Utils.getRollupCaptureTime(captureTime, fixedIntervalMillis);
+            return CaptureTimes.getRollup(captureTime, fixedIntervalMillis);
         }
     }
 }

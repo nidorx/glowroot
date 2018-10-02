@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,12 +23,11 @@ import java.security.PrivilegedAction;
 import java.util.List;
 import java.util.regex.Pattern;
 
-import javax.annotation.Nullable;
-
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.commons.Method;
 
@@ -50,10 +49,10 @@ import org.glowroot.agent.plugin.api.weaving.OnBefore;
 import org.glowroot.agent.plugin.api.weaving.OnReturn;
 import org.glowroot.agent.plugin.api.weaving.OnThrow;
 import org.glowroot.agent.plugin.api.weaving.Pointcut;
+import org.glowroot.agent.util.MaybePatterns;
 import org.glowroot.agent.weaving.Advice.AdviceParameter;
 import org.glowroot.agent.weaving.Advice.ParameterKind;
 import org.glowroot.agent.weaving.ClassLoaders.LazyDefinedClass;
-import org.glowroot.common.util.Patterns;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
@@ -131,25 +130,19 @@ class AdviceBuilder {
             adviceClass = ClassLoaders.defineClass(lazyAdviceClass, tempClassLoader);
         }
         Pointcut pointcut = adviceClass.getAnnotation(Pointcut.class);
-        checkState(pointcut != null, "Class has no @Pointcut annotation");
-        checkNotNull(pointcut);
+        checkNotNull(pointcut, "Class has no @Pointcut annotation");
         builder.pointcut(pointcut);
         builder.adviceType(Type.getType(adviceClass));
-
-        String pointcutClassName = pointcut.className();
-        builder.pointcutClassName(pointcutClassName);
-        builder.pointcutClassNamePattern(buildPattern(pointcutClassName));
-        builder.pointcutClassNameAnnotationPattern(buildPattern(pointcut.classAnnotation()));
-        if (pointcut.methodDeclaringClassName().equals("")) {
-            builder.pointcutMethodDeclaringClassName(pointcutClassName);
-            builder.pointcutMethodDeclaringClassNamePattern(buildPattern(pointcutClassName));
-        } else {
-            builder.pointcutMethodDeclaringClassName(pointcut.methodDeclaringClassName());
-            builder.pointcutMethodDeclaringClassNamePattern(
-                    buildPattern(pointcut.methodDeclaringClassName()));
-        }
-        builder.pointcutMethodNamePattern(buildPattern(pointcut.methodName()));
-        builder.pointcutMethodAnnotationPattern(buildPattern(pointcut.methodAnnotation()));
+        builder.pointcutClassNamePattern(MaybePatterns.buildPattern(pointcut.className()));
+        builder.pointcutClassAnnotationPattern(
+                MaybePatterns.buildPattern(pointcut.classAnnotation()));
+        builder.pointcutSubTypeRestrictionPattern(
+                MaybePatterns.buildPattern(pointcut.subTypeRestriction()));
+        builder.pointcutSuperTypeRestrictionPattern(
+                MaybePatterns.buildPattern(pointcut.superTypeRestriction()));
+        builder.pointcutMethodNamePattern(MaybePatterns.buildPattern(pointcut.methodName()));
+        builder.pointcutMethodAnnotationPattern(
+                MaybePatterns.buildPattern(pointcut.methodAnnotation()));
         builder.pointcutMethodParameterTypes(buildPatterns(pointcut.methodParameterTypes()));
 
         // hasBindThreadContext will be overridden below if needed
@@ -169,7 +162,25 @@ class AdviceBuilder {
                 initOnAfterAdvice(adviceClass, method);
             }
         }
-        return builder.build();
+        Advice advice = builder.build();
+        if (pointcut.methodName().equals("<init>") && advice.onBeforeAdvice() != null
+                && advice.hasBindOptionalThreadContext()) {
+            // this is because of the way @OnBefore advice is handled on constructors,
+            // see WeavingMethodVisitory.invokeOnBefore()
+            throw new IllegalStateException("@BindOptionalThreadContext is not allowed in a "
+                    + "@Pointcut with methodName \"<init>\" that has an @OnBefore method");
+        }
+        if (pointcut.methodName().equals("<init>") && advice.isEnabledAdvice() != null) {
+            for (AdviceParameter parameter : advice.isEnabledParameters()) {
+                if (parameter.kind() == ParameterKind.RECEIVER) {
+                    // @IsEnabled is called before the super constructor is called, so "this" is not
+                    // available yet
+                    throw new IllegalStateException("@BindReceiver is not allowed on @IsEnabled for"
+                            + " a @Pointcut with methodName \"<init>\"");
+                }
+            }
+        }
+        return advice;
     }
 
     private void initIsEnabledAdvice(Class<?> adviceClass, java.lang.reflect.Method method)
@@ -283,10 +294,10 @@ class AdviceBuilder {
         }
     }
 
-    private List<Object> buildPatterns(String[] maybePatterns) {
+    private static List<Object> buildPatterns(String[] maybePatterns) {
         List<Object> patterns = Lists.newArrayList();
         for (String maybePattern : maybePatterns) {
-            Pattern pattern = buildPattern(maybePattern);
+            Pattern pattern = MaybePatterns.buildPattern(maybePattern);
             if (pattern == null) {
                 patterns.add(maybePattern);
             } else {
@@ -294,26 +305,6 @@ class AdviceBuilder {
             }
         }
         return patterns;
-    }
-
-    static @Nullable Pattern buildPattern(String maybePattern) {
-        if (maybePattern.startsWith("/") && maybePattern.endsWith("/")) {
-            // full regex power
-            return Pattern.compile(maybePattern.substring(1, maybePattern.length() - 1));
-        }
-        // limited regex, | and *, should be used whenever possible over full regex since
-        // . and $ are common in class names
-        if (maybePattern.contains("|")) {
-            String[] parts = maybePattern.split("\\|");
-            for (int i = 0; i < parts.length; i++) {
-                parts[i] = Patterns.buildSimplePattern(parts[i]);
-            }
-            return Pattern.compile(Joiner.on('|').join(parts));
-        }
-        if (maybePattern.contains("*")) {
-            return Pattern.compile(Patterns.buildSimplePattern(maybePattern));
-        }
-        return null;
     }
 
     private static List<AdviceParameter> getAdviceParameters(Annotation[][] parameterAnnotations,

@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,43 +16,37 @@
 package org.glowroot.agent.plugin.servlet;
 
 import java.security.Principal;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.Map;
 
-import javax.annotation.Nullable;
-
-import com.google.common.base.Strings;
-import com.google.common.collect.ImmutableMap;
-
 import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.AuxThreadContext;
-import org.glowroot.agent.plugin.api.MessageSupplier;
 import org.glowroot.agent.plugin.api.OptionalThreadContext;
 import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.ThreadContext.Priority;
 import org.glowroot.agent.plugin.api.TimerName;
 import org.glowroot.agent.plugin.api.TraceEntry;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.util.FastThreadLocal;
+import org.glowroot.agent.plugin.api.weaving.BindClassMeta;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
+import org.glowroot.agent.plugin.api.weaving.BindReceiver;
 import org.glowroot.agent.plugin.api.weaving.BindReturn;
 import org.glowroot.agent.plugin.api.weaving.BindThrowable;
 import org.glowroot.agent.plugin.api.weaving.BindTraveler;
-import org.glowroot.agent.plugin.api.weaving.IsEnabled;
 import org.glowroot.agent.plugin.api.weaving.OnAfter;
 import org.glowroot.agent.plugin.api.weaving.OnBefore;
 import org.glowroot.agent.plugin.api.weaving.OnReturn;
 import org.glowroot.agent.plugin.api.weaving.OnThrow;
 import org.glowroot.agent.plugin.api.weaving.Pointcut;
 import org.glowroot.agent.plugin.api.weaving.Shim;
+import org.glowroot.agent.plugin.servlet.DetailCapture.RequestHostAndPortDetail;
+import org.glowroot.agent.plugin.servlet.ServletPluginProperties.SessionAttributePath;
 
-// only the calls to the top-most Filter and to the top-most Servlet are captured
-//
 // this plugin is careful not to rely on request or session objects being thread-safe
 public class ServletAspect {
 
-    // the life of this thread local is tied to the life of the topLevel thread local
-    // it is only created if the topLevel thread local exists, and it is cleared when topLevel
-    // thread local is cleared
     private static final FastThreadLocal</*@Nullable*/ String> sendError =
             new FastThreadLocal</*@Nullable*/ String>();
 
@@ -64,13 +58,22 @@ public class ServletAspect {
         HttpSession glowroot$getSession(boolean create);
 
         @Nullable
+        String getMethod();
+
+        @Nullable
+        String getContextPath();
+
+        @Nullable
+        String getServletPath();
+
+        @Nullable
+        String getPathInfo();
+
+        @Nullable
         String getRequestURI();
 
         @Nullable
         String getQueryString();
-
-        @Nullable
-        String getMethod();
 
         @Nullable
         Enumeration</*@Nullable*/ String> getHeaderNames();
@@ -81,24 +84,35 @@ public class ServletAspect {
         @Nullable
         String getHeader(String name);
 
+        // the map values should be String[], but typing as Object to be safe
         @Nullable
-        Map</*@Nullable*/ String, /*@Nullable*/ String /*@Nullable*/[]> getParameterMap();
+        Map</*@Nullable*/ String, /*@Nullable*/ Object> getParameterMap();
 
         @Nullable
-        Enumeration<? extends /*@Nullable*/Object> getParameterNames();
+        Enumeration<? extends /*@Nullable*/ Object> getParameterNames();
 
         @Nullable
-        String /*@Nullable*/[] getParameterValues(String name);
+        String /*@Nullable*/ [] getParameterValues(String name);
 
         @Nullable
         Object getAttribute(String name);
 
         void removeAttribute(String name);
 
-        // not currently used by servlet plugin, but here to be available for other plugins
         @Nullable
         String getRemoteAddr();
+
+        @Nullable
+        String getRemoteHost();
+
+        @Nullable
+        String getServerName();
+
+        int getServerPort();
     }
+
+    @Shim("javax.servlet.http.HttpServletResponse")
+    public interface HttpServletResponse {}
 
     @Shim("javax.servlet.http.HttpSession")
     public interface HttpSession {
@@ -107,7 +121,7 @@ public class ServletAspect {
         Object getAttribute(String name);
 
         @Nullable
-        Enumeration<? extends /*@Nullable*/Object> getAttributeNames();
+        Enumeration<? extends /*@Nullable*/ Object> getAttributeNames();
 
         @Nullable
         String getId();
@@ -121,8 +135,64 @@ public class ServletAspect {
         private static final TimerName timerName = Agent.getTimerName(ServiceAdvice.class);
         @OnBefore
         public static @Nullable TraceEntry onBefore(OptionalThreadContext context,
-                @BindParameter @Nullable Object req) {
-            if (context.getServletMessageSupplier() != null) {
+                @BindParameter @Nullable Object req, @BindClassMeta RequestInvoker requestInvoker) {
+            return onBeforeCommon(context, req, null, requestInvoker);
+        }
+        @OnReturn
+        public static void onReturn(OptionalThreadContext context,
+                @BindTraveler @Nullable TraceEntry traceEntry,
+                @SuppressWarnings("unused") @BindParameter @Nullable Object req,
+                @BindParameter @Nullable Object res,
+                @BindClassMeta ResponseInvoker responseInvoker) {
+            if (traceEntry == null) {
+                return;
+            }
+            if (res == null || !(res instanceof HttpServletResponse)) {
+                // seems nothing sensible to do here other than ignore
+                return;
+            }
+            ServletMessageSupplier messageSupplier =
+                    (ServletMessageSupplier) context.getServletRequestInfo();
+            if (messageSupplier != null && responseInvoker.hasGetStatusMethod()) {
+                messageSupplier.setResponseCode(responseInvoker.getStatus(res));
+            }
+            FastThreadLocal.Holder</*@Nullable*/ String> errorMessageHolder = sendError.getHolder();
+            String errorMessage = errorMessageHolder.get();
+            if (errorMessage != null) {
+                traceEntry.endWithError(errorMessage);
+                errorMessageHolder.set(null);
+            } else {
+                traceEntry.end();
+            }
+            context.setServletRequestInfo(null);
+        }
+        @OnThrow
+        public static void onThrow(@BindThrowable Throwable t, OptionalThreadContext context,
+                @BindTraveler @Nullable TraceEntry traceEntry,
+                @SuppressWarnings("unused") @BindParameter @Nullable Object req,
+                @BindParameter @Nullable Object res) {
+            if (traceEntry == null) {
+                return;
+            }
+            if (res == null || !(res instanceof HttpServletResponse)) {
+                // seems nothing sensible to do here other than ignore
+                return;
+            }
+            ServletMessageSupplier messageSupplier =
+                    (ServletMessageSupplier) context.getServletRequestInfo();
+            if (messageSupplier != null) {
+                // container will set this unless headers are already flushed
+                messageSupplier.setResponseCode(500);
+            }
+            // ignoring potential sendError since this seems worse
+            sendError.set(null);
+            traceEntry.endWithError(t);
+            context.setServletRequestInfo(null);
+        }
+        private static @Nullable TraceEntry onBeforeCommon(OptionalThreadContext context,
+                @Nullable Object req, @Nullable String transactionTypeOverride,
+                RequestInvoker requestInvoker) {
+            if (context.getServletRequestInfo() != null) {
                 return null;
             }
             if (req == null || !(req instanceof HttpServletRequest)) {
@@ -133,8 +203,7 @@ public class ServletAspect {
             AuxThreadContext auxContextObj = (AuxThreadContext) request
                     .getAttribute(AsyncServletAspect.GLOWROOT_AUX_CONTEXT_REQUEST_ATTRIBUTE);
             if (auxContextObj != null) {
-                request.removeAttribute(
-                        AsyncServletAspect.GLOWROOT_AUX_CONTEXT_REQUEST_ATTRIBUTE);
+                request.removeAttribute(AsyncServletAspect.GLOWROOT_AUX_CONTEXT_REQUEST_ATTRIBUTE);
                 AuxThreadContext auxContext = auxContextObj;
                 return auxContext.startAndMarkAsyncTransactionComplete();
             }
@@ -147,30 +216,52 @@ public class ServletAspect {
             // url ended with ? but nothing after that
             String requestQueryString = request.getQueryString();
             String requestMethod = Strings.nullToEmpty(request.getMethod());
-            ImmutableMap<String, Object> requestHeaders =
-                    DetailCapture.captureRequestHeaders(request);
+            String requestContextPath = Strings.nullToEmpty(request.getContextPath());
+            String requestServletPath = Strings.nullToEmpty(request.getServletPath());
+            String requestPathInfo = request.getPathInfo();
+            Map<String, Object> requestHeaders = DetailCapture.captureRequestHeaders(request);
+            RequestHostAndPortDetail requestHostAndPortDetail =
+                    DetailCapture.captureRequestHostAndPortDetail(request, requestInvoker);
             if (session == null) {
-                messageSupplier = new ServletMessageSupplier(requestMethod, requestUri,
-                        requestQueryString, requestHeaders, ImmutableMap.<String, String>of());
+                messageSupplier = new ServletMessageSupplier(requestMethod, requestContextPath,
+                        requestServletPath, requestPathInfo, requestUri, requestQueryString,
+                        requestHeaders, requestHostAndPortDetail,
+                        Collections.<String, String>emptyMap());
             } else {
-                ImmutableMap<String, String> sessionAttributes =
-                        HttpSessions.getSessionAttributes(session);
-                messageSupplier = new ServletMessageSupplier(requestMethod, requestUri,
-                        requestQueryString, requestHeaders, sessionAttributes);
+                Map<String, String> sessionAttributes = HttpSessions.getSessionAttributes(session);
+                messageSupplier = new ServletMessageSupplier(requestMethod, requestContextPath,
+                        requestServletPath, requestPathInfo, requestUri, requestQueryString,
+                        requestHeaders, requestHostAndPortDetail, sessionAttributes);
             }
             String user = null;
             if (session != null) {
-                String sessionUserAttributePath =
-                        ServletPluginProperties.sessionUserAttributePath();
-                if (!sessionUserAttributePath.isEmpty()) {
+                SessionAttributePath userAttributePath =
+                        ServletPluginProperties.userAttributePath();
+                if (userAttributePath != null) {
                     // capture user now, don't use a lazy supplier
-                    user = HttpSessions.getSessionAttributeTextValue(session,
-                            sessionUserAttributePath);
+                    Object val = HttpSessions.getSessionAttribute(session, userAttributePath);
+                    user = val == null ? null : val.toString();
                 }
             }
-            TraceEntry traceEntry =
-                    context.startTransaction("Web", requestUri, messageSupplier, timerName);
-            context.setServletMessageSupplier(messageSupplier);
+            String transactionType;
+            boolean setWithCoreMaxPriority = false;
+            String transactionTypeHeader = request.getHeader("Glowroot-Transaction-Type");
+            if ("Synthetic".equals(transactionTypeHeader)) {
+                // Glowroot-Transaction-Type header currently only accepts "Synthetic", in order to
+                // prevent spamming of transaction types, which could cause some issues
+                transactionType = transactionTypeHeader;
+                setWithCoreMaxPriority = true;
+            } else if (transactionTypeOverride != null) {
+                transactionType = transactionTypeOverride;
+            } else {
+                transactionType = "Web";
+            }
+            TraceEntry traceEntry = context.startTransaction(transactionType, requestUri,
+                    messageSupplier, timerName);
+            if (setWithCoreMaxPriority) {
+                context.setTransactionType(transactionType, Priority.CORE_MAX);
+            }
+            context.setServletRequestInfo(messageSupplier);
             // Glowroot-Transaction-Name header is useful for automated tests which want to send a
             // more specific name for the transaction
             String transactionNameOverride = request.getHeader("Glowroot-Transaction-Name");
@@ -182,33 +273,6 @@ public class ServletAspect {
             }
             return traceEntry;
         }
-        @OnReturn
-        public static void onReturn(OptionalThreadContext context,
-                @BindTraveler @Nullable TraceEntry traceEntry) {
-            if (traceEntry == null) {
-                return;
-            }
-            FastThreadLocal.Holder</*@Nullable*/ String> errorMessageHolder = sendError.getHolder();
-            String errorMessage = errorMessageHolder.get();
-            if (errorMessage != null) {
-                traceEntry.endWithError(errorMessage);
-                errorMessageHolder.set(null);
-            } else {
-                traceEntry.end();
-            }
-            context.setServletMessageSupplier(null);
-        }
-        @OnThrow
-        public static void onThrow(@BindThrowable Throwable t, OptionalThreadContext context,
-                @BindTraveler @Nullable TraceEntry traceEntry) {
-            if (traceEntry == null) {
-                return;
-            }
-            // ignoring potential sendError since this seems worse
-            sendError.set(null);
-            traceEntry.endWithError(t);
-            context.setServletMessageSupplier(null);
-        }
     }
 
     @Pointcut(className = "javax.servlet.Filter", methodName = "doFilter",
@@ -218,23 +282,33 @@ public class ServletAspect {
     public static class DoFilterAdvice {
         @OnBefore
         public static @Nullable TraceEntry onBefore(OptionalThreadContext context,
-                @BindParameter @Nullable Object request) {
-            return ServiceAdvice.onBefore(context, request);
+                @BindParameter @Nullable Object req, @BindClassMeta RequestInvoker requestInvoker) {
+            return ServiceAdvice.onBeforeCommon(context, req, null, requestInvoker);
         }
         @OnReturn
         public static void onReturn(OptionalThreadContext context,
-                @BindTraveler @Nullable TraceEntry traceEntry) {
-            ServiceAdvice.onReturn(context, traceEntry);
+                @BindTraveler @Nullable TraceEntry traceEntry,
+                @BindParameter @Nullable Object req,
+                @BindParameter @Nullable Object res,
+                @BindClassMeta ResponseInvoker responseInvoker) {
+            ServiceAdvice.onReturn(context, traceEntry, req, res, responseInvoker);
         }
         @OnThrow
         public static void onThrow(@BindThrowable Throwable t, OptionalThreadContext context,
-                @BindTraveler @Nullable TraceEntry traceEntry) {
-            ServiceAdvice.onThrow(t, context, traceEntry);
+                @BindTraveler @Nullable TraceEntry traceEntry,
+                @BindParameter @Nullable Object req,
+                @BindParameter @Nullable Object res) {
+            ServiceAdvice.onThrow(t, context, traceEntry, req, res);
         }
     }
 
-    @Pointcut(className = "org.eclipse.jetty.server.Handler", methodName = "handle",
-            methodParameterTypes = {"java.lang.String", "org.eclipse.jetty.server.Request",
+    @Pointcut(className = "org.eclipse.jetty.server.Handler"
+            + "|wiremock.org.eclipse.jetty.server.Handler",
+            subTypeRestriction = "/(?!org\\.eclipse\\.jetty.)"
+                    + "(?!wiremock.org\\.eclipse\\.jetty.).*/",
+            methodName = "handle",
+            methodParameterTypes = {"java.lang.String",
+                    "org.eclipse.jetty.server.Request|wiremock.org.eclipse.jetty.server.Request",
                     "javax.servlet.http.HttpServletRequest",
                     "javax.servlet.http.HttpServletResponse"},
             nestingGroup = "outer-servlet-or-filter", timerName = "http request")
@@ -243,31 +317,111 @@ public class ServletAspect {
         public static @Nullable TraceEntry onBefore(OptionalThreadContext context,
                 @SuppressWarnings("unused") @BindParameter @Nullable String target,
                 @SuppressWarnings("unused") @BindParameter @Nullable Object baseRequest,
-                @BindParameter @Nullable Object request) {
-            return ServiceAdvice.onBefore(context, request);
+                @BindParameter @Nullable Object req, @BindClassMeta RequestInvoker requestInvoker) {
+            return ServiceAdvice.onBeforeCommon(context, req, null, requestInvoker);
         }
         @OnReturn
         public static void onReturn(OptionalThreadContext context,
-                @BindTraveler @Nullable TraceEntry traceEntry) {
-            ServiceAdvice.onReturn(context, traceEntry);
+                @BindTraveler @Nullable TraceEntry traceEntry,
+                @SuppressWarnings("unused") @BindParameter @Nullable String target,
+                @SuppressWarnings("unused") @BindParameter @Nullable Object baseRequest,
+                @BindParameter @Nullable Object req,
+                @BindParameter @Nullable Object res,
+                @BindClassMeta ResponseInvoker responseInvoker) {
+            ServiceAdvice.onReturn(context, traceEntry, req, res, responseInvoker);
         }
         @OnThrow
         public static void onThrow(@BindThrowable Throwable t, OptionalThreadContext context,
-                @BindTraveler @Nullable TraceEntry traceEntry) {
-            ServiceAdvice.onThrow(t, context, traceEntry);
+                @BindTraveler @Nullable TraceEntry traceEntry,
+                @SuppressWarnings("unused") @BindParameter @Nullable String target,
+                @SuppressWarnings("unused") @BindParameter @Nullable Object baseRequest,
+                @BindParameter @Nullable Object req,
+                @BindParameter @Nullable Object res) {
+            ServiceAdvice.onThrow(t, context, traceEntry, req, res);
+        }
+    }
+
+    // this pointcut makes sure to only set the transaction type to WireMock if WireMock is the
+    // first servlet encountered
+    @Pointcut(className = "javax.servlet.Servlet",
+            subTypeRestriction = "com.github.tomakehurst.wiremock.jetty9"
+                    + ".JettyHandlerDispatchingServlet",
+            methodName = "service",
+            methodParameterTypes = {"javax.servlet.ServletRequest",
+                    "javax.servlet.ServletResponse"},
+            nestingGroup = "outer-servlet-or-filter", timerName = "http request", order = -1)
+    public static class WireMockAdvice {
+        @OnBefore
+        public static @Nullable TraceEntry onBefore(OptionalThreadContext context,
+                @BindParameter @Nullable Object req, @BindClassMeta RequestInvoker requestInvoker) {
+            return ServiceAdvice.onBeforeCommon(context, req, "WireMock", requestInvoker);
+        }
+        @OnReturn
+        public static void onReturn(OptionalThreadContext context,
+                @BindTraveler @Nullable TraceEntry traceEntry,
+                @BindParameter @Nullable Object req,
+                @BindParameter @Nullable Object res,
+                @BindClassMeta ResponseInvoker responseInvoker) {
+            ServiceAdvice.onReturn(context, traceEntry, req, res, responseInvoker);
+        }
+        @OnThrow
+        public static void onThrow(@BindThrowable Throwable t, OptionalThreadContext context,
+                @BindTraveler @Nullable TraceEntry traceEntry,
+                @BindParameter @Nullable Object req,
+                @BindParameter @Nullable Object res) {
+            ServiceAdvice.onThrow(t, context, traceEntry, req, res);
         }
     }
 
     @Pointcut(className = "javax.servlet.http.HttpServletResponse", methodName = "sendError",
             methodParameterTypes = {"int", ".."}, nestingGroup = "servlet-inner-call")
     public static class SendErrorAdvice {
+        // wait until after because sendError throws IllegalStateException if the response has
+        // already been committed
         @OnAfter
-        public static void onAfter(ThreadContext context, @BindParameter Integer statusCode) {
-            FastThreadLocal.Holder</*@Nullable*/ String> errorMessageHolder = sendError.getHolder();
-            // only capture 5xx server errors
-            if (statusCode >= 500 && errorMessageHolder.get() == null) {
-                context.addErrorEntry("sendError, HTTP status code " + statusCode);
-                errorMessageHolder.set("sendError, HTTP status code " + statusCode);
+        public static void onAfter(ThreadContext context, @BindParameter int statusCode) {
+            ServletMessageSupplier messageSupplier =
+                    (ServletMessageSupplier) context.getServletRequestInfo();
+            if (messageSupplier != null) {
+                messageSupplier.setResponseCode(statusCode);
+            }
+            if (captureAsError(statusCode)) {
+                FastThreadLocal.Holder</*@Nullable*/ String> errorMessageHolder =
+                        sendError.getHolder();
+                if (errorMessageHolder.get() == null) {
+                    context.addErrorEntry("sendError, HTTP status code " + statusCode);
+                    errorMessageHolder.set("sendError, HTTP status code " + statusCode);
+                }
+            }
+        }
+
+        private static boolean captureAsError(int statusCode) {
+            return statusCode >= 500
+                    || ServletPluginProperties.traceErrorOn4xxResponseCode() && statusCode >= 400;
+        }
+    }
+
+    @Pointcut(className = "javax.servlet.http.HttpServletResponse", methodName = "sendRedirect",
+            methodParameterTypes = {"java.lang.String"}, nestingGroup = "servlet-inner-call")
+    public static class SendRedirectAdvice {
+        // wait until after because sendError throws IllegalStateException if the response has
+        // already been committed
+        @OnAfter
+        public static void onAfter(ThreadContext context, @BindReceiver Object response,
+                @BindParameter @Nullable String location,
+                @BindClassMeta ResponseInvoker responseInvoker) {
+            ServletMessageSupplier messageSupplier =
+                    (ServletMessageSupplier) context.getServletRequestInfo();
+            if (messageSupplier != null) {
+                messageSupplier.setResponseCode(302);
+                if (responseInvoker.hasGetHeaderMethod()) {
+                    // get the header as set by the container (e.g. after it converts relative to
+                    // absolute path)
+                    String header = responseInvoker.getHeader(response, "Location");
+                    messageSupplier.addResponseHeader("Location", header);
+                } else if (location != null) {
+                    messageSupplier.addResponseHeader("Location", location);
+                }
             }
         }
     }
@@ -275,17 +429,22 @@ public class ServletAspect {
     @Pointcut(className = "javax.servlet.http.HttpServletResponse", methodName = "setStatus",
             methodParameterTypes = {"int", ".."}, nestingGroup = "servlet-inner-call")
     public static class SetStatusAdvice {
-        // using @IsEnabled like this avoids ThreadContext lookup for common case
-        @IsEnabled
-        public static boolean isEnabled(@BindParameter Integer statusCode) {
-            return statusCode >= 500;
-        }
+        // wait until after because sendError throws IllegalStateException if the response has
+        // already been committed
         @OnAfter
-        public static void onAfter(ThreadContext context, @BindParameter Integer statusCode) {
-            FastThreadLocal.Holder</*@Nullable*/ String> errorMessageHolder = sendError.getHolder();
-            if (errorMessageHolder.get() == null) {
-                context.addErrorEntry("setStatus, HTTP status code " + statusCode);
-                errorMessageHolder.set("setStatus, HTTP status code " + statusCode);
+        public static void onAfter(ThreadContext context, @BindParameter int statusCode) {
+            ServletMessageSupplier messageSupplier =
+                    (ServletMessageSupplier) context.getServletRequestInfo();
+            if (messageSupplier != null) {
+                messageSupplier.setResponseCode(statusCode);
+            }
+            if (SendErrorAdvice.captureAsError(statusCode)) {
+                FastThreadLocal.Holder</*@Nullable*/ String> errorMessageHolder =
+                        sendError.getHolder();
+                if (errorMessageHolder.get() == null) {
+                    context.addErrorEntry("setStatus, HTTP status code " + statusCode);
+                    errorMessageHolder.set("setStatus, HTTP status code " + statusCode);
+                }
             }
         }
     }
@@ -316,9 +475,10 @@ public class ServletAspect {
                 context.setTransactionUser(session.getId(), Priority.CORE_PLUGIN);
             }
             if (ServletPluginProperties.captureSessionAttributeNamesContainsId()) {
-                MessageSupplier messageSupplier = context.getServletMessageSupplier();
-                if (messageSupplier instanceof ServletMessageSupplier) {
-                    ((ServletMessageSupplier) messageSupplier).putSessionAttributeChangedValue(
+                ServletMessageSupplier messageSupplier =
+                        (ServletMessageSupplier) context.getServletRequestInfo();
+                if (messageSupplier != null) {
+                    messageSupplier.putSessionAttributeChangedValue(
                             ServletPluginProperties.HTTP_SESSION_ID_ATTR, session.getId());
                 }
             }
@@ -332,6 +492,15 @@ public class ServletAspect {
         public static void onReturn(@BindReturn @Nullable HttpSession session,
                 ThreadContext context) {
             GetSessionAdvice.onReturn(session, context);
+        }
+    }
+
+    @Pointcut(className = "javax.servlet.Servlet", methodName = "init",
+            methodParameterTypes = {"javax.servlet.ServletConfig"})
+    public static class ServiceInitAdvice {
+        @OnBefore
+        public static void onBefore() {
+            ContainerStartup.initPlatformMBeanServer();
         }
     }
 }

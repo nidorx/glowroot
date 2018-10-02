@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,18 +20,13 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.MonitorInfo;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-
-import javax.annotation.Nullable;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Ordering;
-import com.google.common.primitives.Longs;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,14 +53,7 @@ class ThreadDumpService {
 
     ThreadDump getThreadDump() {
         ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
-        List<ThreadContextImpl> activeThreadContexts = Lists.newArrayList();
-        for (Transaction transaction : transactionRegistry.getTransactions()) {
-            ThreadContextImpl mainThreadContext = transaction.getMainThreadContext();
-            if (mainThreadContext.isActive()) {
-                activeThreadContexts.add(mainThreadContext);
-            }
-            activeThreadContexts.addAll(transaction.getActiveAuxThreadContexts());
-        }
+        List<ThreadContextImpl> activeThreadContexts = getActiveThreadContexts();
         @Nullable
         ThreadInfo[] threadInfos = threadBean.getThreadInfo(threadBean.getAllThreadIds(),
                 threadBean.isObjectMonitorUsageSupported(), false);
@@ -104,40 +92,20 @@ class ThreadDumpService {
             if (transactionThreadInfo == null) {
                 transactionThreadInfo = new TransactionThreadInfo(transaction.getHeadline(),
                         transaction.getTransactionType(), transaction.getTransactionName(),
-                        transaction.getDurationNanos(), transaction.getTotalCpuNanos(),
+                        transaction.getDurationNanos(), transaction.getCpuNanos(),
                         transactionCollector.shouldStoreSlow(transaction));
                 transactionThreadInfos.put(traceId, transactionThreadInfo);
             }
             transactionThreadInfo.threadInfos.add(threadInfo);
         }
         List<ThreadDump.Transaction> transactions = Lists.newArrayList();
-        for (Entry<String, TransactionThreadInfo> entry : transactionThreadInfos.entrySet()) {
-            TransactionThreadInfo value = entry.getValue();
-            ThreadDump.Transaction.Builder builder = ThreadDump.Transaction.newBuilder()
-                    .setHeadline(value.headline)
-                    .setTransactionType(value.transactionType)
-                    .setTransactionName(value.transactionName)
-                    .setTotalDurationNanos(value.totalDurationNanos);
-            if (!NotAvailableAware.isNA(value.totalCpuNanos)) {
-                builder.setTotalCpuNanos(OptionalInt64.newBuilder().setValue(value.totalCpuNanos));
-            }
-            if (value.shouldStoreSlow) {
-                builder.setTraceId(entry.getKey());
-            }
-            for (ThreadInfo auxThreadInfo : value.threadInfos) {
-                builder.addThread(createProtobuf(auxThreadInfo));
-            }
-            transactions.add(builder.build());
+        for (Map.Entry<String, TransactionThreadInfo> entry : transactionThreadInfos.entrySet()) {
+            transactions.add(entry.getValue().toProto(entry.getKey()));
         }
         List<ThreadDump.Thread> unmatchedThreads = Lists.newArrayList();
         for (ThreadInfo unmatchedThreadInfo : unmatchedThreadInfos.values()) {
             unmatchedThreads.add(createProtobuf(unmatchedThreadInfo));
         }
-
-        // sort descending by total time
-        Collections.sort(transactions, new TransactionOrdering());
-        // sort descending by thread id (same as jstack)
-        Collections.sort(unmatchedThreads, new UnmatchedThreadOrdering());
 
         ThreadDump.Builder builder = ThreadDump.newBuilder()
                 .addAllTransaction(transactions)
@@ -148,7 +116,19 @@ class ThreadDumpService {
         return builder.build();
     }
 
-    private ThreadDump.Thread createProtobuf(ThreadInfo threadInfo) {
+    private List<ThreadContextImpl> getActiveThreadContexts() {
+        List<ThreadContextImpl> activeThreadContexts = Lists.newArrayList();
+        for (Transaction transaction : transactionRegistry.getTransactions()) {
+            ThreadContextImpl mainThreadContext = transaction.getMainThreadContext();
+            if (mainThreadContext.isActive()) {
+                activeThreadContexts.add(mainThreadContext);
+            }
+            activeThreadContexts.addAll(transaction.getActiveAuxThreadContexts());
+        }
+        return activeThreadContexts;
+    }
+
+    private static ThreadDump.Thread createProtobuf(ThreadInfo threadInfo) {
         ThreadDump.Thread.Builder builder = ThreadDump.Thread.newBuilder()
                 .setName(threadInfo.getThreadName())
                 .setId(threadInfo.getThreadId())
@@ -186,40 +166,44 @@ class ThreadDumpService {
         return builder.build();
     }
 
-    private static class TransactionOrdering extends Ordering<ThreadDump.Transaction> {
-        @Override
-        public int compare(ThreadDump.Transaction left, ThreadDump.Transaction right) {
-            return Longs.compare(right.getTotalDurationNanos(), left.getTotalDurationNanos());
-        }
-    }
-
-    private static class UnmatchedThreadOrdering extends Ordering<ThreadDump.Thread> {
-        @Override
-        public int compare(ThreadDump.Thread left, ThreadDump.Thread right) {
-            return Longs.compare(right.getId(), left.getId());
-        }
-    }
-
     private static class TransactionThreadInfo {
 
         private final String headline;
         private final String transactionType;
         private final String transactionName;
-        private final long totalDurationNanos;
-        private final long totalCpuNanos;
+        private final long durationNanos;
+        private final long cpuNanos;
         private final boolean shouldStoreSlow;
 
         private final List<ThreadInfo> threadInfos = Lists.newArrayList();
 
         private TransactionThreadInfo(String headline, String transactionType,
-                String transactionName, long totalDurationNanos, long totalCpuNanos,
+                String transactionName, long durationNanos, long cpuNanos,
                 boolean shouldStoreSlow) {
             this.headline = headline;
             this.transactionType = transactionType;
             this.transactionName = transactionName;
-            this.totalDurationNanos = totalDurationNanos;
-            this.totalCpuNanos = totalCpuNanos;
+            this.durationNanos = durationNanos;
+            this.cpuNanos = cpuNanos;
             this.shouldStoreSlow = shouldStoreSlow;
+        }
+
+        private ThreadDump.Transaction toProto(String traceId) {
+            ThreadDump.Transaction.Builder builder = ThreadDump.Transaction.newBuilder()
+                    .setHeadline(headline)
+                    .setTransactionType(transactionType)
+                    .setTransactionName(transactionName)
+                    .setDurationNanos(durationNanos);
+            if (!NotAvailableAware.isNA(cpuNanos)) {
+                builder.setCpuNanos(OptionalInt64.newBuilder().setValue(cpuNanos));
+            }
+            if (shouldStoreSlow) {
+                builder.setTraceId(traceId);
+            }
+            for (ThreadInfo auxThreadInfo : threadInfos) {
+                builder.addThread(createProtobuf(auxThreadInfo));
+            }
+            return builder.build();
         }
     }
 }

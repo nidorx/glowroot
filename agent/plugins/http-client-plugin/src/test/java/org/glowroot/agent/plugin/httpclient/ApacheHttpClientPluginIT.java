@@ -1,5 +1,5 @@
 /**
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,13 @@
  */
 package org.glowroot.agent.plugin.httpclient;
 
+import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.util.Iterator;
 
+import com.google.common.io.ByteStreams;
 import org.apache.http.HttpHost;
+import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
@@ -121,8 +125,24 @@ public class ApacheHttpClientPluginIT {
                     .getMethod("createDefault").invoke(null);
         } catch (ClassNotFoundException e) {
             // httpclient prior to 4.3.0
-            return (HttpClient) Class.forName("org.apache.http.impl.client.DefaultHttpClient")
-                    .newInstance();
+            return (HttpClient) Class
+                    .forName("org.apache.http.impl.client.DefaultHttpClient").newInstance();
+        }
+    }
+
+    private static void closeHttpClient(HttpClient httpClient) throws Exception {
+        try {
+            Class<?> closeableHttpClientClass =
+                    Class.forName("org.apache.http.impl.client.CloseableHttpClient");
+            Method closeMethod = closeableHttpClientClass.getMethod("close");
+            closeMethod.invoke(httpClient);
+        } catch (ClassNotFoundException e) {
+            Method getConnectionManagerMethod = HttpClient.class.getMethod("getConnectionManager");
+            Object connectionManager = getConnectionManagerMethod.invoke(httpClient);
+            Class<?> clientConnectionManagerClass =
+                    Class.forName("org.apache.http.conn.ClientConnectionManager");
+            Method shutdownMethod = clientConnectionManagerClass.getMethod("shutdown");
+            shutdownMethod.invoke(connectionManager);
         }
     }
 
@@ -131,7 +151,16 @@ public class ApacheHttpClientPluginIT {
         public void transactionMarker() throws Exception {
             HttpClient httpClient = createHttpClient();
             HttpGet httpGet = new HttpGet("http://localhost:" + getPort() + "/hello1");
-            httpClient.execute(httpGet);
+            HttpResponse response = httpClient.execute(httpGet);
+            int responseStatusCode = response.getStatusLine().getStatusCode();
+            if (responseStatusCode != 200) {
+                throw new IllegalStateException(
+                        "Unexpected response status code: " + responseStatusCode);
+            }
+            InputStream content = response.getEntity().getContent();
+            ByteStreams.exhaust(content);
+            content.close();
+            closeHttpClient(httpClient);
         }
     }
 
@@ -141,7 +170,16 @@ public class ApacheHttpClientPluginIT {
             HttpClient httpClient = createHttpClient();
             HttpHost httpHost = new HttpHost("localhost", getPort());
             HttpGet httpGet = new HttpGet("/hello2");
-            httpClient.execute(httpHost, httpGet);
+            HttpResponse response = httpClient.execute(httpHost, httpGet);
+            int responseStatusCode = response.getStatusLine().getStatusCode();
+            if (responseStatusCode != 200) {
+                throw new IllegalStateException(
+                        "Unexpected response status code: " + responseStatusCode);
+            }
+            InputStream content = response.getEntity().getContent();
+            ByteStreams.exhaust(content);
+            content.close();
+            closeHttpClient(httpClient);
         }
     }
 
@@ -150,7 +188,16 @@ public class ApacheHttpClientPluginIT {
         public void transactionMarker() throws Exception {
             HttpClient httpClient = createHttpClient();
             HttpPost httpPost = new HttpPost("http://localhost:" + getPort() + "/hello3");
-            httpClient.execute(httpPost);
+            HttpResponse response = httpClient.execute(httpPost);
+            int responseStatusCode = response.getStatusLine().getStatusCode();
+            if (responseStatusCode != 200) {
+                throw new IllegalStateException(
+                        "Unexpected response status code: " + responseStatusCode);
+            }
+            InputStream content = response.getEntity().getContent();
+            ByteStreams.exhaust(content);
+            content.close();
+            closeHttpClient(httpClient);
         }
     }
 
@@ -160,7 +207,16 @@ public class ApacheHttpClientPluginIT {
             HttpClient httpClient = createHttpClient();
             HttpHost httpHost = new HttpHost("localhost", getPort());
             HttpPost httpPost = new HttpPost("/hello4");
-            httpClient.execute(httpHost, httpPost);
+            HttpResponse response = httpClient.execute(httpHost, httpPost);
+            int responseStatusCode = response.getStatusLine().getStatusCode();
+            if (responseStatusCode != 200) {
+                throw new IllegalStateException(
+                        "Unexpected response status code: " + responseStatusCode);
+            }
+            InputStream content = response.getEntity().getContent();
+            ByteStreams.exhaust(content);
+            content.close();
+            closeHttpClient(httpClient);
         }
     }
 }

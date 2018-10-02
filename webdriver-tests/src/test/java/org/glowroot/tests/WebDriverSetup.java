@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,25 +15,33 @@
  */
 package org.glowroot.tests;
 
+import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintWriter;
-import java.lang.reflect.Method;
 import java.net.ServerSocket;
 import java.net.URL;
+import java.security.SecureRandom;
 import java.util.Properties;
 
 import com.datastax.driver.core.Cluster;
-import com.datastax.driver.core.Session;
-import com.google.common.base.Charsets;
+import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.io.BaseEncoding;
+import com.google.common.io.ByteStreams;
 import com.google.common.io.Files;
+import com.machinepublishers.jbrowserdriver.JBrowserDriver;
 import com.saucelabs.common.SauceOnDemandAuthentication;
 import com.saucelabs.common.SauceOnDemandSessionIdProvider;
 import com.saucelabs.junit.SauceOnDemandTestWatcher;
 import kr.motd.maven.os.Detector;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.DefaultRedirectStrategy;
+import org.apache.http.impl.client.HttpClients;
 import org.junit.rules.TestWatcher;
 import org.openqa.selenium.Dimension;
 import org.openqa.selenium.WebDriver;
@@ -50,13 +58,21 @@ import org.glowroot.agent.it.harness.Container;
 import org.glowroot.agent.it.harness.Containers;
 import org.glowroot.agent.it.harness.impl.JavaagentContainer;
 import org.glowroot.agent.it.harness.impl.LocalContainer;
+import org.glowroot.central.CentralModule;
+import org.glowroot.central.util.Session;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 public class WebDriverSetup {
 
     protected static final boolean useCentral =
             Boolean.getBoolean("glowroot.internal.webdriver.useCentral");
 
-    private static final String GECKO_DRIVER_VERSION = "0.11.1";
+    // travis build is currently failing with jbrowser driver
+    private static final boolean USE_JBROWSER_DRIVER = false;
+
+    private static final String GECKO_DRIVER_VERSION = "0.22.0";
 
     private static final Logger logger = LoggerFactory.getLogger(WebDriverSetup.class);
 
@@ -78,6 +94,7 @@ public class WebDriverSetup {
         return sharedSetup;
     }
 
+    private final CentralModule centralModule;
     private final Container container;
     private final int uiPort;
     private final boolean shared;
@@ -85,8 +102,9 @@ public class WebDriverSetup {
 
     private String remoteWebDriverSessionId;
 
-    private WebDriverSetup(Container container, int uiPort, boolean shared, WebDriver driver)
-            throws Exception {
+    private WebDriverSetup(CentralModule centralModule, Container container, int uiPort,
+            boolean shared, WebDriver driver) throws Exception {
+        this.centralModule = centralModule;
         this.container = container;
         this.uiPort = uiPort;
         this.shared = shared;
@@ -107,9 +125,7 @@ public class WebDriverSetup {
         }
         container.close();
         if (useCentral) {
-            Class<?> bootstrapClass = Class.forName("org.glowroot.central.Bootstrap");
-            Method mainMethod = bootstrapClass.getMethod("main", String[].class);
-            mainMethod.invoke(null, (Object) new String[] {"stop"});
+            centralModule.shutdown();
             CassandraWrapper.stop();
         }
     }
@@ -166,73 +182,115 @@ public class WebDriverSetup {
 
     private static WebDriverSetup createSetup(boolean shared) throws Exception {
         int uiPort = getAvailablePort();
-        File baseDir = Files.createTempDir();
+        File testDir = Files.createTempDir();
+        CentralModule centralModule;
         Container container;
         if (useCentral) {
             CassandraWrapper.start();
             Cluster cluster = Cluster.builder().addContactPoint("127.0.0.1").build();
-            Session session = cluster.newSession();
-            session.execute("create keyspace if not exists glowroot_unit_tests with replication ="
-                    + " { 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
-            session.execute("use glowroot_unit_tests");
-            session.execute("drop table if exists agent");
-            session.execute("drop table if exists agent_rollup");
-            session.execute("drop table if exists user");
-            session.execute("drop table if exists role");
-            session.execute("drop table if exists central_config");
+            Session session = new Session(cluster.newSession(), "glowroot_unit_tests");
+            session.updateSchemaWithRetry("drop table if exists agent_config");
+            session.updateSchemaWithRetry("drop table if exists user");
+            session.updateSchemaWithRetry("drop table if exists role");
+            session.updateSchemaWithRetry("drop table if exists central_config");
+            session.updateSchemaWithRetry("drop table if exists agent");
             session.close();
             cluster.close();
-            container = createCentralAndContainer(uiPort, baseDir);
+            int grpcPort = getAvailablePort();
+            centralModule = createCentralModule(uiPort, grpcPort);
+            container = createContainerReportingToCentral(grpcPort, testDir);
         } else {
-            container = createContainer(uiPort, baseDir);
+            centralModule = null;
+            container = createContainer(uiPort, testDir);
         }
         if (SauceLabs.useSauceLabs()) {
-            return new WebDriverSetup(container, uiPort, shared, null);
+            return new WebDriverSetup(centralModule, container, uiPort, shared, null);
         } else {
             // single webdriver instance for much better performance
-            File geckoDriverExecutable = downloadGeckoDriverIfNeeded();
-            System.setProperty("webdriver.gecko.driver",
-                    geckoDriverExecutable.getAbsolutePath());
-            WebDriver driver = new FirefoxDriver();
+            WebDriver driver;
+            if (USE_JBROWSER_DRIVER) {
+                driver = new JBrowserDriver();
+            } else {
+                File geckoDriverExecutable = downloadGeckoDriverIfNeeded();
+                System.setProperty("webdriver.gecko.driver",
+                        geckoDriverExecutable.getAbsolutePath());
+                driver = new FirefoxDriver();
+            }
             // 768 is bootstrap media query breakpoint for screen-sm-min
             // 992 is bootstrap media query breakpoint for screen-md-min
             // 1200 is bootstrap media query breakpoint for screen-lg-min
             driver.manage().window().setSize(new Dimension(1200, 800));
-            return new WebDriverSetup(container, uiPort, shared, driver);
+            return new WebDriverSetup(centralModule, container, uiPort, shared, driver);
         }
     }
 
-    private static Container createContainer(int uiPort, File baseDir) throws Exception {
-        File adminFile = new File(baseDir, "admin.json");
-        Files.write("{\"web\":{\"port\":" + uiPort + "}}", adminFile, Charsets.UTF_8);
+    private static Container createContainer(int uiPort, File testDir) throws Exception {
+        File adminFile = new File(testDir, "admin.json");
+        Files.asCharSink(adminFile, UTF_8).write("{\"web\":{\"port\":" + uiPort + "}}");
+        Container container;
         if (Containers.useJavaagent()) {
-            return new JavaagentContainer(baseDir, true,
-                    ImmutableList.of("-Dglowroot.collector.host="));
+            container = new JavaagentContainer(testDir, true, ImmutableList.of());
         } else {
-            return new LocalContainer(baseDir, true,
-                    ImmutableMap.of("glowroot.collector.host", ""));
+            container = new LocalContainer(testDir, true, ImmutableMap.of());
         }
+        // wait for UI to be available (UI starts asynchronously in order to not block startup)
+        CloseableHttpClient httpClient = HttpClients.custom()
+                .setRedirectStrategy(new DefaultRedirectStrategy())
+                .build();
+        Stopwatch stopwatch = Stopwatch.createStarted();
+        Exception lastException = null;
+        while (stopwatch.elapsed(SECONDS) < 10) {
+            HttpGet request = new HttpGet("http://localhost:" + uiPort);
+            try (CloseableHttpResponse response = httpClient.execute(request);
+                    InputStream content = response.getEntity().getContent()) {
+                ByteStreams.exhaust(content);
+                lastException = null;
+                break;
+            } catch (Exception e) {
+                lastException = e;
+            }
+        }
+        httpClient.close();
+        if (lastException != null) {
+            throw new IllegalStateException("Timed out waiting for Glowroot UI", lastException);
+        }
+        return container;
     }
 
-    private static Container createCentralAndContainer(int uiPort, File baseDir) throws Exception {
-        int grpcPort = getAvailablePort();
-        PrintWriter props = new PrintWriter("glowroot-central.properties");
+    private static CentralModule createCentralModule(int uiPort, int grpcPort) throws Exception {
+        File centralDir = new File("target");
+        File propsFile = new File(centralDir, "glowroot-central.properties");
+        PrintWriter props = new PrintWriter(propsFile);
         props.println("cassandra.keyspace=glowroot_unit_tests");
-        props.println("grpc.port=" + grpcPort);
+        byte[] bytes = new byte[16];
+        new SecureRandom().nextBytes(bytes);
+        props.println("cassandra.symmetricEncryptionKey="
+                + BaseEncoding.base16().lowerCase().encode(bytes));
+        props.println("grpc.httpPort=" + grpcPort);
         props.println("ui.port=" + uiPort);
         props.close();
-        Class<?> bootstrapClass = Class.forName("org.glowroot.central.Bootstrap");
-        Method mainMethod = bootstrapClass.getMethod("main", String[].class);
-        mainMethod.invoke(null, (Object) new String[] {"start"});
+        String prior = System.getProperty("glowroot.log.dir");
+        try {
+            System.setProperty("glowroot.log.dir", "target");
+            return CentralModule.create(centralDir);
+        } finally {
+            if (prior == null) {
+                System.clearProperty("glowroot.log.dir");
+            } else {
+                System.setProperty("glowroot.log.dir", prior);
+            }
+        }
+    }
+
+    private static Container createContainerReportingToCentral(int grpcPort, File testDir)
+            throws Exception {
         if (Containers.useJavaagent()) {
             // -Xmx is to limit memory usage on travis-ci builds
-            return new JavaagentContainer(baseDir, false,
-                    ImmutableList.of("-Dglowroot.collector.host=localhost",
-                            "-Dglowroot.collector.port=" + grpcPort, "-Xmx64m"));
+            return new JavaagentContainer(testDir, false, ImmutableList
+                    .of("-Dglowroot.collector.address=localhost:" + grpcPort, "-Xmx64m"));
         } else {
-            return new LocalContainer(baseDir, false,
-                    ImmutableMap.of("glowroot.collector.host", "localhost",
-                            "glowroot.collector.port", Integer.toString(grpcPort)));
+            return new LocalContainer(testDir, false, ImmutableMap.of("glowroot.collector.address",
+                    "localhost:" + Integer.toString(grpcPort)));
         }
     }
 
@@ -287,28 +345,39 @@ public class WebDriverSetup {
         }
         File targetDir = new File("target");
         targetDir.mkdir();
-        File geckoDriverExecutable = new File(targetDir, "geckodriver" + optionalExt);
+        File geckoDriverExecutable =
+                new File(targetDir, "geckodriver-" + GECKO_DRIVER_VERSION + optionalExt);
         if (!geckoDriverExecutable.exists()) {
-            downloadAndExtractGeckoDriver(targetDir, downloadFilenameSuffix, downloadFilenameExt,
-                    archiver);
+            try {
+                downloadAndExtractGeckoDriver(targetDir, downloadFilenameSuffix,
+                        downloadFilenameExt,
+                        optionalExt, archiver);
+            } catch (EOFException e) {
+                // partial download, try again
+                System.out.println("Retrying...");
+                downloadAndExtractGeckoDriver(targetDir, downloadFilenameSuffix,
+                        downloadFilenameExt, optionalExt, archiver);
+            }
 
         }
         return geckoDriverExecutable;
     }
 
     private static void downloadAndExtractGeckoDriver(File directory, String downloadFilenameSuffix,
-            String downloadFilenameExt, Archiver archiver) throws IOException {
+            String downloadFilenameExt, String optionalExt, Archiver archiver) throws IOException {
         // using System.out to make sure user sees why there is a delay here
-        System.out.print("Downloading Mozilla geckodriver " + GECKO_DRIVER_VERSION + " ...");
+        System.out.print("Downloading Mozilla geckodriver " + GECKO_DRIVER_VERSION + "...");
         URL url = new URL("https://github.com/mozilla/geckodriver/releases/download/v"
-                + GECKO_DRIVER_VERSION + "/geckodriver-v" + GECKO_DRIVER_VERSION + "-"
-                + downloadFilenameSuffix + "." + downloadFilenameExt);
+                + GECKO_DRIVER_VERSION + "/geckodriver-v" + GECKO_DRIVER_VERSION + '-'
+                + downloadFilenameSuffix + '.' + downloadFilenameExt);
         InputStream in = url.openStream();
-        File archiveFile = File.createTempFile("geckodriver-" + GECKO_DRIVER_VERSION + "-",
-                "." + downloadFilenameExt);
+        File archiveFile = File.createTempFile("geckodriver-" + GECKO_DRIVER_VERSION + '-',
+                '.' + downloadFilenameExt);
         Files.asByteSink(archiveFile).writeFrom(in);
         in.close();
         archiver.extract(archiveFile, directory);
+        Files.move(new File(directory, "geckodriver" + optionalExt),
+                new File(directory, "geckodriver-" + GECKO_DRIVER_VERSION + optionalExt));
         archiveFile.delete();
         System.out.println(" OK");
     }

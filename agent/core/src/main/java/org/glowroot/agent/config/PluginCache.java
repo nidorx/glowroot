@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2016 the original author or authors.
+ * Copyright 2014-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,25 +23,24 @@ import java.net.URL;
 import java.util.List;
 import java.util.Locale;
 
-import javax.annotation.Nullable;
-
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.google.common.io.Resources;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.glowroot.common.util.ObjectMappers;
 
+import static com.google.common.base.Charsets.UTF_8;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 @Value.Immutable
@@ -61,24 +60,22 @@ public abstract class PluginCache {
     public abstract ImmutableList<File> pluginJars();
     public abstract ImmutableList<PluginDescriptor> pluginDescriptors();
 
-    public static PluginCache create(@Nullable File glowrootJarFile, boolean offline)
+    public static PluginCache create(@Nullable File pluginsDir, boolean offlineViewer)
             throws Exception {
         ImmutablePluginCache.Builder builder = ImmutablePluginCache.builder();
         List<URL> descriptorURLs = Lists.newArrayList();
-        if (glowrootJarFile != null) {
-            List<File> pluginJars = getPluginJars(glowrootJarFile);
-            builder.addAllPluginJars(pluginJars);
-            for (File pluginJar : pluginJars) {
-                descriptorURLs.add(
-                        new URL("jar:" + pluginJar.toURI() + "!/META-INF/glowroot.plugin.json"));
-            }
-            for (File file : getStandaloneDescriptors(glowrootJarFile)) {
-                descriptorURLs.add(file.toURI().toURL());
-            }
+        List<File> pluginJars = getPluginJars(pluginsDir);
+        builder.addAllPluginJars(pluginJars);
+        for (File pluginJar : pluginJars) {
+            descriptorURLs
+                    .add(new URL("jar:" + pluginJar.toURI() + "!/META-INF/glowroot.plugin.json"));
+        }
+        for (File file : getStandaloneDescriptors(pluginsDir)) {
+            descriptorURLs.add(file.toURI().toURL());
         }
         // also add descriptors on the class path (this is primarily for integration tests)
         descriptorURLs.addAll(getResources("META-INF/glowroot.plugin.json"));
-        if (offline) {
+        if (offlineViewer) {
             builder.addAllPluginDescriptors(createForOfflineViewer(descriptorURLs));
         } else {
             builder.addAllPluginDescriptors(readPluginDescriptors(descriptorURLs));
@@ -94,9 +91,7 @@ public abstract class PluginCache {
         return builder.build();
     }
 
-    private static ImmutableList<File> getPluginJars(File glowrootJarFile)
-            throws URISyntaxException, IOException {
-        File pluginsDir = getPluginsDir(glowrootJarFile);
+    private static ImmutableList<File> getPluginJars(@Nullable File pluginsDir) {
         if (pluginsDir == null) {
             return ImmutableList.of();
         }
@@ -113,9 +108,7 @@ public abstract class PluginCache {
         return ImmutableList.copyOf(pluginJars);
     }
 
-    private static ImmutableList<File> getStandaloneDescriptors(File glowrootJarFile)
-            throws IOException, URISyntaxException {
-        File pluginsDir = getPluginsDir(glowrootJarFile);
+    private static ImmutableList<File> getStandaloneDescriptors(@Nullable File pluginsDir) {
         if (pluginsDir == null) {
             return ImmutableList.of();
         }
@@ -130,16 +123,6 @@ public abstract class PluginCache {
             return ImmutableList.of();
         }
         return ImmutableList.copyOf(pluginDescriptorFiles);
-    }
-
-    private static @Nullable File getPluginsDir(File glowrootJarFile)
-            throws IOException, URISyntaxException {
-        File pluginsDir = new File(glowrootJarFile.getParentFile(), "plugins");
-        if (!pluginsDir.exists()) {
-            // it is ok to run without any plugins
-            return null;
-        }
-        return pluginsDir;
     }
 
     private static ImmutableList<URL> getResources(String resourceName) throws IOException {
@@ -167,7 +150,7 @@ public abstract class PluginCache {
         List<PluginDescriptor> pluginDescriptors = Lists.newArrayList();
         for (URL url : descriptorURLs) {
             try {
-                String content = Resources.toString(url, Charsets.UTF_8);
+                String content = Resources.toString(url, UTF_8);
                 PluginDescriptor pluginDescriptor =
                         mapper.readValue(content, ImmutablePluginDescriptor.class);
                 pluginDescriptors.add(pluginDescriptor);
@@ -191,7 +174,7 @@ public abstract class PluginCache {
             return leftName.compareToIgnoreCase(rightName);
         }
 
-        private String stripEndingIgnoreCase(String original, String ending) {
+        private static String stripEndingIgnoreCase(String original, String ending) {
             if (original.toUpperCase(Locale.ENGLISH).endsWith(ending.toUpperCase(Locale.ENGLISH))) {
                 return original.substring(0, original.length() - ending.length());
             } else {

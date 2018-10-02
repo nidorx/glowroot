@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2017 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,37 +23,46 @@ import java.util.List;
 import java.util.Set;
 import java.util.TimeZone;
 
-import javax.annotation.Nullable;
-
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
-import com.google.common.collect.ImmutableList;
+import com.google.common.base.Predicate;
+import com.google.common.base.Strings;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
 import com.google.common.io.CharStreams;
 import io.netty.handler.codec.http.HttpResponseStatus;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 
+import org.glowroot.common.live.ImmutableAggregateQuery;
 import org.glowroot.common.live.ImmutableOverviewAggregate;
 import org.glowroot.common.live.ImmutablePercentileAggregate;
 import org.glowroot.common.live.ImmutableThroughputAggregate;
-import org.glowroot.common.live.ImmutableTransactionQuery;
+import org.glowroot.common.live.LiveAggregateRepository.AggregateQuery;
 import org.glowroot.common.live.LiveAggregateRepository.OverviewAggregate;
 import org.glowroot.common.live.LiveAggregateRepository.PercentileAggregate;
 import org.glowroot.common.live.LiveAggregateRepository.ThroughputAggregate;
-import org.glowroot.common.live.LiveAggregateRepository.TransactionQuery;
 import org.glowroot.common.model.LazyHistogram;
-import org.glowroot.common.repo.AgentRepository;
-import org.glowroot.common.repo.AggregateRepository;
-import org.glowroot.common.repo.GaugeValueRepository;
-import org.glowroot.common.repo.GaugeValueRepository.Gauge;
-import org.glowroot.common.repo.Utils;
+import org.glowroot.common.util.CaptureTimes;
 import org.glowroot.common.util.ObjectMappers;
+import org.glowroot.common2.repo.ActiveAgentRepository;
+import org.glowroot.common2.repo.AggregateRepository;
+import org.glowroot.common2.repo.ConfigRepository;
+import org.glowroot.common2.repo.GaugeValueRepository;
+import org.glowroot.common2.repo.GaugeValueRepository.Gauge;
+import org.glowroot.common2.repo.TransactionTypeRepository;
+import org.glowroot.common2.repo.util.RollupLevelService;
+import org.glowroot.common2.repo.util.RollupLevelService.DataKind;
 import org.glowroot.ui.GaugeValueJsonService.GaugeOrdering;
 import org.glowroot.ui.HttpSessionManager.Authentication;
-import org.glowroot.wire.api.model.CollectorServiceOuterClass.GaugeValue;
+import org.glowroot.ui.LayoutJsonService.AgentRollupSmall;
+import org.glowroot.ui.LayoutService.FilteredAgentRollup;
+import org.glowroot.ui.LayoutService.Permissions;
+import org.glowroot.wire.api.model.CollectorServiceOuterClass.GaugeValueMessage.GaugeValue;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
@@ -63,60 +72,97 @@ import static java.util.concurrent.TimeUnit.HOURS;
 @JsonService
 class ReportJsonService {
 
-    private static final String RESPONSE_TIME_AVG = "transaction:response-time-avg";
-    private static final String RESPONSE_TIME_PERCENTILE = "transaction:response-time-percentile";
-    private static final String THROUGHPUT = "transaction:throughput";
-
     private static final double NANOSECONDS_PER_MILLISECOND = 1000000.0;
 
     private static final ObjectMapper mapper = ObjectMappers.create();
 
+    private final ConfigRepository configRepository;
+    private final ActiveAgentRepository activeAgentRepository;
+    private final TransactionTypeRepository transactionTypeRepository;
     private final AggregateRepository aggregateRepository;
-    private final AgentRepository agentRepository;
     private final GaugeValueRepository gaugeValueRepository;
+    private final RollupLevelService rollupLevelService;
 
-    ReportJsonService(AggregateRepository aggregateRepository, AgentRepository agentRepository,
-            GaugeValueRepository gaugeValueRepository) {
+    ReportJsonService(ConfigRepository configRepository,
+            ActiveAgentRepository activeAgentRepository,
+            TransactionTypeRepository transactionTypeRepository,
+            AggregateRepository aggregateRepository, GaugeValueRepository gaugeValueRepository,
+            RollupLevelService rollupLevelService) {
+        this.configRepository = configRepository;
+        this.activeAgentRepository = activeAgentRepository;
+        this.transactionTypeRepository = transactionTypeRepository;
         this.aggregateRepository = aggregateRepository;
-        this.agentRepository = agentRepository;
         this.gaugeValueRepository = gaugeValueRepository;
+        this.rollupLevelService = rollupLevelService;
+    }
+
+    @GET(path = "/backend/report/agent-rollups", permission = "")
+    String getAllAgentRollups(@BindRequest AgentRollupReportRequest request,
+            @BindAuthentication Authentication authentication) throws Exception {
+        TimeZone timeZone = TimeZone.getTimeZone(request.timeZoneId());
+        FromToPair fromToPair = parseDates(request.fromDate(), request.toDate(), timeZone);
+        Date from = fromToPair.from();
+        Date to = fromToPair.to();
+        List<FilteredAgentRollup> agentRollups = LayoutJsonService.filter(
+                activeAgentRepository.readActiveAgentRollups(from.getTime(), to.getTime()),
+                authentication, new Predicate<Permissions>() {
+                    @Override
+                    public boolean apply(@Nullable Permissions permissions) {
+                        return permissions != null && permissions.transaction().overview()
+                                && permissions.error().overview() && permissions.jvm().gauges();
+                    }
+                });
+        List<AgentRollupSmall> dropdown = Lists.newArrayList();
+        for (FilteredAgentRollup agentRollup : agentRollups) {
+            LayoutJsonService.process(agentRollup, 0, dropdown);
+        }
+        return mapper.writeValueAsString(dropdown);
     }
 
     // permission is checked based on agentRollupIds in the request
-    @GET(path = "/backend/report/all-gauges", permission = "")
-    String getGauges(@BindRequest RequestWithAgentRollupIds request,
+    @GET(path = "/backend/report/transaction-types-and-gauges", permission = "")
+    String getAllGauges(@BindRequest TransactionTypesAndGaugesRequest request,
             @BindAuthentication Authentication authentication) throws Exception {
+        checkPermissions(request.agentRollupIds(), "agent:transaction:overview", authentication);
         checkPermissions(request.agentRollupIds(), "agent:jvm:gauges", authentication);
+
+        TimeZone timeZone = TimeZone.getTimeZone(request.timeZoneId());
+        FromToPair fromToPair = parseDates(request.fromDate(), request.toDate(), timeZone);
+        Date from = fromToPair.from();
+        Date to = fromToPair.to();
+
+        Set<String> transactionTypes = Sets.newHashSet();
         Set<Gauge> gauges = Sets.newHashSet();
         for (String agentRollupId : request.agentRollupIds()) {
-            gauges.addAll(gaugeValueRepository.getGauges(agentRollupId));
+            transactionTypes.addAll(transactionTypeRepository.read(agentRollupId));
+            gauges.addAll(
+                    gaugeValueRepository.getGauges(agentRollupId, from.getTime(), to.getTime()));
         }
-        ImmutableList<Gauge> sortedGauges = new GaugeOrdering().immutableSortedCopy(gauges);
-        return mapper.writeValueAsString(sortedGauges);
+        return mapper.writeValueAsString(ImmutableTransactionTypesAndGaugesReponse.builder()
+                .addAllTransactionTypes(Ordering.natural().sortedCopy(transactionTypes))
+                .addAllGauges(new GaugeOrdering().sortedCopy(gauges))
+                .build());
     }
 
     // permission is checked based on agentRollupIds in the request
     @GET(path = "/backend/report", permission = "")
     String getReport(@BindRequest ReportRequest request,
             @BindAuthentication Authentication authentication) throws Exception {
-        String metricId = request.metricId();
-        if (metricId.startsWith("transaction:")) {
+        String metric = request.metric();
+        if (metric.startsWith("transaction:")) {
             checkPermissions(request.agentRollupIds(), "agent:transaction:overview",
                     authentication);
-        } else if (metricId.startsWith("gauge:")) {
+        } else if (metric.startsWith("error:")) {
+            checkPermissions(request.agentRollupIds(), "agent:error:overview", authentication);
+        } else if (metric.startsWith("gauge:")) {
             checkPermissions(request.agentRollupIds(), "agent:jvm:gauges", authentication);
         } else {
-            throw new IllegalStateException("Unexpected metric id: " + metricId);
+            throw new IllegalStateException("Unexpected metric: " + metric);
         }
         TimeZone timeZone = TimeZone.getTimeZone(request.timeZoneId());
-        SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyyMMdd");
-        simpleDateFormat.setTimeZone(timeZone);
-        Date from = simpleDateFormat.parse(request.fromDate());
-        Date to = simpleDateFormat.parse(request.toDate());
-        Calendar cal = Calendar.getInstance();
-        cal.setTime(to);
-        cal.add(Calendar.DATE, 1);
-        to = cal.getTime();
+        FromToPair fromToPair = parseDates(request.fromDate(), request.toDate(), timeZone);
+        Date from = fromToPair.from();
+        Date to = fromToPair.to();
 
         RollupCaptureTimeFn rollupCaptureTimeFn =
                 new RollupCaptureTimeFn(request.rollup(), timeZone, request.fromDate());
@@ -140,69 +186,118 @@ class ReportJsonService {
         }
 
         List<DataSeries> dataSeriesList;
-        if (metricId.startsWith("transaction:")) {
-            dataSeriesList = getTransactionReport(request, timeZone, from, to, rollupCaptureTimeFn,
-                    gapMillis, metricId);
-        } else if (metricId.startsWith("gauge:")) {
-            String gaugeName = metricId.substring("gauge:".length());
+        long dataPointIntervalMillis;
+        if (metric.startsWith("transaction:") || metric.startsWith("error:")) {
+            int rollupLevel =
+                    rollupLevelService.getRollupLevelForReport(from.getTime(), DataKind.GENERAL);
+            // level 2 (30 min intervals) is the minimum level needed
+            rollupLevel = Math.max(rollupLevel, 2);
+            if (rollupLevel == 3) {
+                verifyFourHourAggregateTimeZone(timeZone);
+            }
+            dataSeriesList = getTransactionReport(request, timeZone, from, to, rollupLevel,
+                    rollupCaptureTimeFn, gapMillis);
+            dataPointIntervalMillis =
+                    configRepository.getRollupConfigs().get(rollupLevel).intervalMillis();
+        } else if (metric.startsWith("gauge:")) {
+            int rollupLevel = rollupLevelService.getGaugeRollupLevelForReport(from.getTime());
+            // level 3 (30 min intervals) is the minimum level needed
+            rollupLevel = Math.max(rollupLevel, 3);
+            if (rollupLevel == 4) {
+                verifyFourHourAggregateTimeZone(timeZone);
+            }
+            String gaugeName = metric.substring("gauge:".length());
             dataSeriesList = Lists.newArrayList();
             for (String agentRollupId : request.agentRollupIds()) {
-                // FIXME, rollup level 2 is nice since 30 min intervals
-                // but need level 3 for long time periods
-                int rollupLevel = 2;
                 dataSeriesList.add(getDataSeriesForGauge(agentRollupId, gaugeName, from, to,
                         rollupLevel, rollupCaptureTimeFn, request.rollup(), timeZone, gapMillis));
             }
+            if (rollupLevel == 0) {
+                dataPointIntervalMillis = configRepository.getGaugeCollectionIntervalMillis();
+            } else {
+                dataPointIntervalMillis =
+                        configRepository.getRollupConfigs().get(rollupLevel - 1).intervalMillis();
+            }
         } else {
-            throw new IllegalStateException("Unexpected metric id: " + metricId);
+            throw new IllegalStateException("Unexpected metric: " + metric);
         }
 
         StringBuilder sb = new StringBuilder();
         JsonGenerator jg = mapper.getFactory().createGenerator(CharStreams.asWriter(sb));
-        jg.writeStartObject();
-        jg.writeObjectField("dataSeries", dataSeriesList);
-        jg.writeEndObject();
-        jg.close();
+        try {
+            jg.writeStartObject();
+            jg.writeObjectField("dataSeries", dataSeriesList);
+            jg.writeNumberField("dataPointIntervalMillis", dataPointIntervalMillis);
+            jg.writeEndObject();
+        } finally {
+            jg.close();
+        }
         return sb.toString();
     }
 
+    private static FromToPair parseDates(String fromDate, String toDate, TimeZone timeZone)
+            throws ParseException {
+        SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyyMMdd");
+        simpleDateFormat.setTimeZone(timeZone);
+        Date from = simpleDateFormat.parse(fromDate);
+        Date to = simpleDateFormat.parse(toDate);
+        Calendar cal = Calendar.getInstance();
+        cal.setTime(to);
+        cal.add(Calendar.DATE, 1);
+        to = cal.getTime();
+        return ImmutableFromToPair.builder()
+                .from(from)
+                .to(to)
+                .build();
+    }
+
     private List<DataSeries> getTransactionReport(ReportRequest request, TimeZone timeZone,
-            Date from, Date to, RollupCaptureTimeFn rollupCaptureTimeFn, double gapMillis,
-            String metricId) throws Exception {
-        TransactionQuery query = ImmutableTransactionQuery.builder()
+            Date from, Date to, int rollupLevel, RollupCaptureTimeFn rollupCaptureTimeFn,
+            double gapMillis) throws Exception {
+        AggregateQuery query = ImmutableAggregateQuery.builder()
                 .transactionType(checkNotNull(request.transactionType()))
+                .transactionName(Strings.emptyToNull(checkNotNull(request.transactionName())))
                 // + 1 to make from non-inclusive, since data points are displayed as midpoint of
                 // time range
                 .from(from.getTime() + 1)
                 .to(to.getTime())
-                .rollupLevel(2) // FIXME, level 2 is nice since 30 min intervals
-                                // but need level 3 for long time periods
+                .rollupLevel(rollupLevel)
                 .build();
         List<DataSeries> dataSeriesList = Lists.newArrayList();
+        String metric = request.metric();
         for (String agentRollupId : request.agentRollupIds()) {
-            if (metricId.equals(RESPONSE_TIME_AVG)) {
+            if (metric.equals("transaction:average")) {
                 dataSeriesList.add(getDataSeriesForAverage(agentRollupId, query,
                         rollupCaptureTimeFn, request.rollup(), timeZone, gapMillis));
-            } else if (metricId.equals(RESPONSE_TIME_PERCENTILE)) {
+            } else if (metric.equals("transaction:x-percentile")) {
                 dataSeriesList.add(getDataSeriesForPercentile(agentRollupId, query,
-                        checkNotNull(request.metricPercentile()), rollupCaptureTimeFn,
+                        checkNotNull(request.percentile()), rollupCaptureTimeFn,
                         request.rollup(), timeZone, gapMillis));
-            } else if (metricId.equals(THROUGHPUT)) {
+            } else if (metric.equals("transaction:count")) {
                 dataSeriesList.add(getDataSeriesForThroughput(agentRollupId, query,
-                        rollupCaptureTimeFn, request.rollup(), timeZone, gapMillis));
+                        rollupCaptureTimeFn, request.rollup(), timeZone, gapMillis,
+                        new CountCalculator()));
+            } else if (metric.equals("error:rate")) {
+                dataSeriesList.add(getDataSeriesForThroughput(agentRollupId, query,
+                        rollupCaptureTimeFn, request.rollup(), timeZone, gapMillis,
+                        new ErrorRateCalculator()));
+            } else if (metric.equals("error:count")) {
+                dataSeriesList.add(getDataSeriesForThroughput(agentRollupId, query,
+                        rollupCaptureTimeFn, request.rollup(), timeZone, gapMillis,
+                        new ErrorCountCalculator()));
             } else {
-                throw new IllegalStateException("Unexpected metric id: " + metricId);
+                throw new IllegalStateException("Unexpected metric: " + metric);
             }
         }
         return dataSeriesList;
     }
 
-    private DataSeries getDataSeriesForAverage(String agentRollupId, TransactionQuery query,
+    private DataSeries getDataSeriesForAverage(String agentRollupId, AggregateQuery query,
             RollupCaptureTimeFn rollupCaptureTimeFn, ROLLUP rollup,
             TimeZone timeZone, double gapMillis) throws Exception {
 
         DataSeries dataSeries =
-                new DataSeries(agentRepository.readAgentRollupDisplay(agentRollupId));
+                new DataSeries(configRepository.readAgentRollupDisplay(agentRollupId));
         List<OverviewAggregate> aggregates =
                 aggregateRepository.readOverviewAggregates(agentRollupId, query);
         aggregates =
@@ -210,7 +305,7 @@ class ReportJsonService {
         if (aggregates.isEmpty()) {
             return dataSeries;
         }
-        OverviewAggregate lastAggregate = aggregates.get(aggregates.size() - 1);
+        OverviewAggregate lastAggregate = Iterables.getLast(aggregates);
         long lastCaptureTime = lastAggregate.captureTime();
         long lastRollupCaptureTime = rollupCaptureTimeFn.apply(lastCaptureTime);
         if (lastCaptureTime != lastRollupCaptureTime) {
@@ -244,11 +339,11 @@ class ReportJsonService {
         return dataSeries;
     }
 
-    private DataSeries getDataSeriesForPercentile(String agentRollupId, TransactionQuery query,
+    private DataSeries getDataSeriesForPercentile(String agentRollupId, AggregateQuery query,
             double percentile, RollupCaptureTimeFn rollupCaptureTimeFn, ROLLUP rollup,
             TimeZone timeZone, double gapMillis) throws Exception {
         DataSeries dataSeries =
-                new DataSeries(agentRepository.readAgentRollupDisplay(agentRollupId));
+                new DataSeries(configRepository.readAgentRollupDisplay(agentRollupId));
         List<PercentileAggregate> aggregates =
                 aggregateRepository.readPercentileAggregates(agentRollupId, query);
         aggregates = TransactionCommonService.rollUpPercentileAggregates(aggregates,
@@ -256,7 +351,7 @@ class ReportJsonService {
         if (aggregates.isEmpty()) {
             return dataSeries;
         }
-        PercentileAggregate lastAggregate = aggregates.get(aggregates.size() - 1);
+        PercentileAggregate lastAggregate = Iterables.getLast(aggregates);
         long lastCaptureTime = lastAggregate.captureTime();
         long lastRollupCaptureTime = rollupCaptureTimeFn.apply(lastCaptureTime);
         if (lastCaptureTime != lastRollupCaptureTime) {
@@ -287,11 +382,11 @@ class ReportJsonService {
         return dataSeries;
     }
 
-    private DataSeries getDataSeriesForThroughput(String agentRollupId, TransactionQuery query,
+    private DataSeries getDataSeriesForThroughput(String agentRollupId, AggregateQuery query,
             RollupCaptureTimeFn rollupCaptureTimeFn, ROLLUP rollup, TimeZone timeZone,
-            double gapMillis) throws Exception {
+            double gapMillis, ThroughputAggregateFn throughputAggregateFn) throws Exception {
         DataSeries dataSeries =
-                new DataSeries(agentRepository.readAgentRollupDisplay(agentRollupId));
+                new DataSeries(configRepository.readAgentRollupDisplay(agentRollupId));
         List<ThroughputAggregate> aggregates =
                 aggregateRepository.readThroughputAggregates(agentRollupId, query);
         aggregates = TransactionCommonService.rollUpThroughputAggregates(aggregates,
@@ -299,7 +394,7 @@ class ReportJsonService {
         if (aggregates.isEmpty()) {
             return dataSeries;
         }
-        ThroughputAggregate lastAggregate = aggregates.get(aggregates.size() - 1);
+        ThroughputAggregate lastAggregate = Iterables.getLast(aggregates);
         long lastCaptureTime = lastAggregate.captureTime();
         long lastRollupCaptureTime = rollupCaptureTimeFn.apply(lastCaptureTime);
         if (lastCaptureTime != lastRollupCaptureTime) {
@@ -308,26 +403,25 @@ class ReportJsonService {
                     .captureTime(lastRollupCaptureTime)
                     .build());
         }
-        long transactionCount = 0;
-        long totalIntervalMillis = 0;
         ThroughputAggregate priorAggregate = null;
         for (ThroughputAggregate aggregate : aggregates) {
+            long rollupIntervalMillis =
+                    getRollupIntervalMillis(rollup, timeZone, aggregate.captureTime());
+            Double value = throughputAggregateFn.getValue(aggregate, rollupIntervalMillis);
+            if (value == null) {
+                continue;
+            }
             if (priorAggregate != null
                     && aggregate.captureTime() - priorAggregate.captureTime() > gapMillis) {
                 dataSeries.addNull();
             }
-            long rollupIntervalMillis =
-                    getRollupIntervalMillis(rollup, timeZone, aggregate.captureTime());
-            dataSeries.add(getIntervalAverage(rollup, timeZone, aggregate.captureTime()),
-                    60000.0 * aggregate.transactionCount() / rollupIntervalMillis);
-            transactionCount += aggregate.transactionCount();
-            totalIntervalMillis += rollupIntervalMillis;
+            dataSeries.add(getIntervalAverage(rollup, timeZone, aggregate.captureTime()), value);
             priorAggregate = aggregate;
         }
-        // individual aggregate intervals are non-zero, and aggregates is non-empty
-        // (see above conditional), so totalIntervalMillis is guaranteed non-zero
-        checkState(totalIntervalMillis != 0);
-        dataSeries.setOverall(60000.0 * transactionCount / totalIntervalMillis);
+        Double overall = throughputAggregateFn.getOverall();
+        if (overall != null) {
+            dataSeries.setOverall(overall);
+        }
         return dataSeries;
     }
 
@@ -335,7 +429,7 @@ class ReportJsonService {
             Date to, int rollupLevel, RollupCaptureTimeFn rollupCaptureTimeFn, ROLLUP rollup,
             TimeZone timeZone, double gapMillis) throws Exception {
         DataSeries dataSeries =
-                new DataSeries(agentRepository.readAgentRollupDisplay(agentRollupId));
+                new DataSeries(configRepository.readAgentRollupDisplay(agentRollupId));
         // from + 1 to make from non-inclusive, since data points are displayed as midpoint of
         // time range
         List<GaugeValue> gaugeValues = gaugeValueRepository.readGaugeValues(agentRollupId,
@@ -345,7 +439,7 @@ class ReportJsonService {
         if (gaugeValues.isEmpty()) {
             return dataSeries;
         }
-        GaugeValue lastGaugeValue = gaugeValues.get(gaugeValues.size() - 1);
+        GaugeValue lastGaugeValue = Iterables.getLast(gaugeValues);
         long lastCaptureTime = lastGaugeValue.getCaptureTime();
         long lastRollupCaptureTime = rollupCaptureTimeFn.apply(lastCaptureTime);
         if (lastCaptureTime != lastRollupCaptureTime) {
@@ -377,11 +471,21 @@ class ReportJsonService {
     }
 
     private static void checkPermissions(List<String> agentRollupIds, String permission,
-            Authentication authentication) {
+            Authentication authentication) throws Exception {
         for (String agentRollupId : agentRollupIds) {
-            if (!authentication.isAgentPermitted(agentRollupId, permission)) {
+            if (!authentication.isPermittedForAgentRollup(agentRollupId, permission)) {
                 throw new JsonServiceException(HttpResponseStatus.FORBIDDEN);
             }
+        }
+    }
+
+    private static void verifyFourHourAggregateTimeZone(TimeZone timeZone) {
+        boolean gmt = timeZone.getID().equals("GMT") || timeZone.getID().startsWith("GMT-")
+                || timeZone.getID().startsWith("GMT+");
+        if (!gmt || timeZone.getRawOffset() % (4 * 3600000) != 0) {
+            throw new IllegalStateException("The selected time zone is not supported because the"
+                    + " time range exceeds the configured retention for 30-minute interval data and"
+                    + " so 4-hour interval data must be used instead");
         }
     }
 
@@ -416,22 +520,48 @@ class ReportJsonService {
     }
 
     @Value.Immutable
-    interface RequestWithAgentRollupIds {
+    interface AgentRollupReportRequest {
+        String fromDate();
+        String toDate();
+        String timeZoneId();
+    }
+
+    @Value.Immutable
+    interface TransactionTypesAndGaugesRequest {
         List<String> agentRollupIds();
+        String fromDate();
+        String toDate();
+        String timeZoneId();
+    }
+
+    @Value.Immutable
+    interface TransactionTypesAndGaugesReponse {
+        List<String> transactionTypes();
+        List<Gauge> gauges();
     }
 
     @Value.Immutable
     interface ReportRequest {
         List<String> agentRollupIds();
-        String metricId();
-        @Nullable
-        Double metricPercentile();
+
+        String metric();
         @Nullable
         String transactionType();
+        @Nullable
+        String transactionName();
+        @Nullable
+        Double percentile();
+
         String fromDate();
         String toDate();
         ROLLUP rollup();
         String timeZoneId();
+    }
+
+    @Value.Immutable
+    interface FromToPair {
+        Date from();
+        Date to();
     }
 
     enum ROLLUP {
@@ -467,7 +597,7 @@ class ReportJsonService {
             Calendar calendar;
             switch (rollup) {
                 case HOURLY:
-                    return Utils.getRollupCaptureTime(captureTime, HOURS.toMillis(1), timeZone);
+                    return CaptureTimes.getRollup(captureTime, HOURS.toMillis(1), timeZone);
                 case DAILY:
                     return getDailyRollupCaptureTime(captureTime).getTimeInMillis();
                 case WEEKLY:
@@ -512,6 +642,78 @@ class ReportJsonService {
                 calendar.add(Calendar.DATE, 1);
                 return calendar;
             }
+        }
+    }
+
+    // the methods return null when the function depends on error_count and the data is from
+    // glowroot central prior to 0.9.18 (when error_count was added to the
+    // aggregate_*_throughput_rollup_* tables)
+    private interface ThroughputAggregateFn {
+        @Nullable
+        Double getValue(ThroughputAggregate aggregate, long rollupIntervalMillis);
+        @Nullable
+        Double getOverall();
+    }
+
+    private static class CountCalculator implements ThroughputAggregateFn {
+
+        private long transactionCount;
+
+        @Override
+        public @Nullable Double getValue(ThroughputAggregate aggregate, long rollupIntervalMillis) {
+            transactionCount += aggregate.transactionCount();
+            return (double) aggregate.transactionCount();
+        }
+
+        @Override
+        public @Nullable Double getOverall() {
+            return (double) transactionCount;
+        }
+    }
+
+    private static class ErrorRateCalculator implements ThroughputAggregateFn {
+
+        private boolean hasErrorRate;
+        private long errorCount;
+        private long transactionCount;
+
+        @Override
+        public @Nullable Double getValue(ThroughputAggregate aggregate, long rollupIntervalMillis) {
+            Long errorCount = aggregate.errorCount();
+            if (errorCount == null) {
+                return null;
+            }
+            hasErrorRate = true;
+            this.errorCount += errorCount;
+            transactionCount += aggregate.transactionCount();
+            return (100.0 * errorCount) / aggregate.transactionCount();
+        }
+
+        @Override
+        public @Nullable Double getOverall() {
+            return hasErrorRate ? (100.0 * errorCount) / transactionCount : null;
+        }
+    }
+
+    private static class ErrorCountCalculator implements ThroughputAggregateFn {
+
+        private boolean hasErrorCount;
+        private long errorCount;
+
+        @Override
+        public @Nullable Double getValue(ThroughputAggregate aggregate, long rollupIntervalMillis) {
+            Long errorCount = aggregate.errorCount();
+            if (errorCount == null) {
+                return null;
+            }
+            this.errorCount += errorCount;
+            hasErrorCount = true;
+            return errorCount.doubleValue();
+        }
+
+        @Override
+        public @Nullable Double getOverall() {
+            return hasErrorCount ? (double) errorCount : null;
         }
     }
 }

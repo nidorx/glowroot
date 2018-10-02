@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -105,13 +105,13 @@ public class ExecutorIT {
 
         // then
         Trace.Header header = trace.getHeader();
-        assertThat(header.getAuxThreadRootTimerCount()).isEqualTo(1);
+        assertThat(header.hasAuxThreadRootTimer()).isTrue();
         assertThat(header.getAsyncTimerCount()).isZero();
-        assertThat(header.getAuxThreadRootTimer(0).getName()).isEqualTo("auxiliary thread");
-        assertThat(header.getAuxThreadRootTimer(0).getCount()).isEqualTo(3);
-        assertThat(header.getAuxThreadRootTimer(0).getTotalNanos())
+        assertThat(header.getAuxThreadRootTimer().getName()).isEqualTo("auxiliary thread");
+        assertThat(header.getAuxThreadRootTimer().getCount()).isEqualTo(3);
+        assertThat(header.getAuxThreadRootTimer().getTotalNanos())
                 .isGreaterThanOrEqualTo(MILLISECONDS.toNanos(500));
-        assertThat(header.getAuxThreadRootTimer(0).getChildTimerCount()).isZero();
+        assertThat(header.getAuxThreadRootTimer().getChildTimerCount()).isZero();
         assertThat(header.getEntryCount()).isZero();
     }
 
@@ -235,22 +235,22 @@ public class ExecutorIT {
             assertThat(header.getMainThreadRootTimer().getChildTimer(0).getCount())
                     .isLessThanOrEqualTo(3);
         }
-        assertThat(header.getAuxThreadRootTimerCount()).isEqualTo(1);
+        assertThat(header.hasAuxThreadRootTimer()).isTrue();
         assertThat(header.getAsyncTimerCount()).isZero();
-        assertThat(header.getAuxThreadRootTimer(0).getName()).isEqualTo("auxiliary thread");
+        assertThat(header.getAuxThreadRootTimer().getName()).isEqualTo("auxiliary thread");
         if (isAny) {
-            assertThat(header.getAuxThreadRootTimer(0).getCount()).isBetween(1L, 3L);
+            assertThat(header.getAuxThreadRootTimer().getCount()).isBetween(1L, 3L);
             // should be 100-300ms, but margin of error, esp. in travis builds is high
-            assertThat(header.getAuxThreadRootTimer(0).getTotalNanos())
+            assertThat(header.getAuxThreadRootTimer().getTotalNanos())
                     .isGreaterThanOrEqualTo(MILLISECONDS.toNanos(50));
         } else {
-            assertThat(header.getAuxThreadRootTimer(0).getCount()).isEqualTo(3);
+            assertThat(header.getAuxThreadRootTimer().getCount()).isEqualTo(3);
             // should be 300ms, but margin of error, esp. in travis builds is high
-            assertThat(header.getAuxThreadRootTimer(0).getTotalNanos())
+            assertThat(header.getAuxThreadRootTimer().getTotalNanos())
                     .isGreaterThanOrEqualTo(MILLISECONDS.toNanos(250));
         }
-        assertThat(header.getAuxThreadRootTimer(0).getChildTimerCount()).isEqualTo(1);
-        assertThat(header.getAuxThreadRootTimer(0).getChildTimer(0).getName())
+        assertThat(header.getAuxThreadRootTimer().getChildTimerCount()).isEqualTo(1);
+        assertThat(header.getAuxThreadRootTimer().getChildTimer(0).getName())
                 .isEqualTo("mock trace entry marker");
         List<Trace.Entry> entries = trace.getEntryList();
 
@@ -431,7 +431,7 @@ public class ExecutorIT {
                 @Override
                 public void run() {
                     try {
-                        Thread.sleep(200);
+                        MILLISECONDS.sleep(200);
                     } catch (InterruptedException e) {
                     }
                 }
@@ -440,7 +440,7 @@ public class ExecutorIT {
                 @Override
                 public void run() {
                     try {
-                        Thread.sleep(200);
+                        MILLISECONDS.sleep(200);
                     } catch (InterruptedException e) {
                     }
                 }
@@ -449,7 +449,7 @@ public class ExecutorIT {
                 @Override
                 public void run() {
                     try {
-                        Thread.sleep(200);
+                        MILLISECONDS.sleep(200);
                     } catch (InterruptedException e) {
                     }
                 }
@@ -478,7 +478,7 @@ public class ExecutorIT {
                 }
             });
             while (!future.isDone()) {
-                Thread.sleep(1);
+                MILLISECONDS.sleep(1);
             }
             future.get();
         }
@@ -770,7 +770,7 @@ public class ExecutorIT {
         @Override
         public void traceEntryMarker() {
             try {
-                Thread.sleep(100);
+                MILLISECONDS.sleep(100);
             } catch (InterruptedException e) {
             }
         }

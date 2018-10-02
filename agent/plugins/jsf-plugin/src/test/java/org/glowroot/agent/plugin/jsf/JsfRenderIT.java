@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import java.util.regex.Pattern;
 
 import com.ning.http.client.AsyncHttpClient;
 import com.ning.http.client.Response;
+import com.ning.http.client.cookie.Cookie;
 import org.apache.catalina.Context;
 import org.apache.catalina.loader.WebappLoader;
 import org.apache.catalina.startup.Tomcat;
@@ -36,6 +37,7 @@ import org.glowroot.agent.it.harness.Container;
 import org.glowroot.agent.it.harness.Containers;
 import org.glowroot.wire.api.model.TraceOuterClass.Trace;
 
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class JsfRenderIT {
@@ -60,7 +62,7 @@ public class JsfRenderIT {
     @Test
     public void shouldCaptureJsfRendering() throws Exception {
         // when
-        Trace trace = container.execute(GetHello.class);
+        Trace trace = container.execute(GetHello.class, "Web");
 
         // then
         Iterator<Trace.Entry> i = trace.getEntryList().iterator();
@@ -75,7 +77,7 @@ public class JsfRenderIT {
     @Test
     public void shouldCaptureJsfAction() throws Exception {
         // when
-        Trace trace = container.execute(PostHello.class);
+        Trace trace = container.execute(PostHello.class, "Web", "/hello.xhtml;xyz");
 
         // then
         Iterator<Trace.Entry> i = trace.getEntryList().iterator();
@@ -126,31 +128,57 @@ public class JsfRenderIT {
             AsyncHttpClient asyncHttpClient = new AsyncHttpClient();
             Response response = asyncHttpClient
                     .prepareGet("http://localhost:" + port + "/hello.xhtml").execute().get();
+            int statusCode = response.getStatusCode();
+            if (statusCode != 200) {
+                asyncHttpClient.close();
+                throw new IllegalStateException("Unexpected status code: " + statusCode);
+            }
             String body = response.getResponseBody();
             Matcher matcher =
                     Pattern.compile("action=\"/hello.xhtml;jsessionid=([0-9A-F]+)\"").matcher(body);
             matcher.find();
             String jsessionId = matcher.group(1);
-            matcher = Pattern.compile("id=\"j_id1:javax.faces.ViewState:0\" value=\"([^\"]+)\"")
+            StringBuilder sb = new StringBuilder();
+            matcher = Pattern
+                    .compile("<input type=\"hidden\" name=\"([^\"]+)\" value=\"([^\"]+)\" />")
                     .matcher(body);
             matcher.find();
-            String viewState = matcher.group(1).replace(":", "%3A");
-            String postBody =
-                    "j_idt4=j_idt4&j_idt4%3Aj_idt5=Hello&javax.faces.ViewState=" + viewState;
-            int statusCode = asyncHttpClient
+            sb.append(matcher.group(1));
+            sb.append("=");
+            sb.append(matcher.group(2));
+            matcher = Pattern
+                    .compile("<input type=\"submit\" name=\"([^\"]+)\" value=\"([^\"]+)\" />")
+                    .matcher(body);
+            matcher.find();
+            sb.append("&");
+            sb.append(matcher.group(1));
+            sb.append("=");
+            sb.append(matcher.group(2));
+            matcher = Pattern.compile("name=\"([^\"]+)\" id=\"[^\"]+\" value=\"([^\"]+)\"")
+                    .matcher(body);
+            matcher.find();
+            sb.append("&");
+            sb.append(matcher.group(1));
+            sb.append("=");
+            sb.append(matcher.group(2));
+            String postBody = sb.toString().replace(":", "%3A");
+            response = asyncHttpClient
+                    // ";xyz" is added to identify the second trace
                     .preparePost(
-                            "http://localhost:" + port + "/hello.xhtml;jsessionid=" + jsessionId)
+                            "http://localhost:" + port + "/hello.xhtml;xyz")
                     .setHeader("Content-Type", "application/x-www-form-urlencoded")
+                    .addCookie(Cookie.newValidCookie("JSESSIONID", jsessionId, "localhost",
+                            jsessionId, null, -1, -1, true, true))
                     .setBody(postBody)
                     .execute()
-                    .get()
-                    .getStatusCode();
+                    .get();
+            statusCode = response.getStatusCode();
             asyncHttpClient.close();
             if (statusCode != 200) {
                 throw new IllegalStateException("Unexpected status code: " + statusCode);
             }
             // sleep a bit to make sure the "last trace" is not the first http request from above
-            Thread.sleep(200);
+            MILLISECONDS.sleep(200);
         }
     }
 

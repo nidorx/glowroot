@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2016 the original author or authors.
+ * Copyright 2013-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,40 +15,36 @@
  */
 package org.glowroot.tests.config;
 
-import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 
-import org.glowroot.tests.util.Utils;
+import org.glowroot.tests.util.Page;
 
 import static org.openqa.selenium.By.xpath;
 
-public class TransactionConfigPage {
-
-    private final WebDriver driver;
+public class TransactionConfigPage extends Page {
 
     public TransactionConfigPage(WebDriver driver) {
-        this.driver = driver;
+        super(driver);
     }
 
     public WebElement getProfilingIntervalTextField() {
-        return withWait(xpath("//div[@gt-label='Profiling interval']//input"));
+        return getWithWait(xpath("//div[@gt-label='Profiling interval']//input"));
     }
 
     public WebElement getSlowThresholdTextField() {
-        return withWait(xpath("//div[@gt-label='Slow threshold']//input"));
+        return getWithWait(xpath("//div[@gt-label='Slow threshold']//input"));
     }
 
-    public WebElement getCaptureThreadStatsCheckBox() {
-        return withWait(xpath("//div[@gt-label='Capture JVM thread stats']//input"));
+    public void clickCaptureThreadStatsCheckBox() {
+        clickWithWait(xpath("//div[@gt-label='Thread stats']//label"));
+    }
+
+    public boolean getCaptureThreadStatsCheckBoxValue() {
+        return getWithWait(xpath("//div[@gt-label='Thread stats']//input")).isSelected();
     }
 
     public void clickSaveButton() {
-        WebElement saveButton = withWait(xpath("//button[normalize-space()='Save changes']"));
-        saveButton.click();
-    }
-
-    private WebElement withWait(By by) {
-        return Utils.withWait(driver, by);
+        clickWithWait(xpath("//button[normalize-space()='Save changes']"));
     }
 }

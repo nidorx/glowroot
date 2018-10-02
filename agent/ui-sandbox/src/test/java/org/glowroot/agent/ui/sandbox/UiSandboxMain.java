@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package org.glowroot.agent.ui.sandbox;
 import java.io.File;
 import java.util.concurrent.Executors;
 
-import com.google.common.base.Charsets;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -29,6 +28,7 @@ import org.glowroot.agent.it.harness.Container;
 import org.glowroot.agent.it.harness.impl.JavaagentContainer;
 import org.glowroot.agent.it.harness.impl.LocalContainer;
 
+import static com.google.common.base.Charsets.UTF_8;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 public class UiSandboxMain {
@@ -39,30 +39,28 @@ public class UiSandboxMain {
 
     private UiSandboxMain() {}
 
-    public static void main(String... args) throws Exception {
+    public static void main(String[] args) throws Exception {
         Container container;
-        File baseDir = new File("target");
-        File configFile = new File(baseDir, "config.json");
+        File testDir = new File("target");
+        File configFile = new File(testDir, "config.json");
         if (!configFile.exists()) {
             Files.write(
                     "{\"transactions\":{\"profilingIntervalMillis\":100},"
-                            + "\"ui\":{\"defaultDisplayedTransactionType\":\"Sandbox\"}}",
-                    configFile, Charsets.UTF_8);
+                            + "\"ui\":{\"defaultTransactionType\":\"Sandbox\"}}",
+                    configFile, UTF_8);
         }
         if (useJavaagent && useGlowrootCentral) {
-            container = new JavaagentContainer(baseDir, false,
-                    ImmutableList.of("-Dglowroot.agent.id=\"UI Sandbox\"",
-                            "-Dglowroot.collector.host=localhost",
-                            "-Dglowroot.collector.port=8181"));
+            container = new JavaagentContainer(testDir, false,
+                    ImmutableList.of("-Dglowroot.agent.id=UI Sandbox",
+                            "-Dglowroot.collector.address=localhost:8181"));
         } else if (useJavaagent) {
-            container = new JavaagentContainer(baseDir, true, ImmutableList.<String>of());
+            container = new JavaagentContainer(testDir, true, ImmutableList.<String>of());
         } else if (useGlowrootCentral) {
-            container = new LocalContainer(baseDir, false,
+            container = new LocalContainer(testDir, false,
                     ImmutableMap.of("glowroot.agent.id", "UI Sandbox",
-                            "glowroot.collector.host", "localhost",
-                            "glowroot.collector.port", "8181"));
+                            "glowroot.collector.address", "localhost:8181"));
         } else {
-            container = new LocalContainer(baseDir, true, ImmutableMap.<String, String>of());
+            container = new LocalContainer(testDir, true, ImmutableMap.<String, String>of());
         }
         container.executeNoExpectedTrace(GenerateTraces.class);
     }
@@ -85,7 +83,7 @@ public class UiSandboxMain {
                     new NestableCall(new NestableCall(20, 50, 5000), 5, 50, 5000).execute();
                 }
                 new NestableCall(new NestableCall(5000, 50, 5000), 100, 50, 5000).execute();
-                Thread.sleep(1000);
+                SECONDS.sleep(1);
             }
         }
         private void startDeadlockingThreads() {
@@ -96,7 +94,7 @@ public class UiSandboxMain {
                 public void run() {
                     synchronized (lock1) {
                         try {
-                            Thread.sleep(1000);
+                            SECONDS.sleep(1);
                         } catch (InterruptedException e) {
                             throw new RuntimeException(e);
                         }
@@ -111,7 +109,7 @@ public class UiSandboxMain {
                 public void run() {
                     synchronized (lock2) {
                         try {
-                            Thread.sleep(1000);
+                            SECONDS.sleep(1);
                         } catch (InterruptedException e) {
                             throw new RuntimeException(e);
                         }

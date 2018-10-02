@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
     <groupId>org.glowroot</groupId>
     <artifactId>glowroot-parent</artifactId>
-    <version>0.9.9</version>
+    <version>0.11.1</version>
     <relativePath>../../..</relativePath>
   </parent>
 
@@ -17,7 +18,7 @@
 
   <properties>
     <!-- instrumented libraries -->
-    <grails.version>3.2.4</grails.version>
+    <grails.version>3.3.8</grails.version>
   </properties>
 
   <dependencies>
@@ -26,12 +27,6 @@
       <artifactId>glowroot-agent-plugin-api</artifactId>
       <version>${project.version}</version>
       <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.google.code.findbugs</groupId>
-      <artifactId>jsr305</artifactId>
-      <!-- don't need this dependency at runtime since only annotations -->
-      <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>junit</groupId>
@@ -44,9 +39,8 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>org.glowroot</groupId>
-      <artifactId>glowroot-agent-it-harness</artifactId>
-      <version>${project.version}</version>
+      <groupId>com.google.guava</groupId>
+      <artifactId>guava</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -70,60 +64,36 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <!-- this is needed because logback classic 1.1.10+ contains
+        META-INF/services/javax.servlet.ServletContainerInitializer which causes issues when running
+        tests with embedded tomcat inside JavaagentContainer because logback is loaded in the
+        bootstrap class loader (see JavaagentContainer.java) and so
+        LogbackServletContainerInitializer is loaded in the bootstrap class loader which then
+        looks for ServletContainerInitializer in the bootstrap class loader, but it is not, and
+        adding tomcat-embed-core (which has ServletContainerInitializer) to the bootstrap class
+        loader causes NullPointerException in org.apache.catalina.startup.ContextConfig
+
+        to get around this problem, javax.servlet-api artifact is included, and put in the bootstrap
+        class loader (see JavaagentContainer.java) so that logback's ServletContainerInitializer
+        can load in the the bootstrap class loader successfully
+      -->
+      <groupId>javax.servlet</groupId>
+      <artifactId>javax.servlet-api</artifactId>
+      <!-- Tomcat 7 (above) uses Servlet API 3.0 -->
+      <version>3.0.1</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>org.grails</groupId>
       <artifactId>grails-web-boot</artifactId>
       <version>${grails.version}</version>
       <scope>test</scope>
     </dependency>
     <dependency>
-      <!-- normally grails-plugin-* dependencies are pulled in by using
-        org.grails:grails-dependencies, but there is no grails-dependencies 3.1.9 in maven central
-        so just embedding grails-plugin-* dependencies directly -->
       <groupId>org.grails</groupId>
-      <artifactId>grails-plugin-rest</artifactId>
+      <artifactId>grails-dependencies</artifactId>
       <version>${grails.version}</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.grails</groupId>
-      <artifactId>grails-plugin-databinding</artifactId>
-      <version>${grails.version}</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.grails</groupId>
-      <artifactId>grails-plugin-i18n</artifactId>
-      <version>${grails.version}</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.grails</groupId>
-      <artifactId>grails-plugin-gsp</artifactId>
-      <version>${grails.version}</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.grails</groupId>
-      <artifactId>grails-plugin-services</artifactId>
-      <version>${grails.version}</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.grails</groupId>
-      <artifactId>grails-plugin-url-mappings</artifactId>
-      <version>${grails.version}</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.grails</groupId>
-      <artifactId>grails-plugin-interceptors</artifactId>
-      <version>${grails.version}</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.grails</groupId>
-      <artifactId>grails-plugin-async</artifactId>
-      <version>${grails.version}</version>
+      <type>pom</type>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -137,31 +107,41 @@
       <!-- this is to resolve maven enforcer RequireUpperBoundDeps error -->
       <groupId>org.aspectj</groupId>
       <artifactId>aspectjweaver</artifactId>
-      <version>1.8.10</version>
+      <version>1.9.1</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <!-- this is to resolve maven enforcer RequireUpperBoundDeps error -->
       <groupId>org.springframework</groupId>
       <artifactId>spring-context</artifactId>
-      <version>4.3.5.RELEASE</version>
+      <!-- Spring 5+ requires Java 8+ -->
+      <version>4.3.19.RELEASE</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <!-- this is to resolve maven enforcer RequireUpperBoundDeps error -->
       <groupId>org.springframework</groupId>
       <artifactId>spring-core</artifactId>
-      <version>4.3.5.RELEASE</version>
+      <!-- Spring 5+ requires Java 8+ -->
+      <version>4.3.19.RELEASE</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <!-- this is to resolve maven enforcer RequireUpperBoundDeps error -->
       <groupId>commons-validator</groupId>
       <artifactId>commons-validator</artifactId>
-      <version>1.5.1</version>
+      <version>1.6</version>
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <repositories>
+    <repository>
+      <!-- this is needed for some versions of grails that are not in central -->
+      <id>grails</id>
+      <url>https://repo.grails.org/grails/core</url>
+    </repository>
+  </repositories>
 
   <build>
     <plugins>
@@ -199,6 +179,50 @@
 
   <profiles>
     <profile>
+      <id>auto-activated-test-unshaded</id>
+      <activation>
+        <property>
+          <name>!glowroot.test.shaded</name>
+        </property>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.glowroot</groupId>
+          <artifactId>glowroot-agent-it-harness-unshaded</artifactId>
+          <version>${project.version}</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>auto-activated-test-shaded</id>
+      <activation>
+        <property>
+          <name>glowroot.test.shaded</name>
+        </property>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.glowroot</groupId>
+          <artifactId>glowroot-agent-it-harness</artifactId>
+          <version>${project.version}</version>
+          <scope>test</scope>
+          <exclusions>
+            <exclusion>
+              <!-- exclusion is needed due to https://issues.apache.org/jira/browse/MSHADE-206 -->
+              <groupId>org.glowroot</groupId>
+              <artifactId>glowroot-agent-it-harness-unshaded</artifactId>
+            </exclusion>
+            <exclusion>
+              <!-- exclusion is needed due to https://issues.apache.org/jira/browse/MSHADE-206 -->
+              <groupId>org.glowroot</groupId>
+              <artifactId>glowroot-agent-core</artifactId>
+            </exclusion>
+          </exclusions>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
       <id>java7</id>
       <activation>
         <jdk>1.7</jdk>
@@ -214,45 +238,6 @@
           </plugin>
         </plugins>
       </build>
-    </profile>
-    <profile>
-      <id>grails-3.2.0</id>
-      <!-- this is needed for grails 3.2.0 because grails-plugin-rest 3.2.0 has a dependency on
-        versions 6.0.0.RELEASE of the below artifacts which do not exist in maven central -->
-      <dependencyManagement>
-        <dependencies>
-          <dependency>
-            <groupId>org.grails</groupId>
-            <artifactId>grails-datastore-core</artifactId>
-            <version>6.0.1.RELEASE</version>
-            <scope>test</scope>
-          </dependency>
-          <dependency>
-            <groupId>org.grails</groupId>
-            <artifactId>grails-datastore-simple</artifactId>
-            <version>6.0.1.RELEASE</version>
-            <scope>test</scope>
-          </dependency>
-          <dependency>
-            <groupId>org.grails</groupId>
-            <artifactId>grails-datastore-gorm</artifactId>
-            <version>6.0.1.RELEASE</version>
-            <scope>test</scope>
-          </dependency>
-          <dependency>
-            <groupId>org.grails</groupId>
-            <artifactId>grails-datastore-gorm-support</artifactId>
-            <version>6.0.1.RELEASE</version>
-            <scope>test</scope>
-          </dependency>
-          <dependency>
-            <groupId>org.grails</groupId>
-            <artifactId>grails-datastore-gorm-validation</artifactId>
-            <version>6.0.1.RELEASE</version>
-            <scope>test</scope>
-          </dependency>
-        </dependencies>
-      </dependencyManagement>
     </profile>
   </profiles>
 </project>

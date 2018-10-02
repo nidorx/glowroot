@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,14 +22,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
-import javax.annotation.Nullable;
-
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.checkerframework.checker.nullness.qual.RequiresNonNull;
 import org.immutables.value.Value;
 import org.objectweb.asm.ClassReader;
@@ -44,14 +43,14 @@ import org.objectweb.asm.commons.GeneratorAdapter;
 import org.objectweb.asm.commons.Method;
 import org.objectweb.asm.commons.MethodRemapper;
 import org.objectweb.asm.commons.SimpleRemapper;
-import org.objectweb.asm.signature.SignatureReader;
-import org.objectweb.asm.signature.SignatureVisitor;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.glowroot.agent.bytecode.api.Bytecode;
+import org.glowroot.agent.bytecode.api.Util;
 import org.glowroot.agent.plugin.api.weaving.Shim;
 
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -63,7 +62,7 @@ import static org.objectweb.asm.Opcodes.ACC_SUPER;
 import static org.objectweb.asm.Opcodes.ACC_SYNTHETIC;
 import static org.objectweb.asm.Opcodes.ALOAD;
 import static org.objectweb.asm.Opcodes.ANEWARRAY;
-import static org.objectweb.asm.Opcodes.ASM5;
+import static org.objectweb.asm.Opcodes.ASM6;
 import static org.objectweb.asm.Opcodes.ASTORE;
 import static org.objectweb.asm.Opcodes.ATHROW;
 import static org.objectweb.asm.Opcodes.DUP;
@@ -86,19 +85,27 @@ class WeavingClassVisitor extends ClassVisitor {
 
     private static final Logger logger = LoggerFactory.getLogger(WeavingClassVisitor.class);
 
+    private static final Type bytecodeType = Type.getType(Bytecode.class);
+    private static final Type bytecodeUtilType = Type.getType(Util.class);
+
     private static final AtomicLong metaHolderCounter = new AtomicLong();
 
     private final ClassWriter cw;
     private final @Nullable ClassLoader loader;
 
+    private final boolean frames;
+    private final boolean noLongerNeedToWeaveMainMethods;
     private final AnalyzedClass analyzedClass;
     private final List<AnalyzedMethod> methodsThatOnlyNowFulfillAdvice;
 
     private final List<ShimType> shimTypes;
     private final List<MixinType> mixinTypes;
+    private final List<ClassNode> mixinClassNodes;
     private final Map<String, List<Advice>> methodAdvisors;
 
     private final AnalyzedWorld analyzedWorld;
+
+    private final Set<String> shimMethods;
 
     private @MonotonicNonNull Type type;
 
@@ -108,43 +115,61 @@ class WeavingClassVisitor extends ClassVisitor {
     private @MonotonicNonNull String metaHolderInternalName;
     private int methodMetaCounter;
 
-    public WeavingClassVisitor(ClassWriter cw, @Nullable ClassLoader loader,
-            AnalyzedClass analyzedClass, List<AnalyzedMethod> methodsThatOnlyNowFulfillAdvice,
-            List<ShimType> shimTypes, List<MixinType> mixinTypes,
-            Map<String, List<Advice>> methodAdvisors, AnalyzedWorld analyzedWorld) {
-        super(ASM5, cw);
+    public WeavingClassVisitor(ClassWriter cw, @Nullable ClassLoader loader, boolean frames,
+            boolean noLongerNeedToWeaveMainMethods, AnalyzedClass analyzedClass,
+            List<AnalyzedMethod> methodsThatOnlyNowFulfillAdvice, List<ShimType> shimTypes,
+            List<MixinType> mixinTypes, Map<String, List<Advice>> methodAdvisors,
+            AnalyzedWorld analyzedWorld) {
+        super(ASM6, cw);
         this.cw = cw;
         this.loader = loader;
+        this.frames = frames;
+        this.noLongerNeedToWeaveMainMethods = noLongerNeedToWeaveMainMethods;
         this.analyzedClass = analyzedClass;
         this.methodsThatOnlyNowFulfillAdvice = methodsThatOnlyNowFulfillAdvice;
         this.shimTypes = shimTypes;
         this.mixinTypes = mixinTypes;
         this.methodAdvisors = methodAdvisors;
         this.analyzedWorld = analyzedWorld;
+
+        shimMethods = Sets.newHashSet();
+        for (ShimType shimType : shimTypes) {
+            for (java.lang.reflect.Method shimMethod : shimType.shimMethods()) {
+                Method method = Method.getMethod(shimMethod);
+                shimMethods.add(method.getName() + method.getDescriptor());
+            }
+        }
+
+        // cannot store ClassNode in MixinType and re-use across MethodClassVisitors because
+        // MethodNode.accept() cannot be called multiple times (at least not across multiple
+        // threads) without throwing an occassional NPE
+        mixinClassNodes = Lists.newArrayList();
+        if (!analyzedClass.isInterface()) {
+            for (MixinType mixinType : mixinTypes) {
+                ClassReader cr = new ClassReader(mixinType.implementationBytes());
+                ClassNode cn = new ClassNode();
+                cr.accept(cn, ClassReader.EXPAND_FRAMES);
+                mixinClassNodes.add(cn);
+            }
+        }
     }
 
     @Override
     public void visit(int version, int access, String internalName, @Nullable String signature,
             @Nullable String superInternalName,
-            String /*@Nullable*/[] interfaceInternalNamesNullable) {
+            String /*@Nullable*/ [] interfaceInternalNamesNullable) {
 
         type = Type.getObjectType(internalName);
-        String /*@Nullable*/[] interfacesIncludingMixins = getInterfacesIncludingShimsAndMixins(
+        String[] interfacesIncludingMixins = getInterfacesIncludingShimsAndMixins(
                 interfaceInternalNamesNullable, shimTypes, mixinTypes);
         cw.visit(version, access, internalName, signature, superInternalName,
                 interfacesIncludingMixins);
     }
 
     @Override
-    public MethodVisitor visitMethod(int access, String name, String desc,
-            @Nullable String signature, String /*@Nullable*/[] exceptions) {
-        List<Advice> matchingAdvisors = methodAdvisors.get(name + desc);
-        if (matchingAdvisors == null) {
-            matchingAdvisors = ImmutableList.of();
-        } else {
-            matchingAdvisors = removeSuperseded(matchingAdvisors);
-        }
-        checkNotNull(type); // type is non null if there is something to weave
+    public @Nullable MethodVisitor visitMethod(int access, String name, String desc,
+            @Nullable String signature, String /*@Nullable*/ [] exceptions) {
+        checkNotNull(type);
         if (isAbstractOrNativeOrSynthetic(access)) {
             // don't try to weave abstract, native and synthetic methods
             // no need to weave bridge methods (which are also marked synthetic) since they forward
@@ -152,29 +177,73 @@ class WeavingClassVisitor extends ClassVisitor {
             // bridgeTargetAdvisors)
             return cw.visitMethod(access, name, desc, signature, exceptions);
         }
+        if (isMixinProxy(name, desc)) {
+            return null;
+        }
+        if (shimMethods.contains(name + desc)) {
+            // ignore proxy implementations of shim methods (they will be implemented in visitEnd())
+            return null;
+        }
+        List<Advice> matchingAdvisors = methodAdvisors.get(name + desc);
+        if (matchingAdvisors == null) {
+            matchingAdvisors = ImmutableList.of();
+        } else {
+            matchingAdvisors = removeSuperseded(matchingAdvisors);
+        }
         if (isInitWithMixins(name)) {
             return visitInitWithMixins(access, name, desc, signature, exceptions, matchingAdvisors);
         }
-        if (matchingAdvisors.isEmpty()) {
-            return cw.visitMethod(access, name, desc, signature, exceptions);
+        MethodVisitor mv = cw.visitMethod(access, name, desc, signature, exceptions);
+        if (!noLongerNeedToWeaveMainMethods) {
+            if (Modifier.isPublic(access) && Modifier.isStatic(access) && name.equals("main")
+                    && desc.equals("([Ljava/lang/String;)V")) {
+                mv.visitLdcInsn(type.getClassName());
+                mv.visitVarInsn(ALOAD, 0);
+                mv.visitMethodInsn(INVOKESTATIC, bytecodeType.getInternalName(),
+                        "enteringMainMethod", "(Ljava/lang/String;[Ljava/lang/String;)V", false);
+            } else if (type.getInternalName()
+                    .equals("org/apache/commons/daemon/support/DaemonLoader")
+                    && Modifier.isPublic(access) && Modifier.isStatic(access) && name.equals("load")
+                    && desc.equals("(Ljava/lang/String;[Ljava/lang/String;)Z")) {
+                mv.visitVarInsn(ALOAD, 0);
+                mv.visitVarInsn(ALOAD, 1);
+                mv.visitMethodInsn(INVOKESTATIC, bytecodeType.getInternalName(),
+                        "enteringApacheCommonsDaemonLoadMethod",
+                        "(Ljava/lang/String;[Ljava/lang/String;)V", false);
+            }
         }
-        return visitMethodWithAdvice(access, name, desc, signature, exceptions, matchingAdvisors);
+        if (matchingAdvisors.isEmpty()) {
+            return mv;
+        }
+        return visitMethodWithAdvice(mv, access, name, desc, matchingAdvisors);
+    }
+
+    private boolean isMixinProxy(String name, String desc) {
+        for (ClassNode cn : mixinClassNodes) {
+            List<MethodNode> methodNodes = cn.methods;
+            for (MethodNode mn : methodNodes) {
+                if (!mn.name.equals("<init>") && mn.name.equals(name) && mn.desc.equals(desc)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     @Override
     public void visitEnd() {
+        checkNotNull(type);
         analyzedWorld.add(analyzedClass, loader);
-        checkNotNull(type); // type is non null if there is something to weave
-        for (ShimType shimType : shimTypes) {
-            addShim(shimType);
-        }
-        for (MixinType mixinType : mixinTypes) {
-            addMixin(mixinType);
-        }
-        if (!Modifier.isAbstract(analyzedClass.modifiers())) {
-            for (AnalyzedMethod methodThatOnlyNowFulfillAdvice : methodsThatOnlyNowFulfillAdvice) {
-                overrideAndWeaveInheritedMethod(methodThatOnlyNowFulfillAdvice);
+        if (!analyzedClass.isInterface()) {
+            for (ShimType shimType : shimTypes) {
+                addShim(shimType);
             }
+            for (ClassNode mixinClassNode : mixinClassNodes) {
+                addMixin(mixinClassNode);
+            }
+        }
+        for (AnalyzedMethod methodThatOnlyNowFulfillAdvice : methodsThatOnlyNowFulfillAdvice) {
+            overrideAndWeaveInheritedMethod(methodThatOnlyNowFulfillAdvice);
         }
         // handle metas at end, since handleInheritedMethodsThatNowFulfillAdvice()
         // above could add new metas
@@ -340,7 +409,7 @@ class WeavingClassVisitor extends ClassVisitor {
     private static void loadArrayType(MethodVisitor mv, Type type, Type ownerType) {
         loadType(mv, type.getElementType(), ownerType);
         mv.visitLdcInsn(type.getDimensions());
-        mv.visitMethodInsn(INVOKESTATIC, Type.getInternalName(GeneratedBytecodeUtil.class),
+        mv.visitMethodInsn(INVOKESTATIC, bytecodeUtilType.getInternalName(),
                 "getArrayClass", "(Ljava/lang/Class;I)Ljava/lang/Class;", false);
     }
 
@@ -356,8 +425,8 @@ class WeavingClassVisitor extends ClassVisitor {
                 "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;", false);
     }
 
-    private static String /*@Nullable*/[] getInterfacesIncludingShimsAndMixins(
-            String /*@Nullable*/[] interfaces, List<ShimType> shimTypes,
+    private static String /*@Nullable*/ [] getInterfacesIncludingShimsAndMixins(
+            String /*@Nullable*/ [] interfaces, List<ShimType> shimTypes,
             List<MixinType> mixinTypes) {
         if (mixinTypes.isEmpty() && shimTypes.isEmpty()) {
             return interfaces;
@@ -383,7 +452,7 @@ class WeavingClassVisitor extends ClassVisitor {
 
     @RequiresNonNull("type")
     private MethodVisitor visitInitWithMixins(int access, String name, String desc,
-            @Nullable String signature, String /*@Nullable*/[] exceptions,
+            @Nullable String signature, String /*@Nullable*/ [] exceptions,
             List<Advice> matchingAdvisors) {
         Integer methodMetaUniqueNum = collectMetasAtMethod(matchingAdvisors, name, desc);
         MethodVisitor mv = cw.visitMethod(access, name, desc, signature, exceptions);
@@ -394,19 +463,17 @@ class WeavingClassVisitor extends ClassVisitor {
                 break;
             }
         }
-        return new WeavingMethodVisitor(mv, access, name, desc, type, matchingAdvisors,
-                metaHolderInternalName, methodMetaUniqueNum, loader == null, null);
+        return new WeavingMethodVisitor(mv, frames, access, name, desc, type, matchingAdvisors,
+                metaHolderInternalName, methodMetaUniqueNum, loader == null);
     }
 
     @RequiresNonNull("type")
-    private MethodVisitor visitMethodWithAdvice(int access, String name, String desc,
-            @Nullable String signature, String /*@Nullable*/[] exceptions,
-            Iterable<Advice> matchingAdvisors) {
+    private MethodVisitor visitMethodWithAdvice(MethodVisitor mv, int access, String name,
+            String desc, Iterable<Advice> matchingAdvisors) {
         // FIXME remove superseded advisors
         Integer methodMetaUniqueNum = collectMetasAtMethod(matchingAdvisors, name, desc);
-        MethodVisitor mv = cw.visitMethod(access, name, desc, signature, exceptions);
-        return new WeavingMethodVisitor(mv, access, name, desc, type, matchingAdvisors,
-                metaHolderInternalName, methodMetaUniqueNum, loader == null, null);
+        return new WeavingMethodVisitor(mv, frames, access, name, desc, type, matchingAdvisors,
+                metaHolderInternalName, methodMetaUniqueNum, loader == null);
     }
 
     private @Nullable Integer collectMetasAtMethod(Iterable<Advice> matchingAdvisors,
@@ -441,7 +508,11 @@ class WeavingClassVisitor extends ClassVisitor {
             Method method = Method.getMethod(reflectMethod);
             Shim shim = reflectMethod.getAnnotation(Shim.class);
             checkNotNull(shim);
-            Method targetMethod = Method.getMethod(shim.value());
+            if (shim.value().length != 1) {
+                throw new IllegalStateException(
+                        "@Shim annotation must have exactly one value when used on methods");
+            }
+            Method targetMethod = Method.getMethod(shim.value()[0]);
             MethodVisitor mv = cw.visitMethod(ACC_PUBLIC, method.getName(), method.getDescriptor(),
                     null, null);
             mv.visitCode();
@@ -459,30 +530,28 @@ class WeavingClassVisitor extends ClassVisitor {
     }
 
     @RequiresNonNull("type")
-    private void addMixin(MixinType mixinType) {
-        ClassReader cr = new ClassReader(mixinType.implementationBytes());
-        ClassNode cn = new ClassNode();
-        cr.accept(cn, ClassReader.EXPAND_FRAMES);
-        // SuppressWarnings because generics are explicitly removed from asm binaries
-        // see http://forge.ow2.org/tracker/?group_id=23&atid=100023&func=detail&aid=316377
-        @SuppressWarnings("unchecked")
-        List<FieldNode> fieldNodes = cn.fields;
+    private void addMixin(ClassNode mixinClassNode) {
+        List<FieldNode> fieldNodes = mixinClassNode.fields;
         for (FieldNode fieldNode : fieldNodes) {
+            if (!Modifier.isTransient(fieldNode.access)) {
+                // this is needed to avoid serialization issues (even if the new field is
+                // serializable, this can still cause issues in a cluster if glowroot is not
+                // deployed on all nodes)
+                throw new IllegalStateException(
+                        "@Mixin fields must be marked transient: " + mixinClassNode.name);
+            }
             fieldNode.accept(this);
         }
-        // SuppressWarnings because generics are explicitly removed from asm binaries
-        @SuppressWarnings("unchecked")
-        List<MethodNode> methodNodes = cn.methods;
+        List<MethodNode> methodNodes = mixinClassNode.methods;
         for (MethodNode mn : methodNodes) {
             if (mn.name.equals("<init>")) {
                 continue;
             }
-            // SuppressWarnings because generics are explicitly removed from asm binaries
-            @SuppressWarnings("unchecked")
             String[] exceptions = Iterables.toArray(mn.exceptions, String.class);
             MethodVisitor mv =
                     cw.visitMethod(mn.access, mn.name, mn.desc, mn.signature, exceptions);
-            mn.accept(new MethodRemapper(mv, new SimpleRemapper(cn.name, type.getInternalName())));
+            mn.accept(new MethodRemapper(mv,
+                    new SimpleRemapper(mixinClassNode.name, type.getInternalName())));
         }
     }
 
@@ -497,8 +566,10 @@ class WeavingClassVisitor extends ClassVisitor {
             exceptions[i] = ClassNames.toInternalName(inheritedMethod.exceptions().get(i));
         }
         List<Advice> advisors = removeSuperseded(inheritedMethod.advisors());
-        MethodVisitor mv = visitMethodWithAdvice(ACC_PUBLIC, inheritedMethod.name(),
-                inheritedMethod.getDesc(), inheritedMethod.signature(), exceptions, advisors);
+        MethodVisitor mv = cw.visitMethod(ACC_PUBLIC, inheritedMethod.name(),
+                inheritedMethod.getDesc(), inheritedMethod.signature(), exceptions);
+        mv = visitMethodWithAdvice(mv, ACC_PUBLIC, inheritedMethod.name(),
+                inheritedMethod.getDesc(), advisors);
         checkNotNull(mv);
         GeneratorAdapter mg = new GeneratorAdapter(mv, ACC_PUBLIC, inheritedMethod.name(),
                 inheritedMethod.getDesc());
@@ -552,7 +623,7 @@ class WeavingClassVisitor extends ClassVisitor {
 
         InitMixins(MethodVisitor mv, int access, String name, String desc,
                 List<MixinType> matchedMixinTypes, Type type) {
-            super(ASM5, mv, access, name, desc);
+            super(ASM6, mv, access, name, desc);
             this.matchedMixinTypes = ImmutableList.copyOf(matchedMixinTypes);
             this.type = type;
         }
@@ -589,36 +660,5 @@ class WeavingClassVisitor extends ClassVisitor {
         ImmutableList<Type> methodParameterTypes();
         int uniqueNum();
         ImmutableSet<Type> methodMetaTypes();
-    }
-
-    public static void main(String[] args) {
-        String signature = "(TT;TT;)V";
-        SignatureReader r = new SignatureReader(signature);
-        r.accept(new MethodSignatureVisitor());
-
-    }
-
-    private static class MethodSignatureVisitor extends SignatureVisitor {
-
-        private MethodSignatureVisitor() {
-            super(ASM5);
-        }
-
-        @Override
-        public SignatureVisitor visitParameterType() {
-            return new ParamSignatureVisitor();
-        }
-    }
-
-    private static class ParamSignatureVisitor extends SignatureVisitor {
-
-        private ParamSignatureVisitor() {
-            super(ASM5);
-        }
-
-        @Override
-        public SignatureVisitor visitParameterType() {
-            return this;
-        }
     }
 }

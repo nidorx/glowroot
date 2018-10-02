@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -92,7 +92,7 @@ public class Threads {
                 return;
             }
             // wait a few milliseconds before trying again
-            Thread.sleep(10);
+            MILLISECONDS.sleep(10);
         } while (stopwatch.elapsed(SECONDS) < 10);
         // failure
         if (!rogueThreads.isEmpty()) {
@@ -122,20 +122,20 @@ public class Threads {
                 return;
             }
             // wait a few milliseconds before trying again
-            Thread.sleep(10);
+            MILLISECONDS.sleep(10);
         } while (stopwatch.elapsed(SECONDS) < 10);
         // failure
         throw new RogueThreadsException(rogueThreads);
     }
 
     // try to handle under- and over- sleeping for tests that depend on more accurate sleep timing
-    public static void moreAccurateSleep(int millis) throws InterruptedException {
+    public static void moreAccurateSleep(long millis) throws InterruptedException {
         Stopwatch stopwatch = Stopwatch.createStarted();
         if (millis > 10) {
-            Thread.sleep(millis - 10);
+            MILLISECONDS.sleep(millis - 10);
         }
         while (stopwatch.elapsed(MILLISECONDS) < millis) {
-            Thread.sleep(1);
+            MILLISECONDS.sleep(1);
         }
     }
 
@@ -144,7 +144,7 @@ public class Threads {
         currentThreads.removeAll(preExistingThreads);
         for (Iterator<Thread> i = currentThreads.iterator(); i.hasNext();) {
             String threadName = i.next().getName();
-            if (threadName.startsWith("Glowroot-GRPC-")) {
+            if (threadName.startsWith("Glowroot-IT-Harness*-GRPC-")) {
                 i.remove();
             }
             if (threadName.equals("grpc-shared-destroyer-0")) {
@@ -189,7 +189,7 @@ public class Threads {
 
     private static boolean isShaded() {
         try {
-            Class.forName("org.glowroot.agent.shaded.slf4j.Logger");
+            Class.forName("org.glowroot.agent.shaded.org.slf4j.Logger");
             return true;
         } catch (ClassNotFoundException e) {
             // log exception at trace level

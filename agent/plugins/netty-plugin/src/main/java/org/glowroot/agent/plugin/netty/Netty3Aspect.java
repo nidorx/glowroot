@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,14 @@
  */
 package org.glowroot.agent.plugin.netty;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-
 import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.AuxThreadContext;
 import org.glowroot.agent.plugin.api.OptionalThreadContext;
 import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.TimerName;
 import org.glowroot.agent.plugin.api.TraceEntry;
+import org.glowroot.agent.plugin.api.checker.NonNull;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
 import org.glowroot.agent.plugin.api.weaving.BindReceiver;
 import org.glowroot.agent.plugin.api.weaving.BindThrowable;
@@ -38,12 +37,11 @@ import org.glowroot.agent.plugin.api.weaving.Shim;
 
 public class Netty3Aspect {
 
-    // the field and method names are verbose to avoid conflict since they will become fields
-    // and methods in all classes that extend org.jboss.netty.channel.Channel
+    // the field and method names are verbose since they will be mixed in to existing classes
     @Mixin({"org.jboss.netty.channel.Channel"})
     public abstract static class ChannelImpl implements ChannelMixin {
 
-        private volatile boolean glowroot$completeAsyncTransaction;
+        private transient volatile boolean glowroot$completeAsyncTransaction;
 
         @Override
         public boolean glowroot$getCompleteAsyncTransaction() {
@@ -52,12 +50,11 @@ public class Netty3Aspect {
 
         @Override
         public void glowroot$setCompleteAsyncTransaction(boolean completeAsyncTransaction) {
-            this.glowroot$completeAsyncTransaction = completeAsyncTransaction;
+            glowroot$completeAsyncTransaction = completeAsyncTransaction;
         }
     }
 
-    // the method names are verbose to avoid conflict since they will become methods in all classes
-    // that extend org.jboss.netty.channel.Channel
+    // the method names are verbose since they will be mixed in to existing classes
     public interface ChannelMixin {
 
         boolean glowroot$getCompleteAsyncTransaction();
@@ -65,12 +62,11 @@ public class Netty3Aspect {
         void glowroot$setCompleteAsyncTransaction(boolean completeAsyncTransaction);
     }
 
-    // the field and method names are verbose to avoid conflict since they will become fields
-    // and methods in all classes that extend org.jboss.netty.channel.ChannelFutureListener
+    // the field and method names are verbose since they will be mixed in to existing classes
     @Mixin({"org.jboss.netty.channel.ChannelFutureListener"})
     public abstract static class ListenerImpl implements ListenerMixin {
 
-        private volatile @Nullable AuxThreadContext glowroot$auxContext;
+        private transient volatile @Nullable AuxThreadContext glowroot$auxContext;
 
         @Override
         public @Nullable AuxThreadContext glowroot$getAuxContext() {
@@ -79,12 +75,11 @@ public class Netty3Aspect {
 
         @Override
         public void glowroot$setAuxContext(@Nullable AuxThreadContext auxContext) {
-            this.glowroot$auxContext = auxContext;
+            glowroot$auxContext = auxContext;
         }
     }
 
-    // the method names are verbose to avoid conflict since they will become methods in all classes
-    // that extend org.jboss.netty.channel.ChannelFutureListener
+    // the method names are verbose since they will be mixed in to existing classes
     public interface ListenerMixin {
 
         @Nullable
@@ -155,11 +150,11 @@ public class Netty3Aspect {
                 // not null, just checked above in isEnabled()
                 @BindParameter Object channelEvent) {
             @SuppressWarnings("nullness") // just checked above in isEnabled()
-            @Nonnull
+            @NonNull
             ChannelMixin channel = channelHandlerContext.glowroot$getChannel();
             // just checked valid cast above in isEnabled()
             @SuppressWarnings("nullness") // just checked above in isEnabled()
-            @Nonnull
+            @NonNull
             Object msg = ((MessageEvent) channelEvent).getMessage();
             // just checked valid cast above in isEnabled()
             HttpRequest request = (HttpRequest) msg;
@@ -176,9 +171,9 @@ public class Netty3Aspect {
         }
 
         @OnThrow
-        public static void onThrow(@BindThrowable Throwable throwable,
+        public static void onThrow(@BindThrowable Throwable t,
                 @BindTraveler TraceEntry traceEntry) {
-            traceEntry.endWithError(throwable);
+            traceEntry.endWithError(t);
         }
     }
 
@@ -267,7 +262,7 @@ public class Netty3Aspect {
         @OnBefore
         public static TraceEntry onBefore(@BindReceiver ListenerMixin listener) {
             @SuppressWarnings("nullness") // just checked above in isEnabled()
-            @Nonnull
+            @NonNull
             AuxThreadContext auxContext = listener.glowroot$getAuxContext();
             listener.glowroot$setAuxContext(null);
             return auxContext.start();

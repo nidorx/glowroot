@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,12 +22,10 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import javax.annotation.Nullable;
-
+import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -35,6 +33,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.checkerframework.checker.nullness.qual.RequiresNonNull;
 import org.immutables.value.Value;
 import org.objectweb.asm.ClassReader;
@@ -44,13 +43,17 @@ import org.objectweb.asm.Type;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.glowroot.agent.config.ImmutableInstrumentationConfig;
+import org.glowroot.agent.config.InstrumentationConfig;
 import org.glowroot.agent.weaving.AnalyzedWorld.ParseContext;
+import org.glowroot.agent.weaving.ClassLoaders.LazyDefinedClass;
 import org.glowroot.agent.weaving.ThinClassVisitor.ThinClass;
 import org.glowroot.agent.weaving.ThinClassVisitor.ThinMethod;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig.CaptureKind;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.objectweb.asm.Opcodes.ACC_BRIDGE;
-import static org.objectweb.asm.Opcodes.ASM5;
+import static org.objectweb.asm.Opcodes.ASM6;
 import static org.objectweb.asm.Opcodes.INVOKESPECIAL;
 
 class ClassAnalyzer {
@@ -59,12 +62,14 @@ class ClassAnalyzer {
 
     private final ThinClass thinClass;
     private final String className;
+    private final boolean intf;
 
     private final ImmutableAnalyzedClass.Builder analyzedClassBuilder;
     private final ImmutableList<AdviceMatcher> adviceMatchers;
     private final ImmutableList<AnalyzedClass> superAnalyzedClasses;
     private final ImmutableList<ShimType> matchedShimTypes;
-    private final ImmutableList<MixinType> matchedMixinTypes;
+    private final MatchedMixinTypes matchedMixinTypes;
+    private final boolean hasMainMethod;
 
     private final ImmutableSet<String> superClassNames;
 
@@ -80,53 +85,86 @@ class ClassAnalyzer {
 
     ClassAnalyzer(ThinClass thinClass, List<Advice> advisors, List<ShimType> shimTypes,
             List<MixinType> mixinTypes, @Nullable ClassLoader loader, AnalyzedWorld analyzedWorld,
-            @Nullable CodeSource codeSource, byte[] classBytes) {
+            @Nullable CodeSource codeSource, byte[] classBytes,
+            @Nullable Class<?> classBeingRedefined, boolean noLongerNeedToWeaveMainMethods) {
         this.thinClass = thinClass;
         ImmutableList<String> interfaceNames = ClassNames.fromInternalNames(thinClass.interfaces());
         className = ClassNames.fromInternalName(thinClass.name());
+        intf = Modifier.isInterface(thinClass.access());
         String superClassName = ClassNames.fromInternalName(thinClass.superName());
         analyzedClassBuilder = ImmutableAnalyzedClass.builder()
                 .modifiers(thinClass.access())
                 .name(className)
                 .superName(superClassName)
                 .addAllInterfaceNames(interfaceNames);
-        adviceMatchers =
-                AdviceMatcher.getAdviceMatchers(className, thinClass.annotations(), advisors);
-        if (Modifier.isInterface(thinClass.access())) {
-            superAnalyzedClasses = ImmutableList.of();
+        boolean ejbRemote = false;
+        boolean ejbStateless = false;
+        for (String annotation : thinClass.annotations()) {
+            if (annotation.equals("Ljavax/ejb/Remote;")) {
+                ejbRemote = true;
+            } else if (annotation.equals("Ljavax/ejb/Stateless;")) {
+                ejbStateless = true;
+            }
+        }
+
+        ParseContext parseContext = ImmutableParseContext.of(className, codeSource);
+        List<AnalyzedClass> interfaceAnalyzedHierarchy = Lists.newArrayList();
+        // it's ok if there are duplicates in the superAnalyzedClasses list (e.g. an interface
+        // that appears twice in a type hierarchy), it's rare, dups don't cause an issue for
+        // callers, and so it doesn't seem worth the (minor) performance hit to de-dup every
+        // time
+        List<AnalyzedClass> superAnalyzedClasses = Lists.newArrayList();
+        for (String interfaceName : interfaceNames) {
+            interfaceAnalyzedHierarchy.addAll(
+                    analyzedWorld.getAnalyzedHierarchy(interfaceName, loader, parseContext));
+        }
+        superAnalyzedClasses.addAll(interfaceAnalyzedHierarchy);
+
+        if (intf) {
             matchedShimTypes = getMatchedShimTypes(shimTypes, className,
                     ImmutableList.<AnalyzedClass>of(), ImmutableList.<AnalyzedClass>of());
-            analyzedClassBuilder.addAllShimTypes(matchedShimTypes);
-            matchedMixinTypes = getMatchedMixinTypes(mixinTypes, className,
+            matchedMixinTypes = getMatchedMixinTypes(mixinTypes, className, classBeingRedefined,
                     ImmutableList.<AnalyzedClass>of(), ImmutableList.<AnalyzedClass>of());
-            analyzedClassBuilder.addAllMixinTypes(matchedMixinTypes);
-            shortCircuitBeforeAnalyzeMethods = adviceMatchers.isEmpty();
+            hasMainMethod = false;
         } else {
-            ParseContext parseContext = ImmutableParseContext.of(className, codeSource);
             List<AnalyzedClass> superAnalyzedHierarchy =
                     analyzedWorld.getAnalyzedHierarchy(superClassName, loader, parseContext);
-            List<AnalyzedClass> interfaceAnalyzedHierarchy = Lists.newArrayList();
-            for (String interfaceName : interfaceNames) {
-                interfaceAnalyzedHierarchy.addAll(
-                        analyzedWorld.getAnalyzedHierarchy(interfaceName, loader, parseContext));
-            }
-            // it's ok if there are duplicates in the superAnalyzedClasses list (e.g. an interface
-            // that appears twice in a type hierarchy), it's rare, dups don't cause an issue for
-            // callers, and so it doesn't seem worth the (minor) performance hit to de-dup every
-            // time
-            List<AnalyzedClass> superAnalyzedClasses = Lists.newArrayList();
             superAnalyzedClasses.addAll(superAnalyzedHierarchy);
-            superAnalyzedClasses.addAll(interfaceAnalyzedHierarchy);
-            this.superAnalyzedClasses = ImmutableList.copyOf(superAnalyzedClasses);
             matchedShimTypes = getMatchedShimTypes(shimTypes, className, superAnalyzedHierarchy,
                     interfaceAnalyzedHierarchy);
-            analyzedClassBuilder.addAllShimTypes(matchedShimTypes);
-            matchedMixinTypes = getMatchedMixinTypes(mixinTypes, className, superAnalyzedHierarchy,
-                    interfaceAnalyzedHierarchy);
-            analyzedClassBuilder.addAllMixinTypes(matchedMixinTypes);
-            shortCircuitBeforeAnalyzeMethods =
-                    !hasSuperAdvice(superAnalyzedClasses) && matchedShimTypes.isEmpty()
-                            && matchedMixinTypes.isEmpty() && adviceMatchers.isEmpty();
+            matchedMixinTypes = getMatchedMixinTypes(mixinTypes, className, classBeingRedefined,
+                    superAnalyzedHierarchy, interfaceAnalyzedHierarchy);
+            if (noLongerNeedToWeaveMainMethods) {
+                hasMainMethod = false;
+            } else {
+                hasMainMethod = hasMainMethod(thinClass.nonBridgeMethods())
+                        || className.equals("org.apache.commons.daemon.support.DaemonLoader");
+            }
+        }
+        analyzedClassBuilder.addAllShimTypes(matchedShimTypes);
+        analyzedClassBuilder.addAllMixinTypes(matchedMixinTypes.reweavable());
+        analyzedClassBuilder.addAllNonReweavableMixinTypes(matchedMixinTypes.nonReweavable());
+
+        if ((ejbRemote || ejbStateless) && !intf) {
+            Set<String> ejbRemoteInterfaces =
+                    getEjbRemoteInterfaces(thinClass, superAnalyzedClasses);
+            if (ejbRemoteInterfaces.isEmpty()) {
+                this.superAnalyzedClasses = ImmutableList.copyOf(superAnalyzedClasses);
+                analyzedClassBuilder.ejbRemote(ejbRemote);
+            } else if (loader == null) {
+                logger.warn("instrumenting @javax.ejb.Remote not currently supported in bootstrap"
+                        + " class loader: {}", className);
+                this.superAnalyzedClasses = ImmutableList.copyOf(superAnalyzedClasses);
+                analyzedClassBuilder.ejbRemote(false);
+            } else {
+                List<AnalyzedClass> ejbHackedSuperAnalyzedClasses =
+                        hack(thinClass, loader, superAnalyzedClasses, ejbRemoteInterfaces);
+                this.superAnalyzedClasses = ImmutableList.copyOf(ejbHackedSuperAnalyzedClasses);
+                analyzedClassBuilder.ejbRemote(true);
+            }
+        } else {
+            this.superAnalyzedClasses = ImmutableList.copyOf(superAnalyzedClasses);
+            analyzedClassBuilder.ejbRemote(ejbRemote);
         }
         Set<String> superClassNames = Sets.newHashSet();
         superClassNames.add(className);
@@ -134,11 +172,16 @@ class ClassAnalyzer {
             superClassNames.add(analyzedClass.name());
         }
         this.superClassNames = ImmutableSet.copyOf(superClassNames);
+        adviceMatchers = AdviceMatcher.getAdviceMatchers(className, thinClass.annotations(),
+                superClassNames, advisors);
+        if (intf) {
+            shortCircuitBeforeAnalyzeMethods = false;
+        } else {
+            shortCircuitBeforeAnalyzeMethods =
+                    !hasSuperAdvice(this.superAnalyzedClasses) && matchedShimTypes.isEmpty()
+                            && matchedMixinTypes.reweavable().isEmpty() && adviceMatchers.isEmpty();
+        }
         this.classBytes = classBytes;
-    }
-
-    boolean isShortCircuitBeforeAnalyzeMethods() {
-        return shortCircuitBeforeAnalyzeMethods;
     }
 
     void analyzeMethods() {
@@ -170,18 +213,20 @@ class ClassAnalyzer {
         checkNotNull(methodAdvisors);
         checkNotNull(methodsThatOnlyNowFulfillAdvice);
         if (Modifier.isInterface(thinClass.access())) {
-            return false;
+            // FIXME only need to return true if any default methods have advice
+            return !methodAdvisors.isEmpty() || !matchedMixinTypes.reweavable().isEmpty();
         }
         return !methodAdvisors.isEmpty() || !methodsThatOnlyNowFulfillAdvice.isEmpty()
-                || !matchedShimTypes.isEmpty() || !matchedMixinTypes.isEmpty();
+                || !matchedShimTypes.isEmpty() || !matchedMixinTypes.reweavable().isEmpty()
+                || hasMainMethod;
     }
 
     ImmutableList<ShimType> getMatchedShimTypes() {
         return matchedShimTypes;
     }
 
-    ImmutableList<MixinType> getMatchedMixinTypes() {
-        return matchedMixinTypes;
+    List<MixinType> getMatchedReweavableMixinTypes() {
+        return matchedMixinTypes.reweavable();
     }
 
     Map<String, List<Advice>> getMethodAdvisors() {
@@ -199,11 +244,23 @@ class ClassAnalyzer {
     @RequiresNonNull("bridgeTargetAdvisors")
     private List<Advice> analyzeMethod(ThinMethod thinMethod) {
         List<Type> parameterTypes = Arrays.asList(Type.getArgumentTypes(thinMethod.desc()));
+        if (Modifier.isFinal(thinMethod.access()) && Modifier.isPublic(thinMethod.access())) {
+            ImmutablePublicFinalMethod.Builder builder = ImmutablePublicFinalMethod.builder()
+                    .name(thinMethod.name());
+            for (Type parameterType : parameterTypes) {
+                builder.addParameterTypes(parameterType.getClassName());
+            }
+            analyzedClassBuilder.addPublicFinalMethods(builder.build());
+        }
+        if (shortCircuitBeforeAnalyzeMethods) {
+            return ImmutableList.of();
+        }
         Type returnType = Type.getReturnType(thinMethod.desc());
         List<String> methodAnnotations = thinMethod.annotations();
         List<Advice> matchingAdvisors = getMatchingAdvisors(thinMethod, methodAnnotations,
                 parameterTypes, returnType);
-        if (matchingAdvisors.isEmpty()) {
+        boolean intfMethod = intf && !Modifier.isStatic(thinMethod.access());
+        if (matchingAdvisors.isEmpty() && !intfMethod) {
             return ImmutableList.of();
         }
         ImmutableAnalyzedMethod.Builder builder = ImmutableAnalyzedMethod.builder();
@@ -217,23 +274,21 @@ class ClassAnalyzer {
         for (String exception : thinMethod.exceptions()) {
             builder.addExceptions(ClassNames.fromInternalName(exception));
         }
-        List<Advice> declaredOnlyMatchingAdvisors = Lists.newArrayList();
+        List<Advice> subTypeRestrictedAdvisors = Lists.newArrayList();
         for (Iterator<Advice> i = matchingAdvisors.iterator(); i.hasNext();) {
             Advice advice = i.next();
-            if (advice.pointcutClassName().equals(advice.pointcutMethodDeclaringClassName())) {
-                continue;
-            } else if (!isTargetClassNameMatch(advice, superClassNames)) {
-                declaredOnlyMatchingAdvisors.add(advice);
+            if (!isSubTypeRestrictionMatch(advice, superClassNames)) {
+                subTypeRestrictedAdvisors.add(advice);
                 i.remove();
             }
         }
-        builder.addAllAdvisors(matchingAdvisors);
-        builder.addAllDeclaredOnlyAdvisors(declaredOnlyMatchingAdvisors);
+        builder.addAllAdvisors(matchingAdvisors)
+                .addAllSubTypeRestrictedAdvisors(subTypeRestrictedAdvisors);
         analyzedClassBuilder.addAnalyzedMethods(builder.build());
         return matchingAdvisors;
     }
 
-    // returns mutable list if non-empty
+    // returns mutable list if non-empty so items can be removed
     @RequiresNonNull("bridgeTargetAdvisors")
     private List<Advice> getMatchingAdvisors(ThinMethod thinMethod, List<String> methodAnnotations,
             List<Type> parameterTypes, Type returnType) {
@@ -244,12 +299,20 @@ class ClassAnalyzer {
                 matchingAdvisors.add(adviceMatcher.advice());
             }
         }
-        // look at super types
-        for (AnalyzedClass superAnalyzedClass : superAnalyzedClasses) {
-            for (AnalyzedMethod analyzedMethod : superAnalyzedClass.analyzedMethods()) {
-                if (analyzedMethod.isOverriddenBy(thinMethod.name(), parameterTypes)) {
-                    matchingAdvisors.addAll(analyzedMethod.advisors());
-                    matchingAdvisors.addAll(analyzedMethod.declaredOnlyAdvisors());
+        if (!thinMethod.name().equals("<init>")) {
+            // look at super types
+            for (AnalyzedClass superAnalyzedClass : superAnalyzedClasses) {
+                for (AnalyzedMethod analyzedMethod : superAnalyzedClass.analyzedMethods()) {
+                    if (analyzedMethod.isOverriddenBy(thinMethod.name(), parameterTypes)) {
+                        matchingAdvisors.addAll(analyzedMethod.advisors());
+                        for (Advice subTypeRestrictedAdvice : analyzedMethod
+                                .subTypeRestrictedAdvisors()) {
+                            if (isSubTypeRestrictionMatch(subTypeRestrictedAdvice,
+                                    superClassNames)) {
+                                matchingAdvisors.add(subTypeRestrictedAdvice);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -302,24 +365,27 @@ class ClassAnalyzer {
     }
 
     private List<AnalyzedMethod> getMethodsThatOnlyNowFulfillAdvice(AnalyzedClass analyzedClass) {
-        if (analyzedClass.isInterface() || analyzedClass.isAbstract()) {
-            ImmutableMap.of();
+        if (analyzedClass.isAbstract()) {
+            return ImmutableList.of();
         }
         Map<AnalyzedMethodKey, Set<Advice>> matchingAdvisorSets =
                 getInheritedInterfaceMethodsWithAdvice();
+        if (matchingAdvisorSets.isEmpty()) {
+            return ImmutableList.of();
+        }
         for (AnalyzedMethod analyzedMethod : analyzedClass.analyzedMethods()) {
             matchingAdvisorSets.remove(AnalyzedMethodKey.wrap(analyzedMethod));
         }
         removeAdviceAlreadyWovenIntoSuperClass(matchingAdvisorSets);
+        removeMethodsThatWouldOverridePublicFinalMethodsFromSuperClass(matchingAdvisorSets);
         List<AnalyzedMethod> methodsThatOnlyNowFulfillAdvice = Lists.newArrayList();
-        for (Entry<AnalyzedMethodKey, Set<Advice>> entry : matchingAdvisorSets.entrySet()) {
-            AnalyzedMethod inheritedMethod = entry.getKey().analyzedMethod();
+        for (Map.Entry<AnalyzedMethodKey, Set<Advice>> entry : matchingAdvisorSets.entrySet()) {
+            AnalyzedMethod inheritedMethod = checkNotNull(entry.getKey().analyzedMethod());
             Set<Advice> advisors = entry.getValue();
             if (!advisors.isEmpty()) {
                 methodsThatOnlyNowFulfillAdvice.add(ImmutableAnalyzedMethod.builder()
                         .copyFrom(inheritedMethod)
                         .advisors(advisors)
-                        .declaredOnlyAdvisors(ImmutableList.<Advice>of())
                         .build());
             }
         }
@@ -336,12 +402,11 @@ class ClassAnalyzer {
                     matchingAdvisorSet = Sets.newHashSet();
                     matchingAdvisorSets.put(key, matchingAdvisorSet);
                 }
-                if (superAnalyzedClass.isInterface()) {
-                    addToMatchingAdvisorsIfTargetClassNameMatch(matchingAdvisorSet,
-                            superAnalyzedMethod.advisors(), superClassNames);
-                } else {
-                    addToMatchingAdvisorsIfTargetClassNameMatch(matchingAdvisorSet,
-                            superAnalyzedMethod.declaredOnlyAdvisors(), superClassNames);
+                matchingAdvisorSet.addAll(superAnalyzedMethod.advisors());
+                for (Advice advice : superAnalyzedMethod.subTypeRestrictedAdvisors()) {
+                    if (isSubTypeRestrictionMatch(advice, superClassNames)) {
+                        matchingAdvisorSet.add(advice);
+                    }
                 }
             }
         }
@@ -351,10 +416,10 @@ class ClassAnalyzer {
     private void removeAdviceAlreadyWovenIntoSuperClass(
             Map<AnalyzedMethodKey, Set<Advice>> matchingAdvisorSets) {
         for (AnalyzedClass superAnalyzedClass : superAnalyzedClasses) {
-            if (superAnalyzedClass.isInterface()) {
-                continue;
-            }
             for (AnalyzedMethod superAnalyzedMethod : superAnalyzedClass.analyzedMethods()) {
+                if (Modifier.isAbstract(superAnalyzedMethod.modifiers())) {
+                    continue;
+                }
                 Set<Advice> matchingAdvisorSet =
                         matchingAdvisorSets.get(AnalyzedMethodKey.wrap(superAnalyzedMethod));
                 if (matchingAdvisorSet == null) {
@@ -365,31 +430,55 @@ class ClassAnalyzer {
         }
     }
 
-    private static void addToMatchingAdvisorsIfTargetClassNameMatch(Set<Advice> matchingAdvisors,
-            List<Advice> advisors, Set<String> superClassNames) {
-        for (Advice advice : advisors) {
-            if (isTargetClassNameMatch(advice, superClassNames)) {
-                matchingAdvisors.add(advice);
+    private void removeMethodsThatWouldOverridePublicFinalMethodsFromSuperClass(
+            Map<AnalyzedMethodKey, Set<Advice>> matchingAdvisorSets) {
+        for (AnalyzedClass superAnalyzedClass : superAnalyzedClasses) {
+            for (PublicFinalMethod publicFinalMethod : superAnalyzedClass.publicFinalMethods()) {
+                ImmutableAnalyzedMethodKey key = ImmutableAnalyzedMethodKey.builder()
+                        .name(publicFinalMethod.name())
+                        .addAllParameterTypes(publicFinalMethod.parameterTypes())
+                        .build();
+                Set<Advice> value = matchingAdvisorSets.remove(key);
+                // need to check if empty due to removeAdviceAlreadyWovenIntoSuperClass() above
+                if (value != null && !value.isEmpty()) {
+                    logOverridePublicFinalMethodInfo(superAnalyzedClass, publicFinalMethod);
+                }
             }
         }
     }
 
+    private void logOverridePublicFinalMethodInfo(AnalyzedClass superAnalyzedClass,
+            PublicFinalMethod publicFinalMethod) {
+        String format = "Not able to override and instrument final method {}.{}({}) which is"
+                + " being used by a subclass {} to implement one or more instrumented interfaces";
+        String arg1 = superAnalyzedClass.name();
+        String arg2 = publicFinalMethod.name();
+        String arg3 = Joiner.on(", ").join(publicFinalMethod.parameterTypes());
+        String arg4 = className;
+        if (superAnalyzedClass.name().equals("org.jooq.tools.jdbc.JDBC41ResultSet")) {
+            // this is a known case, and is only worth logging at debug level since all that these
+            // methods in JDBC41ResultSet do is throw an UnsupportedOperationException
+            logger.debug(format, arg1, arg2, arg3, arg4);
+        } else {
+            logger.info(format, arg1, arg2, arg3, arg4);
+        }
+    }
+
     private static ImmutableList<ShimType> getMatchedShimTypes(List<ShimType> shimTypes,
-            String className, Iterable<AnalyzedClass> superAnalyzedClasses,
-            List<AnalyzedClass> newInterfaceAnalyzedClasses) {
+            String className, List<AnalyzedClass> superAnalyzedHierarchy,
+            List<AnalyzedClass> interfaceAnalyzedHierarchy) {
         Set<ShimType> matchedShimTypes = Sets.newHashSet();
         for (ShimType shimType : shimTypes) {
-            Pattern targetPattern = shimType.targetPattern();
-            if (targetPattern == null && shimType.target().equals(className)
-                    || targetPattern != null && targetPattern.matcher(className).matches()) {
+            // currently only exact matching is supported
+            if (shimType.targets().contains(className)) {
                 matchedShimTypes.add(shimType);
             }
         }
-        for (AnalyzedClass newInterfaceAnalyzedClass : newInterfaceAnalyzedClasses) {
-            matchedShimTypes.addAll(newInterfaceAnalyzedClass.shimTypes());
+        for (AnalyzedClass interfaceAnalyzedClass : interfaceAnalyzedHierarchy) {
+            matchedShimTypes.addAll(interfaceAnalyzedClass.shimTypes());
         }
         // remove shims that were already implemented in a super class
-        for (AnalyzedClass superAnalyzedClass : superAnalyzedClasses) {
+        for (AnalyzedClass superAnalyzedClass : superAnalyzedHierarchy) {
             if (!superAnalyzedClass.isInterface()) {
                 matchedShimTypes.removeAll(superAnalyzedClass.shimTypes());
             }
@@ -397,9 +486,10 @@ class ClassAnalyzer {
         return ImmutableList.copyOf(matchedShimTypes);
     }
 
-    private static ImmutableList<MixinType> getMatchedMixinTypes(List<MixinType> mixinTypes,
-            String className, Iterable<AnalyzedClass> superAnalyzedClasses,
-            List<AnalyzedClass> newInterfaceAnalyzedClasses) {
+    private static MatchedMixinTypes getMatchedMixinTypes(List<MixinType> mixinTypes,
+            String className, @Nullable Class<?> classBeingRedefined,
+            List<AnalyzedClass> superAnalyzedHierarchy,
+            List<AnalyzedClass> interfaceAnalyzedHierarchy) {
         Set<MixinType> matchedMixinTypes = Sets.newHashSet();
         for (MixinType mixinType : mixinTypes) {
             // currently only exact matching is supported
@@ -407,16 +497,150 @@ class ClassAnalyzer {
                 matchedMixinTypes.add(mixinType);
             }
         }
-        for (AnalyzedClass newInterfaceAnalyzedClass : newInterfaceAnalyzedClasses) {
-            matchedMixinTypes.addAll(newInterfaceAnalyzedClass.mixinTypes());
+        for (AnalyzedClass interfaceAnalyzedClass : interfaceAnalyzedHierarchy) {
+            matchedMixinTypes.addAll(interfaceAnalyzedClass.mixinTypes());
+        }
+        for (AnalyzedClass superAnalyzedClass : superAnalyzedHierarchy) {
+            matchedMixinTypes.addAll(superAnalyzedClass.nonReweavableMixinTypes());
         }
         // remove mixins that were already implemented in a super class
-        for (AnalyzedClass superAnalyzedClass : superAnalyzedClasses) {
+        for (AnalyzedClass superAnalyzedClass : superAnalyzedHierarchy) {
             if (!superAnalyzedClass.isInterface()) {
                 matchedMixinTypes.removeAll(superAnalyzedClass.mixinTypes());
             }
         }
-        return ImmutableList.copyOf(matchedMixinTypes);
+        List<MixinType> nonReweavableMatchedMixinTypes = Lists.newArrayList();
+        if (classBeingRedefined != null) {
+            Set<String> interfaceNames = Sets.newHashSet();
+            for (Class<?> iface : classBeingRedefined.getInterfaces()) {
+                interfaceNames.add(iface.getName());
+            }
+            for (Iterator<MixinType> i = matchedMixinTypes.iterator(); i.hasNext();) {
+                MixinType matchedMixinType = i.next();
+                for (Type mixinInterface : matchedMixinType.interfaces()) {
+                    if (!interfaceNames.contains(mixinInterface.getClassName())) {
+                        // re-weaving would fail with "attempted to change superclass or interfaces"
+                        logger.debug("not reweaving {} because cannot add mixin type: {}",
+                                ClassNames.fromInternalName(className),
+                                mixinInterface.getClassName());
+                        nonReweavableMatchedMixinTypes.add(matchedMixinType);
+                        i.remove();
+                        break;
+                    }
+                }
+            }
+        }
+        return ImmutableMatchedMixinTypes.builder()
+                .addAllReweavable(matchedMixinTypes)
+                .addAllNonReweavable(nonReweavableMatchedMixinTypes)
+                .build();
+    }
+
+    private static boolean hasMainMethod(List<ThinMethod> methods) {
+        for (ThinMethod method : methods) {
+            if (method.name().equals("main") && method.desc().equals("([Ljava/lang/String;)V")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Set<String> getEjbRemoteInterfaces(ThinClass thinClass,
+            List<AnalyzedClass> superAnalyzedClasses) {
+        Set<String> ejbRemoteInterfaces = Sets.newHashSet();
+        for (Type ejbRemoteInterface : thinClass.ejbRemoteInterfaces()) {
+            ejbRemoteInterfaces.add(ejbRemoteInterface.getClassName());
+        }
+        for (AnalyzedClass superAnalyzedClass : superAnalyzedClasses) {
+            if (superAnalyzedClass.isInterface() && superAnalyzedClass.ejbRemote()) {
+                ejbRemoteInterfaces.add(superAnalyzedClass.name());
+            }
+        }
+        return ejbRemoteInterfaces;
+    }
+
+    private static List<AnalyzedClass> hack(ThinClass thinClass, ClassLoader loader,
+            List<AnalyzedClass> superAnalyzedClasses, Set<String> ejbRemoteInterfaces) {
+        Map<String, List<String>> superInterfaceNames = Maps.newHashMap();
+        for (AnalyzedClass analyzedClass : superAnalyzedClasses) {
+            if (analyzedClass.isInterface()) {
+                superInterfaceNames.put(analyzedClass.name(), analyzedClass.interfaceNames());
+            }
+        }
+        Map<String, String> interfaceNamesToInstrument = Maps.newHashMap();
+        for (String ejbRemoteInterface : ejbRemoteInterfaces) {
+            addToInterfaceNamesToInstrument(ejbRemoteInterface, superInterfaceNames,
+                    interfaceNamesToInstrument, ejbRemoteInterface);
+        }
+        List<InstrumentationConfig> instrumentationConfigs = Lists.newArrayList();
+        for (Map.Entry<String, String> entry : interfaceNamesToInstrument.entrySet()) {
+            String shortClassName = entry.getValue();
+            int index = shortClassName.lastIndexOf('.');
+            if (index != -1) {
+                shortClassName = shortClassName.substring(index + 1);
+            }
+            index = shortClassName.lastIndexOf('$');
+            if (index != -1) {
+                shortClassName = shortClassName.substring(index + 1);
+            }
+            instrumentationConfigs.add(ImmutableInstrumentationConfig.builder()
+                    .className(entry.getKey())
+                    .subTypeRestriction(ClassNames.fromInternalName(thinClass.name()))
+                    .methodName("*")
+                    .addMethodParameterTypes("..")
+                    .captureKind(CaptureKind.TRANSACTION)
+                    .transactionType("Background")
+                    .transactionNameTemplate("EJB remote: " + shortClassName + "#{{methodName}}")
+                    .traceEntryMessageTemplate(
+                            "EJB remote: " + entry.getValue() + ".{{methodName}}()")
+                    .timerName("ejb remote")
+                    .build());
+        }
+        ImmutableMap<Advice, LazyDefinedClass> newAdvisors =
+                AdviceGenerator.createAdvisors(instrumentationConfigs, null, false);
+        try {
+            ClassLoaders.defineClassesInClassLoader(newAdvisors.values(), loader);
+        } catch (Exception e) {
+            logger.error(e.getMessage(), e);
+        }
+        Map<String, Advice> newAdvisorsByRemoteInterface = Maps.newHashMap();
+        for (Advice advice : newAdvisors.keySet()) {
+            newAdvisorsByRemoteInterface.put(advice.pointcut().className(), advice);
+        }
+
+        List<AnalyzedClass> ejbHackedSuperAnalyzedClasses = Lists.newArrayList();
+        for (AnalyzedClass superAnalyzedClass : superAnalyzedClasses) {
+            Advice advice = newAdvisorsByRemoteInterface.get(superAnalyzedClass.name());
+            if (advice == null) {
+                ejbHackedSuperAnalyzedClasses.add(superAnalyzedClass);
+            } else {
+                ImmutableAnalyzedClass.Builder builder = ImmutableAnalyzedClass.builder()
+                        .copyFrom(superAnalyzedClass);
+                List<AnalyzedMethod> analyzedMethods = Lists.newArrayList();
+                for (AnalyzedMethod analyzedMethod : superAnalyzedClass.analyzedMethods()) {
+                    analyzedMethods.add(ImmutableAnalyzedMethod.builder()
+                            .copyFrom(analyzedMethod)
+                            .addSubTypeRestrictedAdvisors(advice)
+                            .build());
+                }
+                builder.analyzedMethods(analyzedMethods);
+                ejbHackedSuperAnalyzedClasses.add(builder.build());
+            }
+        }
+        return ejbHackedSuperAnalyzedClasses;
+    }
+
+    private static void addToInterfaceNamesToInstrument(String interfaceName,
+            Map<String, List<String>> superInterfaceNamesMap,
+            Map<String, String> interfaceNamesToInstrument, String ejbRemoteInterface) {
+        interfaceNamesToInstrument.put(interfaceName, ejbRemoteInterface);
+        List<String> superInterfaceNames = superInterfaceNamesMap.get(interfaceName);
+        if (superInterfaceNames != null) {
+            for (String superInterfaceName : superInterfaceNames) {
+                addToInterfaceNamesToInstrument(superInterfaceName, superInterfaceNamesMap,
+                        interfaceNamesToInstrument, ejbRemoteInterface);
+            }
+        }
     }
 
     private static boolean hasSuperAdvice(List<AnalyzedClass> superAnalyzedClasses) {
@@ -428,14 +652,14 @@ class ClassAnalyzer {
         return false;
     }
 
-    private static boolean isTargetClassNameMatch(Advice advice, Set<String> superClassNames) {
-        Pattern classNamePattern = advice.pointcutClassNamePattern();
-        if (classNamePattern == null) {
-            String className = advice.pointcutClassName();
-            return className.isEmpty() || superClassNames.contains(className);
+    private static boolean isSubTypeRestrictionMatch(Advice advice, Set<String> superClassNames) {
+        Pattern pointcutSubTypeRestrictionPattern = advice.pointcutSubTypeRestrictionPattern();
+        if (pointcutSubTypeRestrictionPattern == null) {
+            String subTypeRestriction = advice.pointcut().subTypeRestriction();
+            return subTypeRestriction.isEmpty() || superClassNames.contains(subTypeRestriction);
         }
         for (String superClassName : superClassNames) {
-            if (classNamePattern.matcher(superClassName).matches()) {
+            if (pointcutSubTypeRestrictionPattern.matcher(superClassName).matches()) {
                 return true;
             }
         }
@@ -460,8 +684,9 @@ class ClassAnalyzer {
 
         abstract String name();
         abstract ImmutableList<String> parameterTypes();
+        // null is only used when constructing key purely for lookup
         @Value.Auxiliary
-        abstract AnalyzedMethod analyzedMethod();
+        abstract @Nullable AnalyzedMethod analyzedMethod();
 
         private static AnalyzedMethodKey wrap(AnalyzedMethod analyzedMethod) {
             return ImmutableAnalyzedMethodKey.builder()
@@ -472,12 +697,24 @@ class ClassAnalyzer {
         }
     }
 
+    @Value.Immutable
+    interface MatchedShimTypes {
+        List<ShimType> reweavable();
+        List<ShimType> nonReweavable();
+    }
+
+    @Value.Immutable
+    interface MatchedMixinTypes {
+        List<MixinType> reweavable();
+        List<MixinType> nonReweavable();
+    }
+
     private static class BridgeMethodClassVisitor extends ClassVisitor {
 
         private final Map<String, String> bridgeTargetMethods = Maps.newHashMap();
 
         private BridgeMethodClassVisitor() {
-            super(ASM5);
+            super(ASM6);
         }
 
         public Map<String, String> getBridgeTargetMethods() {
@@ -486,7 +723,7 @@ class ClassAnalyzer {
 
         @Override
         public @Nullable MethodVisitor visitMethod(int access, String name, String desc,
-                @Nullable String signature, String /*@Nullable*/[] exceptions) {
+                @Nullable String signature, String /*@Nullable*/ [] exceptions) {
             if ((access & ACC_BRIDGE) == 0) {
                 return null;
             }
@@ -502,7 +739,7 @@ class ClassAnalyzer {
             private boolean found;
 
             private BridgeMethodVisitor(String bridgeMethodName, String bridgeMethodDesc) {
-                super(ASM5);
+                super(ASM6);
                 this.bridgeMethodName = bridgeMethodName;
                 this.bridgeMethodDesc = bridgeMethodDesc;
                 bridgeMethodParamCount = Type.getArgumentTypes(bridgeMethodDesc).length;

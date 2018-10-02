@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,21 +21,57 @@ import java.lang.annotation.Target;
 import static java.lang.annotation.ElementType.TYPE;
 import static java.lang.annotation.RetentionPolicy.RUNTIME;
 
+// pointcuts on constructors (methodName = "<init>") are unusual
+// because you cannot have a try catch handler than covers the call to the super constructor
+// see https://bugs.openjdk.java.net/browse/JDK-8172282
+// because of this, @IsEnabled is invoked prior to calling the super constructor
+// and @OnBefore is invoked after calling the super constructor
+// NOTE @IsEnabled could be invoked after calling the super constructor, but this causes stack frame
+// headaches if some other bytecode manipulation added local variable prior to the super constructor
+// call (which is not possible via straight Java code, but is legal in bytecode,
+// see WeaverTest.shouldExecuteAdviceOnHackedConstructorBytecode())
+
 @Target(TYPE)
 @Retention(RUNTIME)
 public @interface Pointcut {
 
-    // target class name
+    /**
+     * Restrict the pointcut to methods that are declared in a classes (or interfaces) matching the
+     * given name.
+     * 
+     * | and * can be used for limited regular expressions. Full regular expressions can be used by
+     * starting and ending className with /
+     */
     String className() default "";
-    // optionally (in addition to className or instead of className) restrict pointcut to classes
-    // with the given annotation
+
+    /**
+     * Optionally (in addition to className or instead of className) restrict the pointcut to
+     * methods that are declared in a classes (or interfaces) matching the given annotation.
+     * 
+     * | and * can be used for limited regular expressions. Full regular expressions can be used by
+     * starting and ending classAnnotation with /
+     */
     String classAnnotation() default "";
-    // restrict pointcut to the given subclass and below
-    // e.g. useful for pointcut on java.lang.Runnable.run(), but only for classes
-    // matching com.yourcompany.*
-    // also useful for pointcut on java.util.concurrent.Future.get(), but only for classes
-    // under com.ning.http.client.ListenableFuture
-    String methodDeclaringClassName() default "";
+
+    /**
+     * E.g. pointcut on className="java.util.concurrent.Future", methodName="get",
+     * methodParameterTypes={}, but only for classes with
+     * subTypeRestriction="com.ning.http.client.ListenableFuture"
+     * 
+     * | and * can be used for limited regular expressions. Full regular expressions can be used by
+     * starting and ending subTypeRestriction with /
+     */
+    String subTypeRestriction() default "";
+
+    /**
+     * E.g. pointcut on className="com.yourcompany.*", methodName="run", methodParameterTypes={},
+     * but only for classes with superTypeRestriction="java.lang.Runnable"
+     * 
+     * | and * can be used for limited regular expressions. Full regular expressions can be used by
+     * starting and ending superTypeRestriction with /
+     */
+    String superTypeRestriction() default "";
+
     /**
      * | and * can be used for limited regular expressions. Full regular expressions can be used by
      * starting and ending methodName with /.

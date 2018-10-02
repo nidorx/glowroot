@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,14 @@
 package org.glowroot.central.repo;
 
 import com.datastax.driver.core.Cluster;
-import com.datastax.driver.core.KeyspaceMetadata;
-import com.datastax.driver.core.Session;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.glowroot.central.util.Sessions;
-import org.glowroot.common.config.ImmutableUserConfig;
-import org.glowroot.common.config.UserConfig;
+import org.glowroot.central.util.ClusterManager;
+import org.glowroot.central.util.Session;
+import org.glowroot.common2.config.ImmutableUserConfig;
+import org.glowroot.common2.config.UserConfig;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -32,22 +31,21 @@ public class UserDaoIT {
 
     private static Cluster cluster;
     private static Session session;
+    private static ClusterManager clusterManager;
     private static UserDao userDao;
 
     @BeforeClass
     public static void setUp() throws Exception {
         SharedSetupRunListener.startCassandra();
         cluster = Clusters.newCluster();
-        session = cluster.newSession();
-        Sessions.createKeyspaceIfNotExists(session, "glowroot_unit_tests");
-        session.execute("use glowroot_unit_tests");
-        KeyspaceMetadata keyspace = cluster.getMetadata().getKeyspace("glowroot_unit_tests");
-
-        userDao = new UserDao(session, keyspace);
+        session = new Session(cluster.newSession(), "glowroot_unit_tests");
+        clusterManager = ClusterManager.create();
+        userDao = new UserDao(session, clusterManager);
     }
 
     @AfterClass
     public static void tearDown() throws Exception {
+        clusterManager.close();
         session.close();
         cluster.close();
         SharedSetupRunListener.stopCassandra();

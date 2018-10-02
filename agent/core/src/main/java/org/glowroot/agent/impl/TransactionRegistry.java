@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,59 +15,40 @@
  */
 package org.glowroot.agent.impl;
 
-import javax.annotation.Nullable;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
-import org.glowroot.agent.impl.TransactionCollection.TransactionEntry;
-import org.glowroot.agent.plugin.api.util.FastThreadLocal;
-import org.glowroot.agent.plugin.api.util.FastThreadLocal.Holder;
-import org.glowroot.common.util.UsedByGeneratedBytecode;
-
-import static org.glowroot.agent.util.Checkers.castInitialized;
+import org.glowroot.agent.bytecode.api.ThreadContextThreadLocal;
+import org.glowroot.agent.util.IterableWithSelfRemovableEntries;
+import org.glowroot.agent.util.IterableWithSelfRemovableEntries.SelfRemovableEntry;
 
 public class TransactionRegistry {
 
     // collection of active running transactions
-    private final TransactionCollection transactions = new TransactionCollection();
+    private final IterableWithSelfRemovableEntries<Transaction> transactions =
+            new IterableWithSelfRemovableEntries<Transaction>();
 
     // active thread context being executed by the current thread
-    private final FastThreadLocal</*@Nullable*/ ThreadContextImpl> currentThreadContext =
-            new FastThreadLocal</*@Nullable*/ ThreadContextImpl>();
-
-    public TransactionRegistry() {
-        TransactionRegistryHolder.transactionRegistry = castInitialized(this);
-    }
+    private final ThreadContextThreadLocal currentThreadContext =
+            new ThreadContextThreadLocal();
 
     @Nullable
     Transaction getCurrentTransaction() {
-        ThreadContextImpl threadContext = currentThreadContext.get();
+        ThreadContextImpl threadContext = (ThreadContextImpl) currentThreadContext.get();
         if (threadContext == null) {
             return null;
         }
         return threadContext.getTransaction();
     }
 
-    @UsedByGeneratedBytecode
-    public Holder</*@Nullable*/ ThreadContextImpl> getCurrentThreadContextHolder() {
+    public ThreadContextThreadLocal.Holder getCurrentThreadContextHolder() {
         return currentThreadContext.getHolder();
     }
 
-    TransactionEntry addTransaction(Transaction transaction) {
+    SelfRemovableEntry addTransaction(Transaction transaction) {
         return transactions.add(transaction);
     }
 
     public Iterable<Transaction> getTransactions() {
         return transactions;
-    }
-
-    @UsedByGeneratedBytecode
-    public static class TransactionRegistryHolder {
-
-        private static @Nullable TransactionRegistry transactionRegistry;
-
-        private TransactionRegistryHolder() {}
-
-        public static @Nullable TransactionRegistry getTransactionRegistry() {
-            return transactionRegistry;
-        }
     }
 }

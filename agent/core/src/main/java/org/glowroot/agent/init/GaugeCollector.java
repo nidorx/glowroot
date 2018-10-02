@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2017 the original author or authors.
+ * Copyright 2014-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package org.glowroot.agent.init;
 
+import java.lang.instrument.Instrumentation;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
@@ -37,8 +38,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.checkerframework.checker.nullness.qual.RequiresNonNull;
 import org.immutables.value.Value;
 import org.slf4j.Logger;
@@ -49,12 +50,15 @@ import org.glowroot.agent.config.ConfigService;
 import org.glowroot.agent.config.GaugeConfig;
 import org.glowroot.agent.config.GaugeConfig.MBeanAttribute;
 import org.glowroot.agent.config.ImmutableMBeanAttribute;
+import org.glowroot.agent.util.JavaVersion;
 import org.glowroot.agent.util.LazyPlatformMBeanServer;
 import org.glowroot.agent.util.LazyPlatformMBeanServer.InitListener;
+import org.glowroot.agent.util.ThreadFactories;
+import org.glowroot.agent.weaving.Java9;
 import org.glowroot.common.util.Clock;
 import org.glowroot.common.util.ScheduledRunnable;
 import org.glowroot.common.util.Styles;
-import org.glowroot.wire.api.model.CollectorServiceOuterClass.GaugeValue;
+import org.glowroot.wire.api.model.CollectorServiceOuterClass.GaugeValueMessage.GaugeValue;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 
@@ -82,7 +86,8 @@ class GaugeCollector extends ScheduledRunnable {
     private @MonotonicNonNull Map<String, RawCounterValue> priorRawCounterValues;
 
     GaugeCollector(ConfigService configService, Collector collector,
-            LazyPlatformMBeanServer lazyPlatformMBeanServer, Clock clock, Ticker ticker) {
+            LazyPlatformMBeanServer lazyPlatformMBeanServer,
+            final @Nullable Instrumentation instrumentation, Clock clock, Ticker ticker) {
         this.configService = configService;
         this.collector = collector;
         this.lazyPlatformMBeanServer = lazyPlatformMBeanServer;
@@ -90,19 +95,17 @@ class GaugeCollector extends ScheduledRunnable {
         this.ticker = ticker;
         startTimeMillis = clock.currentTimeMillis();
         collectionExecutor = Executors.newSingleThreadScheduledExecutor(
-                new ThreadFactoryBuilder()
-                        .setDaemon(true)
-                        .setNameFormat("Glowroot-Gauge-Collection")
-                        .build());
-        flushingExecutor = Executors.newSingleThreadExecutor(
-                new ThreadFactoryBuilder()
-                        .setDaemon(true)
-                        .setNameFormat("Glowroot-Gauge-Flushing")
-                        .build());
+                ThreadFactories.create("Glowroot-Gauge-Collection"));
+        flushingExecutor = Executors
+                .newSingleThreadExecutor(ThreadFactories.create("Glowroot-Gauge-Flushing"));
         lazyPlatformMBeanServer.addInitListener(new InitListener() {
             @Override
             public void postInit(MBeanServer mbeanServer) {
                 try {
+                    if (JavaVersion.isGreaterThanOrEqualToJava9() && instrumentation != null) {
+                        Java9.grantAccess(instrumentation, "org.glowroot.agent.init.GaugeCollector",
+                                "sun.management.ManagementFactoryHelper", true);
+                    }
                     Class<?> sunManagementFactoryHelperClass =
                             Class.forName("sun.management.ManagementFactoryHelper");
                     Method registerInternalMBeansMethod = sunManagementFactoryHelperClass
@@ -156,7 +159,7 @@ class GaugeCollector extends ScheduledRunnable {
 
     @VisibleForTesting
     @RequiresNonNull("priorRawCounterValues")
-    List<GaugeValue> collectGaugeValues(GaugeConfig gaugeConfig) throws InterruptedException {
+    List<GaugeValue> collectGaugeValues(GaugeConfig gaugeConfig) throws Exception {
         String mbeanObjectName = gaugeConfig.mbeanObjectName();
         ObjectName objectName;
         try {
@@ -174,6 +177,9 @@ class GaugeCollector extends ScheduledRunnable {
             logFirstTimeMBeanNotMatchedOrFound(mbeanObjectName);
             return ImmutableList.of();
         }
+        // remove from pendingLoggedMBeanGauges so if it is later not found, it will be logged
+        // normally and not with "waited ... seconds after jvm startup before logging this" message
+        pendingLoggedMBeanGauges.remove(mbeanObjectName);
         List<GaugeValue> gaugeValues = Lists.newArrayList();
         for (ObjectName matchingObjectName : matchingObjectNames) {
             gaugeValues.addAll(collectGaugeValues(matchingObjectName, gaugeConfig.mbeanAttributes(),
@@ -249,7 +255,7 @@ class GaugeCollector extends ScheduledRunnable {
                     // non-counter values showing up in same chart line)
                     gaugeName.append("[counter]");
                     String gaugeNameStr = gaugeName.toString();
-                    RawCounterValue priorRawCounterValue = priorRawCounterValues.get(gaugeName);
+                    RawCounterValue priorRawCounterValue = priorRawCounterValues.get(gaugeNameStr);
                     long captureTick = ticker.read();
                     if (priorRawCounterValue != null) {
                         long intervalNanos = captureTick - priorRawCounterValue.captureTick();

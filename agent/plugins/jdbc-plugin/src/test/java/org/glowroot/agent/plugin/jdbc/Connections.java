@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,25 @@
  */
 package org.glowroot.agent.plugin.jdbc;
 
+import java.lang.reflect.UndeclaredThrowableException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Properties;
 
+import javax.sql.DataSource;
+
+import com.sun.gjc.spi.DMManagedConnectionFactory;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import org.apache.commons.dbcp.BasicDataSource;
+import org.glassfish.api.jdbc.SQLTraceListener;
+import org.glassfish.api.jdbc.SQLTraceRecord;
 import org.h2.jdbc.JdbcConnection;
 import org.hsqldb.jdbc.JDBCDriver;
+
+import org.glowroot.agent.weaving.IsolatedWeavingClassLoader;
 
 public class Connections {
 
@@ -39,7 +49,8 @@ public class Connections {
     }
 
     enum ConnectionType {
-        HSQLDB, H2, COMMONS_DBCP_WRAPPED, TOMCAT_JDBC_POOL_WRAPPED, POSTGRES, ORACLE, SQLSERVER
+        HSQLDB, H2, COMMONS_DBCP_WRAPPED, TOMCAT_JDBC_POOL_WRAPPED, GLASSFISH_JDBC_POOL_WRAPPED,
+        HIKARI_CP_WRAPPED, POSTGRES, ORACLE, MSSQL
     }
 
     static Connection createConnection() throws Exception {
@@ -52,12 +63,16 @@ public class Connections {
                 return createCommonsDbcpWrappedConnection();
             case TOMCAT_JDBC_POOL_WRAPPED:
                 return createTomcatJdbcPoolWrappedConnection();
+            case GLASSFISH_JDBC_POOL_WRAPPED:
+                return createGlassfishJdbcPoolWrappedConnection();
+            case HIKARI_CP_WRAPPED:
+                return createHikariCpWrappedConnection();
             case POSTGRES:
                 return createPostgresConnection();
             case ORACLE:
                 return createOracleConnection();
-            case SQLSERVER:
-                return createSqlServerConnection();
+            case MSSQL:
+                return createMssqlConnection();
             default:
                 throw new IllegalStateException("Unexpected connection type: " + connectionType);
         }
@@ -70,7 +85,14 @@ public class Connections {
         } finally {
             statement.close();
         }
-        connection.close();
+        if (connectionType != ConnectionType.GLASSFISH_JDBC_POOL_WRAPPED) {
+            // TODO figure out why glassfish connection throws NullPointerException here
+            connection.close();
+        }
+    }
+
+    static ConnectionType getConnectionType() {
+        return connectionType;
     }
 
     private static Connection createHsqldbConnection() throws SQLException {
@@ -110,6 +132,43 @@ public class Connections {
         return connection;
     }
 
+    private static Connection createGlassfishJdbcPoolWrappedConnection() throws SQLException {
+        // set up database
+        DMManagedConnectionFactory connectionFactory = new DMManagedConnectionFactory();
+        connectionFactory.setClassName("org.hsqldb.jdbc.JDBCDriver");
+        connectionFactory.setURL("jdbc:hsqldb:mem:test");
+        connectionFactory.setStatementWrapping("true");
+        connectionFactory.setSqlTraceListeners(
+                "org.glowroot.agent.plugin.jdbc.Connections$GlassfishSQLTraceListener");
+        DataSource ds = (DataSource) connectionFactory.createConnectionFactory();
+        Connection connection = ds.getConnection();
+        insertRecords(connection);
+        return connection;
+    }
+
+    private static Connection createHikariCpWrappedConnection() throws SQLException {
+        if (Connections.class.getClassLoader() instanceof IsolatedWeavingClassLoader) {
+            try {
+                Class.forName("com.zaxxer.hikari.proxy.JavassistProxyFactory");
+                throw new AssertionError("Old HikariCP versions define proxies using"
+                        + " ClassLoader.defineClass() which is final so IsolatedWeavingClassLoader"
+                        + " cannot override and weave them, must use JavaagentContainer");
+            } catch (ClassNotFoundException e) {
+            }
+        }
+        HikariConfig config = new HikariConfig();
+        config.setDriverClassName("org.hsqldb.jdbc.JDBCDriver");
+        config.setJdbcUrl("jdbc:hsqldb:mem:test");
+        config.addDataSourceProperty("cachePrepStmts", "true");
+        config.addDataSourceProperty("prepStmtCacheSize", "250");
+        config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
+        @SuppressWarnings("resource")
+        HikariDataSource ds = new HikariDataSource(config);
+        Connection connection = ds.getConnection();
+        insertRecords(connection);
+        return connection;
+    }
+
     private static Connection createPostgresConnection() throws SQLException {
         // set up database
         Connection connection = DriverManager.getConnection("jdbc:postgresql://localhost/glowroot",
@@ -133,27 +192,13 @@ public class Connections {
     // </dependency>
     private static Connection createOracleConnection() throws SQLException {
         // set up database
-        Connection connection = DriverManager.getConnection("jdbc:oracle:thin:@//localhost/orcl",
-                "glowroot", "glowroot");
+        Connection connection =
+                DriverManager.getConnection("jdbc:oracle:thin:@localhost", "glowroot", "glowroot");
         insertRecords(connection);
         return connection;
     }
 
-    // need to add the sqlserver driver to the path in order to use this, e.g. install into local
-    // repo:
-    //
-    // mvn install:install-file -Dfile=sqljdbc.jar -DgroupId=com.microsoft -DartifactId=sqljdbc
-    // -Dversion=4.0 -Dpackaging=jar -DgeneratePom=true
-    //
-    // then add to pom.xml
-    //
-    // <dependency>
-    // <groupId>com.microsoft</groupId>
-    // <artifactId>sqljdbc</artifactId>
-    // <version>4.0</version>
-    // <scope>test</scope>
-    // </dependency>
-    private static Connection createSqlServerConnection() throws Exception {
+    private static Connection createMssqlConnection() throws Exception {
         // set up database
         Class.forName("com.microsoft.sqlserver.jdbc.SQLServerDriver");
         Connection connection =
@@ -174,14 +219,20 @@ public class Connections {
                 // in case of previous failure mid-test
                 statement.execute("drop table employee");
             } catch (SQLException e) {
+            } catch (UndeclaredThrowableException e) {
             }
-            statement.execute("create table employee (name varchar(100), misc " + binaryTypeName
-                    + ", misc2 " + clobTypeName + ")");
+            statement.execute("create table employee (id integer identity, name varchar(100), misc "
+                    + binaryTypeName + ", misc2 " + clobTypeName + ")");
             statement.execute("insert into employee (name) values ('john doe')");
             statement.execute("insert into employee (name) values ('jane doe')");
             statement.execute("insert into employee (name) values ('sally doe')");
         } finally {
             statement.close();
         }
+    }
+
+    public static class GlassfishSQLTraceListener implements SQLTraceListener {
+        @Override
+        public void sqlTrace(SQLTraceRecord record) {}
     }
 }

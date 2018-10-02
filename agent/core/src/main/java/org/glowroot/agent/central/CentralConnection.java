@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
  */
 package org.glowroot.agent.central;
 
+import java.io.File;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -22,18 +24,26 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.annotation.concurrent.GuardedBy;
+import javax.net.ssl.SSLException;
 
+import com.google.common.base.Splitter;
 import com.google.common.base.Stopwatch;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import com.google.common.collect.Lists;
 import io.grpc.ManagedChannel;
+import io.grpc.netty.GrpcSslContexts;
 import io.grpc.netty.NegotiationType;
 import io.grpc.netty.NettyChannelBuilder;
 import io.grpc.stub.StreamObserver;
+import io.grpc.util.RoundRobinLoadBalancerFactory;
 import io.netty.channel.EventLoopGroup;
+import io.netty.handler.ssl.SslContextBuilder;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.immutables.value.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.glowroot.agent.util.RateLimitedLogger;
+import org.glowroot.agent.util.ThreadFactories;
 import org.glowroot.common.util.OnlyUsedByTests;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -64,35 +74,79 @@ class CentralConnection {
 
     private final Random random = new Random();
 
-    private final RateLimitedLogger backPressureLogger =
+    private final RateLimitedLogger discardingDataLogger =
             new RateLimitedLogger(CentralConnection.class);
-    @GuardedBy("backPressureLogger")
+
+    // count does not include init call
+    @GuardedBy("discardingDataLogger")
     private int pendingRequestCount;
+
+    private final RateLimitedLogger initConnectionErrorLogger =
+            new RateLimitedLogger(CentralConnection.class, true);
 
     private final RateLimitedLogger connectionErrorLogger =
             new RateLimitedLogger(CentralConnection.class);
 
+    private final String collectorAddress;
+
+    private volatile boolean initCallSucceeded;
     private volatile boolean closed;
 
-    CentralConnection(String collectorHost, int collectorPort, AtomicBoolean inConnectionFailure) {
+    CentralConnection(String collectorAddress, @Nullable String collectorAuthority,
+            List<File> confDirs, AtomicBoolean inConnectionFailure) throws SSLException {
+        ParsedCollectorAddress parsedCollectorAddress = parseCollectorAddress(collectorAddress);
         eventLoopGroup = EventLoopGroups.create("Glowroot-GRPC-Worker-ELG");
-        channelExecutor = Executors.newSingleThreadExecutor(
-                new ThreadFactoryBuilder()
-                        .setDaemon(true)
-                        .setNameFormat("Glowroot-GRPC-Executor")
-                        .build());
-        channel = NettyChannelBuilder
-                .forAddress(collectorHost, collectorPort)
+        channelExecutor =
+                Executors.newSingleThreadExecutor(ThreadFactories.create("Glowroot-GRPC-Executor"));
+        NettyChannelBuilder builder;
+        if (parsedCollectorAddress.targets().size() == 1) {
+            CollectorTarget target = parsedCollectorAddress.targets().get(0);
+            builder = NettyChannelBuilder.forAddress(target.host(), target.port());
+            if (collectorAuthority != null) {
+                builder.overrideAuthority(collectorAuthority);
+            }
+        } else {
+            // this connection mechanism may be deprecated in the future in favor resolving a single
+            // address to multiple collectors via DNS (above)
+            String authority;
+            if (collectorAuthority != null) {
+                authority = collectorAuthority;
+            } else if (!parsedCollectorAddress.https()) {
+                authority = "dummy-service-authority";
+            } else {
+                throw new IllegalStateException("collector.authority is required when connecting"
+                        + " over HTTPS to a comma-separated list of glowroot central collectors");
+            }
+            builder = NettyChannelBuilder.forTarget("dummy-target")
+                    .nameResolverFactory(new MultipleAddressNameResolverFactory(
+                            parsedCollectorAddress.targets(), authority));
+        }
+        // single address may resolve to multiple collectors above via DNS, so need to specify round
+        // robin here even if only single address (first part of conditional above)
+        builder.loadBalancerFactory(RoundRobinLoadBalancerFactory.getInstance())
                 .eventLoopGroup(eventLoopGroup)
                 .executor(channelExecutor)
-                .negotiationType(NegotiationType.PLAINTEXT)
-                .build();
+                // aggressive keep alive, shouldn't even be used since gauge data is sent every
+                // 5 seconds and keep alive will only kick in after 30 seconds of not hearing back
+                // from the server
+                .keepAliveTime(30, SECONDS);
+        if (parsedCollectorAddress.https()) {
+            SslContextBuilder sslContext = GrpcSslContexts.forClient();
+            File trustCertCollectionFile = getTrustCertCollectionFile(confDirs);
+            if (trustCertCollectionFile != null) {
+                sslContext.trustManager(trustCertCollectionFile);
+            }
+            channel = builder.sslContext(sslContext.build())
+                    .negotiationType(NegotiationType.TLS)
+                    .build();
+        } else {
+            channel = builder.negotiationType(NegotiationType.PLAINTEXT)
+                    .build();
+        }
         retryExecutor = Executors.newSingleThreadScheduledExecutor(
-                new ThreadFactoryBuilder()
-                        .setDaemon(true)
-                        .setNameFormat("Glowroot-Collector-Retry")
-                        .build());
+                ThreadFactories.create("Glowroot-Collector-Retry"));
         this.inConnectionFailure = inConnectionFailure;
+        this.collectorAddress = collectorAddress;
     }
 
     boolean suppressLogCollector() {
@@ -103,6 +157,10 @@ class CentralConnection {
         return channel;
     }
 
+    <T extends /*@NonNull*/ Object> void callOnce(GrpcCall<T> call) {
+        callWithAFewRetries(0, -1, call);
+    }
+
     // important that these calls are idempotent
     <T extends /*@NonNull*/ Object> void callWithAFewRetries(GrpcCall<T> call) {
         callWithAFewRetries(0, call);
@@ -110,20 +168,38 @@ class CentralConnection {
 
     // important that these calls are idempotent
     <T extends /*@NonNull*/ Object> void callWithAFewRetries(int initialDelayMillis,
-            final GrpcCall<T> call) {
+            GrpcCall<T> call) {
+        callWithAFewRetries(initialDelayMillis, 60, call);
+    }
+
+    // important that these calls are idempotent
+    private <T extends /*@NonNull*/ Object> void callWithAFewRetries(int initialDelayMillis,
+            final int maxTotalInSeconds, final GrpcCall<T> call) {
         if (closed) {
             return;
         }
         if (inConnectionFailure.get()) {
             return;
         }
-        synchronized (backPressureLogger) {
+        boolean logWarningAndDoNotSend = false;
+        synchronized (discardingDataLogger) {
             if (pendingRequestCount >= PENDING_LIMIT) {
-                backPressureLogger.warn("not sending data to the central collector because of an"
-                        + " excessive backlog of {} requests in progress", PENDING_LIMIT);
-                return;
+                logWarningAndDoNotSend = true;
+            } else {
+                pendingRequestCount++;
             }
-            pendingRequestCount++;
+        }
+        if (logWarningAndDoNotSend) {
+            // it is important not to perform logging under the above synchronized lock in order to
+            // eliminate possibility of deadlock
+            suppressLogCollector(new Runnable() {
+                @Override
+                public void run() {
+                    discardingDataLogger.warn("not sending data to the central collector"
+                            + " because pending request limit ({}) exceeded", PENDING_LIMIT);
+                }
+            });
+            return;
         }
         // TODO revisit retry/backoff after next grpc version
 
@@ -137,25 +213,27 @@ class CentralConnection {
                 @Override
                 public void run() {
                     try {
-                        call.call(new RetryingStreamObserver<T>(call, 60, 60));
+                        call.call(new RetryingStreamObserver<T>(call, maxTotalInSeconds,
+                                maxTotalInSeconds, false));
                     } catch (Throwable t) {
                         logger.error(t.getMessage(), t);
                     }
                 }
             }, initialDelayMillis, MILLISECONDS);
         } else {
-            call.call(new RetryingStreamObserver<T>(call, 60, 60));
+            call.call(new RetryingStreamObserver<T>(call, maxTotalInSeconds, maxTotalInSeconds,
+                    false));
         }
     }
 
     // important that these calls are idempotent
-    <T extends /*@NonNull*/ Object> void callUntilSuccessful(GrpcCall<T> call) {
+    <T extends /*@NonNull*/ Object> void callInit(GrpcCall<T> call) {
         if (closed) {
             return;
         }
         // important here not to check inConnectionFailure, since need this to succeed if/when
         // connection is re-established
-        call.call(new RetryingStreamObserver<T>(call, 15, -1));
+        call.call(new RetryingStreamObserver<T>(call, 15, -1, true));
     }
 
     void suppressLogCollector(Runnable runnable) {
@@ -192,7 +270,85 @@ class CentralConnection {
         }
     }
 
-    static abstract class GrpcCall<T extends /*@NonNull*/ Object> {
+    private static ParsedCollectorAddress parseCollectorAddress(String collectorAddress) {
+        boolean https = false;
+        List<CollectorTarget> targets = Lists.newArrayList();
+        for (String addr : Splitter.on(',').trimResults().omitEmptyStrings()
+                .split(collectorAddress)) {
+            if (addr.startsWith("https://")) {
+                if (!targets.isEmpty() && !https) {
+                    throw new IllegalStateException("Cannot mix http and https addresses when using"
+                            + " client side load balancing: " + collectorAddress);
+                }
+                addr = addr.substring("https://".length());
+                https = true;
+            } else {
+                if (https) {
+                    throw new IllegalStateException("Cannot mix http and https addresses when using"
+                            + " client side load balancing: " + collectorAddress);
+                }
+                if (addr.startsWith("http://")) {
+                    addr = addr.substring("http://".length());
+                }
+            }
+            int index = addr.indexOf(':');
+            if (index == -1) {
+                throw new IllegalStateException(
+                        "Invalid collector.address (missing port): " + addr);
+            }
+            String host = addr.substring(0, index);
+            int port;
+            try {
+                port = Integer.parseInt(addr.substring(index + 1));
+            } catch (NumberFormatException e) {
+                logger.debug(e.getMessage(), e);
+                throw new IllegalStateException(
+                        "Invalid collector.address (invalid port): " + addr);
+            }
+            targets.add(ImmutableCollectorTarget.builder()
+                    .host(host)
+                    .port(port)
+                    .build());
+        }
+        return ImmutableParsedCollectorAddress.builder()
+                .https(https)
+                .addAllTargets(targets)
+                .build();
+    }
+
+    private static @Nullable File getTrustCertCollectionFile(List<File> confDirs) {
+        for (File confDir : confDirs) {
+            File confFile = new File(confDir, "grpc-trusted-root-certs.pem");
+            if (confFile.exists()) {
+                return confFile;
+            }
+        }
+        return null;
+    }
+
+    private static String getRootCauseMessage(Throwable t) {
+        Throwable cause = t.getCause();
+        if (cause == null) {
+            // using toString() instead of getMessage() in order to capture exception class name
+            return t.toString();
+        } else {
+            return getRootCauseMessage(cause);
+        }
+    }
+
+    @Value.Immutable
+    interface ParsedCollectorAddress {
+        boolean https();
+        List<CollectorTarget> targets();
+    }
+
+    @Value.Immutable
+    interface CollectorTarget {
+        String host();
+        int port();
+    }
+
+    abstract static class GrpcCall<T extends /*@NonNull*/ Object> {
         abstract void call(StreamObserver<T> responseObserver);
         void doWithResponse(@SuppressWarnings("unused") T response) {}
     }
@@ -203,28 +359,71 @@ class CentralConnection {
         private final GrpcCall<T> grpcCall;
         private final int maxSingleDelayInSeconds;
         private final int maxTotalInSeconds;
+        private final boolean init;
         private final Stopwatch stopwatch = Stopwatch.createStarted();
 
         private volatile long nextDelayInSeconds = 4;
 
         private RetryingStreamObserver(GrpcCall<T> grpcCall, int maxSingleDelayInSeconds,
-                int maxTotalInSeconds) {
+                int maxTotalInSeconds, boolean init) {
             this.grpcCall = grpcCall;
             this.maxSingleDelayInSeconds = maxSingleDelayInSeconds;
             this.maxTotalInSeconds = maxTotalInSeconds;
+            this.init = init;
         }
 
         @Override
         public void onNext(T value) {
-            grpcCall.doWithResponse(value);
+            try {
+                grpcCall.doWithResponse(value);
+            } catch (RuntimeException t) {
+                logger.error(t.getMessage(), t);
+                throw t;
+            } catch (Throwable t) {
+                logger.error(t.getMessage(), t);
+                throw new RuntimeException(t);
+            }
         }
 
         @Override
-        public void onError(final Throwable t) {
+        public void onCompleted() {
+            if (init) {
+                initCallSucceeded = true;
+            }
+            decrementPendingRequestCount();
+        }
+
+        @Override
+        public void onError(Throwable t) {
+            try {
+                onErrorInternal(t);
+            } catch (RuntimeException u) {
+                logger.error(u.getMessage(), u);
+                throw u;
+            } catch (Throwable u) {
+                logger.error(u.getMessage(), u);
+                throw new RuntimeException(u);
+            }
+        }
+
+        private void onErrorInternal(final Throwable t) {
             if (closed) {
+                decrementPendingRequestCount();
                 return;
             }
+            if (init) {
+                suppressLogCollector(new Runnable() {
+                    @Override
+                    public void run() {
+                        initConnectionErrorLogger.warn("unable to establish connection with the"
+                                + " central collector {} (will keep trying...): {}",
+                                collectorAddress, getRootCauseMessage(t));
+                        logger.debug(t.getMessage(), t);
+                    }
+                });
+            }
             if (inConnectionFailure.get()) {
+                decrementPendingRequestCount();
                 return;
             }
             suppressLogCollector(new Runnable() {
@@ -233,12 +432,19 @@ class CentralConnection {
                     logger.debug(t.getMessage(), t);
                 }
             });
-            if (maxTotalInSeconds != -1 && stopwatch.elapsed(SECONDS) > maxTotalInSeconds) {
-                connectionErrorLogger.warn("error sending data to the central collector: {}",
-                        t.getMessage(), t);
-                synchronized (backPressureLogger) {
-                    pendingRequestCount--;
+            if (!init && stopwatch.elapsed(SECONDS) > maxTotalInSeconds) {
+                if (initCallSucceeded) {
+                    suppressLogCollector(new Runnable() {
+                        @Override
+                        public void run() {
+                            connectionErrorLogger.warn(
+                                    "unable to send data to the central collector: {}",
+                                    getRootCauseMessage(t));
+                            logger.debug(t.getMessage(), t);
+                        }
+                    });
                 }
+                decrementPendingRequestCount();
                 return;
             }
 
@@ -267,10 +473,11 @@ class CentralConnection {
             }, currDelay, SECONDS);
         }
 
-        @Override
-        public void onCompleted() {
-            synchronized (backPressureLogger) {
-                pendingRequestCount--;
+        private void decrementPendingRequestCount() {
+            if (!init) {
+                synchronized (discardingDataLogger) {
+                    pendingRequestCount--;
+                }
             }
         }
     }

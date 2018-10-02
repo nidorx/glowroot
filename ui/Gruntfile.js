@@ -15,6 +15,8 @@ module.exports = function (grunt) {
     exportDist: 'target/generated-resources/export-dist/org/glowroot/ui/export-dist'
   };
 
+  var livereload = 35729;
+
   // Define the configuration for all the tasks
   grunt.initConfig({
 
@@ -23,9 +25,9 @@ module.exports = function (grunt) {
 
     // Watches files for changes and runs tasks based on the changed files
     watch: {
-      less: {
-        files: ['<%= yeoman.app %>/styles/*.less'],
-        tasks: ['less']
+      sass: {
+        files: ['<%= yeoman.app %>/styles/*.scss'],
+        tasks: ['sass', 'postcss:autoprefixonly']
       },
       handlebars: {
         files: ['<%= yeoman.app %>/hbs/*.hbs'],
@@ -36,14 +38,14 @@ module.exports = function (grunt) {
       },
       livereload: {
         options: {
-          livereload: '<%= connect.livereload.options.livereload %>'
+          livereload: livereload
         },
         files: [
           '<%= yeoman.app %>/index.html',
           '<%= yeoman.app %>/scripts/**/*.js',
           '<%= yeoman.app %>/views/**/*.html',
           '<%= yeoman.app %>/template/**/*.html',
-          // watch:less output
+          // watch:sass output
           '.tmp/styles/main.css',
           // watch:handlebars output
           '.tmp/scripts/generated/handlebars-templates.js'
@@ -57,12 +59,56 @@ module.exports = function (grunt) {
         {from: '^/transaction/.*$', to: '/index.html'},
         {from: '^/error/.*$', to: '/index.html'},
         {from: '^/jvm/.*$', to: '/index.html'},
+        {from: '^/synthetic-monitors(|\\?.*)$', to: '/index.html'},
+        {from: '^/incidents(|\\?.*)$', to: '/index.html'},
         {from: '^/report/.*$', to: '/index.html'},
         {from: '^/config/.*$', to: '/index.html'},
         {from: '^/admin/.*$', to: '/index.html'},
-        {from: '^/profile/.*', to: '/index.html'},
+        {from: '^/profile/.*$', to: '/index.html'},
         {from: '^/login$', to: '/index.html'}
       ],
+      options: {
+        port: 9000,
+        // Change this to '0.0.0.0' to access the server from outside.
+        hostname: 'localhost',
+        open: true,
+        middleware: function (connect) {
+          var setXUACompatibleHeader = function (req, res, next) {
+            // X-UA-Compatible must be set via header (as opposed to via meta tag)
+            // see https://github.com/h5bp/html5-boilerplate/blob/master/doc/html.md#x-ua-compatible
+            res.setHeader('X-UA-Compatible', 'IE=edge');
+            next();
+          };
+          var serveStatic = require('serve-static');
+          return [
+            require('connect-livereload')({
+              port: livereload,
+              include: [
+                /^\/$/,
+                /^\/transaction\//,
+                /^\/error\//,
+                /^\/jvm\//,
+                /^\/synthetic-monitors(|\\?.*)/,
+                /^\/incidents(|\\?.*)/,
+                /^\/report\//,
+                /^\/config\//,
+                /^\/admin\//,
+                /^\/profile\//,
+                /^\/login$/
+              ],
+              hostname: 'localhost'
+            }),
+            setXUACompatibleHeader,
+            require('grunt-connect-rewrite/lib/utils').rewriteRequest,
+            require('grunt-connect-proxy/lib/utils').proxyRequest,
+            serveStatic('.tmp'),
+            connect().use('/bower_components', serveStatic('bower_components')),
+            serveStatic(appConfig.app),
+            connect().use('/fonts', serveStatic('bower_components/fontawesome/web-fonts-with-css/webfonts')),
+            connect().use('/uib/template', serveStatic('bower_components/angular-ui-bootstrap4/template'))
+          ];
+        }
+      },
       livereload: {
         proxies: [
           {
@@ -75,33 +121,29 @@ module.exports = function (grunt) {
             host: 'localhost',
             port: 4000
           }
-        ],
-        options: {
-          port: 9000,
-          // Change this to '0.0.0.0' to access the server from outside.
-          hostname: 'localhost',
-          livereload: 35729,
-          open: true,
-          middleware: function (connect) {
-            var setXUACompatibleHeader = function (req, res, next) {
-              // X-UA-Compatible must be set via header (as opposed to via meta tag)
-              // see https://github.com/h5bp/html5-boilerplate/blob/master/doc/html.md#x-ua-compatible
-              res.setHeader('X-UA-Compatible', 'IE=edge');
-              next();
-            };
-            var serveStatic = require('serve-static');
-            return [
-              setXUACompatibleHeader,
-              require('grunt-connect-rewrite/lib/utils').rewriteRequest,
-              require('grunt-connect-proxy/lib/utils').proxyRequest,
-              serveStatic('.tmp'),
-              connect().use('/bower_components', serveStatic('bower_components')),
-              serveStatic(appConfig.app),
-              connect().use('/fonts', serveStatic('bower_components/fontawesome/fonts')),
-              connect().use('/uib/template', serveStatic('bower_components/angular-ui-bootstrap/template'))
-            ];
+        ]
+      },
+      demo: {
+        proxies: [
+          {
+            context: '/backend',
+            host: 'demo.glowroot.org',
+            port: 443,
+            protocol: 'https:',
+            headers: {
+              host: 'demo.glowroot.org'
+            }
+          },
+          {
+            context: '/export',
+            host: 'demo.glowroot.org',
+            port: 443,
+            protocol: 'https:',
+            headers: {
+              host: 'demo.glowroot.org'
+            }
           }
-        }
+        ]
       }
     },
 
@@ -159,12 +201,42 @@ module.exports = function (grunt) {
       }
     },
 
-    less: {
+    sass: {
+      options: {
+        implementation: require('node-sass'),
+        sourceMap: true
+      },
       dist: {
         files: {
-          '.tmp/styles/main.css': '<%= yeoman.app %>/styles/main.less',
-          '.tmp/styles/export.css': '<%= yeoman.app %>/styles/export.less'
+          '.tmp/styles/main.css': '<%= yeoman.app %>/styles/main.scss',
+          '.tmp/styles/export.css': '<%= yeoman.app %>/styles/export.scss'
         }
+      }
+    },
+
+    postcss: {
+      autoprefixonly: {
+        options: {
+          processors: [
+            require('autoprefixer')({browsers: 'last 2 versions'})
+          ]
+        },
+        // FIXME NEED TO WRITE TO ANOTHER PLACE SO IT DOESN'T END UP IN LOOP!
+        src: '.tmp/styles/*.css'
+      },
+      dist: {
+        options: {
+          map: {
+            inline: false,
+            annotation: '.tmp/styles/maps/'
+          },
+          processors: [
+            require('autoprefixer')({browsers: 'last 2 versions'}),
+            require('cssnano')()
+          ]
+        },
+        // FIXME NEED TO WRITE TO ANOTHER PLACE SO IT DOESN'T END UP IN LOOP!
+        src: '.tmp/styles/*.css'
       }
     },
 
@@ -185,13 +257,13 @@ module.exports = function (grunt) {
           module: 'ui.bootstrap.typeahead',
           prefix: 'uib'
         },
-        cwd: 'bower_components/angular-ui-bootstrap',
+        cwd: 'bower_components/angular-ui-bootstrap4',
         src: [
           'template/typeahead/*.html',
           'template/modal/*.html',
           'template/popover/*.html'
         ],
-        dest: '.tmp/scripts/generated/angular-ui-bootstrap-templates.js'
+        dest: '.tmp/scripts/generated/angular-ui-bootstrap4-templates.js'
       },
       appTemplates: {
         options: {
@@ -243,11 +315,11 @@ module.exports = function (grunt) {
           },
           {
             expand: true,
-            cwd: 'bower_components/fontawesome',
-            dest: '<%= yeoman.dist %>',
+            cwd: 'bower_components/fontawesome/web-fonts-with-css/webfonts',
+            dest: '<%= yeoman.dist %>/fonts',
             src: [
-              // only supporting IE9+ so only need woff/woff2
-              'fonts/*.woff{,2}'
+              'fa-regular-400.woff{,2}',
+              'fa-solid-900.woff{,2}'
             ]
           },
           {
@@ -307,8 +379,8 @@ module.exports = function (grunt) {
         },
         blockReplacements: {
           // this is workaround for grunt-usemin issue #391
-          js: function (block){
-            if (block.dest === 'scripts/vendor-flame-graph.js') {
+          js: function (block) {
+            if (block.dest === 'scripts/vendor-flame-graph.min.js') {
               return '<script async src="' + block.dest + '"><\/script>';
             } else {
               return '<script src="' + block.dest + '"><\/script>';
@@ -342,21 +414,17 @@ module.exports = function (grunt) {
   });
 
   grunt.registerTask('serve', 'Compile then start a connect web server', function (target) {
-    if (target === 'xyzzy') {
-      return grunt.task.run([
-        'configureProxies:xyzzy',
-        'configureRewriteRules',
-        'connect:xyzzy:keepalive'
-      ]);
+    if (target === undefined) {
+      target = 'livereload';
     }
-
     grunt.task.run([
       'clean:serve',
-      'less',
+      'sass',
+      'postcss:autoprefixonly',
       'handlebars',
       'configureRewriteRules',
-      'configureProxies:livereload',
-      'connect:livereload',
+      'configureProxies:' + target,
+      'connect:' + target,
       'watch'
     ]);
   });
@@ -364,7 +432,8 @@ module.exports = function (grunt) {
   grunt.registerTask('build', [
     'clean:dist',
     'useminPrepare',
-    'less',
+    'sass',
+    'postcss:dist',
     'ngtemplates',
     'handlebars',
     'concat',

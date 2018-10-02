@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -91,6 +91,10 @@ glowroot.controller('ConfigInstrumentationListCtrl', [
           });
     }
 
+    $scope.showApplyChangesButton = function () {
+      return $scope.jvmRetransformClassesSupported && $scope.agentRollup.permissions.config.edit.instrumentation;
+    };
+
     $scope.displayImportModal = function () {
       $location.search('import', true);
     };
@@ -161,7 +165,8 @@ glowroot.controller('ConfigInstrumentationListCtrl', [
         }
         var base = {
           classAnnotation: '',
-          methodDeclaringClassName: '',
+          subTypeRestriction: '',
+          superTypeRestriction: '',
           methodAnnotation: '',
           methodReturnType: '',
           nestingGroup: '',
@@ -228,9 +233,7 @@ glowroot.controller('ConfigInstrumentationListCtrl', [
         $('#importModal').modal('hide');
       }
       if ($location.search().export) {
-        gtClipboard('#exportModal .fa-clipboard', function () {
-          return document.getElementById('jsonExport');
-        }, function () {
+        gtClipboard('#exportModal .fa-clipboard', '#exportModal', function () {
           return $scope.jsonExport;
         });
         $('#exportModal').data('location-query', 'export');

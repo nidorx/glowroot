@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2017 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,13 +30,12 @@ glowroot.controller('TransactionAverageCtrl', [
 
     var chartState = charts.createState();
 
-    function refreshData(autoRefresh) {
-      charts.refreshData('backend/transaction/average', chartState, $scope, autoRefresh, undefined, onRefreshData);
-    }
-
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh', 'range.chartAutoRefresh'],
+    // using $watch instead of $watchGroup because $watchGroup has confusing behavior regarding oldValues
+    // (see https://github.com/angular/angular.js/pull/12643)
+    $scope.$watch('[range.chartFrom, range.chartTo, range.chartRefresh, range.chartAutoRefresh]',
         function (newValues, oldValues) {
-          refreshData(newValues[3] !== oldValues[3]);
+          var autoRefresh = newValues[3] !== oldValues[3];
+          charts.refreshData('backend/transaction/average', chartState, $scope, autoRefresh, undefined, onRefreshData);
         });
 
     $scope.clickTopRadioButton = function (item) {
@@ -54,6 +53,13 @@ glowroot.controller('TransactionAverageCtrl', [
         event.preventDefault();
         return false;
       }
+      return true;
+    };
+
+    $scope.displayThreadStats = function (threadStats) {
+      return threadStats !== undefined
+          && (threadStats.totalCpuNanos !== -1 || threadStats.totalBlockedNanos !== -1
+              || threadStats.totalWaitedNanos !== -1 || threadStats.totalAllocatedBytes !== -1);
     };
 
     function onRefreshData(data) {
@@ -78,13 +84,17 @@ glowroot.controller('TransactionAverageCtrl', [
       $scope.mergedAggregate = data.mergedAggregate;
       if ($scope.mergedAggregate.transactionCount) {
         $scope.mainThreadTreeTimers = createTreeTimers($scope.mergedAggregate.mainThreadRootTimer);
-        $scope.auxThreadTreeTimers = createTreeTimers($scope.mergedAggregate.auxThreadRootTimers);
+        $scope.auxThreadTreeTimers = createTreeTimers($scope.mergedAggregate.auxThreadRootTimer);
         $scope.mainThreadFlattenedTimers = createFlattenedTimers($scope.mergedAggregate.mainThreadRootTimer);
-        $scope.auxThreadFlattenedTimers = createFlattenedTimers($scope.mergedAggregate.auxThreadRootTimers);
+        $scope.auxThreadFlattenedTimers = createFlattenedTimers($scope.mergedAggregate.auxThreadRootTimer);
       }
     }
 
     function createTreeTimers(rootTimer) {
+      if (rootTimer === undefined) {
+        return undefined;
+      }
+
       var treeTimers = [];
 
       // indent1 must be sync'd with $indent1 variable in common-trace.less
@@ -115,6 +125,10 @@ glowroot.controller('TransactionAverageCtrl', [
     }
 
     function createFlattenedTimers(rootTimer) {
+      if (rootTimer === undefined) {
+        return undefined;
+      }
+
       var flattenedTimerMap = {};
       var flattenedTimers = [];
 
@@ -136,7 +150,7 @@ glowroot.controller('TransactionAverageCtrl', [
         }
         if (timer.childTimers) {
           $.each(timer.childTimers, function (index, nestedTimer) {
-            traverse(nestedTimer, parentTimerNames.concat(timer));
+            traverse(nestedTimer, parentTimerNames.concat(timer.name));
           });
         }
       }
@@ -163,13 +177,9 @@ glowroot.controller('TransactionAverageCtrl', [
         content: function (label, xval, yval, flotItem) {
           var total = 0;
           var seriesIndex;
-          var dataSeries;
-          var value;
           var plotData = chartState.plot.getData();
           for (seriesIndex = 0; seriesIndex < plotData.length; seriesIndex++) {
-            dataSeries = plotData[seriesIndex];
-            value = dataSeries.data[flotItem.dataIndex][1];
-            total += value;
+            total += plotData[seriesIndex].data[flotItem.dataIndex][1];
           }
           if (total === 0) {
             return 'No data';

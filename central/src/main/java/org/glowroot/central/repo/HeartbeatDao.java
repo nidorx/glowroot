@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2017 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,16 @@
  */
 package org.glowroot.central.repo;
 
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
+import java.util.concurrent.Future;
 
 import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.PreparedStatement;
-import com.datastax.driver.core.Session;
 
-import org.glowroot.central.util.Sessions;
+import org.glowroot.central.util.MoreFutures;
+import org.glowroot.central.util.Session;
 import org.glowroot.common.util.Clock;
 
 import static java.util.concurrent.TimeUnit.HOURS;
@@ -30,7 +33,7 @@ public class HeartbeatDao {
 
     static final int EXPIRATION_HOURS = 24;
 
-    private static final int TTL = (int) HOURS.toMillis(EXPIRATION_HOURS);
+    private static final int TTL = (int) HOURS.toSeconds(EXPIRATION_HOURS);
 
     private final Session session;
     private final Clock clock;
@@ -38,13 +41,13 @@ public class HeartbeatDao {
     private final PreparedStatement insertPS;
     private final PreparedStatement existsPS;
 
-    public HeartbeatDao(Session session, Clock clock) {
+    HeartbeatDao(Session session, Clock clock) throws InterruptedException {
         this.session = session;
         this.clock = clock;
 
-        Sessions.createTableWithTWCS(session, "create table if not exists heartbeat"
-                + " (agent_id varchar, central_capture_time timestamp, primary key (agent_id,"
-                + " central_capture_time))", 24);
+        session.createTableWithTWCS("create table if not exists heartbeat (agent_id varchar,"
+                + " central_capture_time timestamp, primary key (agent_id, central_capture_time))",
+                EXPIRATION_HOURS);
         insertPS = session.prepare(
                 "insert into heartbeat (agent_id, central_capture_time) values (?, ?) using ttl ?");
         existsPS = session.prepare("select central_capture_time from heartbeat where agent_id = ?"
@@ -52,18 +55,24 @@ public class HeartbeatDao {
     }
 
     public void store(String agentId) throws Exception {
-        BoundStatement boundStatement = insertPS.bind();
-        int i = 0;
-        boundStatement.setString(i++, agentId);
-        boundStatement.setTimestamp(i++, new Date(clock.currentTimeMillis()));
-        boundStatement.setInt(i++, TTL);
-        session.execute(boundStatement);
+        List<String> agentRollupIds = AgentRollupIds.getAgentRollupIds(agentId);
+        List<Future<?>> futures = new ArrayList<>();
+        for (String agentRollupId : agentRollupIds) {
+            BoundStatement boundStatement = insertPS.bind();
+            int i = 0;
+            boundStatement.setString(i++, agentRollupId);
+            boundStatement.setTimestamp(i++, new Date(clock.currentTimeMillis()));
+            boundStatement.setInt(i++, TTL);
+            futures.add(session.executeAsync(boundStatement));
+        }
+        MoreFutures.waitForAll(futures);
     }
 
-    public boolean exists(String agentId, long centralCaptureFrom, long centralCaptureTo) {
+    public boolean exists(String agentRollupId, long centralCaptureFrom, long centralCaptureTo)
+            throws Exception {
         BoundStatement boundStatement = existsPS.bind();
         int i = 0;
-        boundStatement.setString(i++, agentId);
+        boundStatement.setString(i++, agentRollupId);
         boundStatement.setTimestamp(i++, new Date(centralCaptureFrom));
         boundStatement.setTimestamp(i++, new Date(centralCaptureTo));
         return !session.execute(boundStatement).isExhausted();

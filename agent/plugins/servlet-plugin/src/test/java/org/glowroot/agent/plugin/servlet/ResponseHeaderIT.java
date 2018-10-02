@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import javax.annotation.Nullable;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -67,7 +66,7 @@ public class ResponseHeaderIT {
                 "Content-Type, Content-Length, Content-Language");
 
         // when
-        Trace trace = container.execute(SetStandardResponseHeaders.class);
+        Trace trace = container.execute(SetStandardResponseHeaders.class, "Web");
 
         // then
         Map<String, Object> responseHeaders = getResponseHeaders(trace);
@@ -84,7 +83,7 @@ public class ResponseHeaderIT {
                 "Content-Type, Content-Length, Content-Language");
 
         // when
-        Trace trace = container.execute(SetStandardResponseHeadersUsingSetHeader.class);
+        Trace trace = container.execute(SetStandardResponseHeadersUsingSetHeader.class, "Web");
 
         // then
         Map<String, Object> responseHeaders = getResponseHeaders(trace);
@@ -101,7 +100,7 @@ public class ResponseHeaderIT {
                 "Content-Type, Content-Length, Content-Language");
 
         // when
-        Trace trace = container.execute(SetStandardResponseHeadersUsingAddHeader.class);
+        Trace trace = container.execute(SetStandardResponseHeadersUsingAddHeader.class, "Web");
 
         // then
         Map<String, Object> responseHeaders = getResponseHeaders(trace);
@@ -118,7 +117,7 @@ public class ResponseHeaderIT {
                 "Content-Type, Content-Length");
 
         // when
-        Trace trace = container.execute(SetStandardResponseHeadersLowercase.class);
+        Trace trace = container.execute(SetStandardResponseHeadersLowercase.class, "Web");
 
         // then
         Map<String, Object> responseHeaders = getResponseHeaders(trace);
@@ -132,7 +131,7 @@ public class ResponseHeaderIT {
         // given
         container.getConfigService().setPluginProperty(PLUGIN_ID, "captureResponseHeaders", "");
         // when
-        Trace trace = container.execute(SetStandardResponseHeaders.class);
+        Trace trace = container.execute(SetStandardResponseHeaders.class, "Web");
         // then
         assertThat(getResponseHeaders(trace)).isNull();
     }
@@ -142,7 +141,7 @@ public class ResponseHeaderIT {
         // given
         container.getConfigService().setPluginProperty(PLUGIN_ID, "captureResponseHeaders", "ABC");
         // when
-        Trace trace = container.execute(SetStandardResponseHeaders.class);
+        Trace trace = container.execute(SetStandardResponseHeaders.class, "Web");
         // then
         assertThat(getResponseHeaders(trace)).isNull();
     }
@@ -152,7 +151,7 @@ public class ResponseHeaderIT {
         // given
         container.getConfigService().setPluginProperty(PLUGIN_ID, "captureResponseHeaders", "");
         // when
-        Trace trace = container.execute(SetStandardResponseHeadersUsingSetHeader.class);
+        Trace trace = container.execute(SetStandardResponseHeadersUsingSetHeader.class, "Web");
         // then
         assertThat(getResponseHeaders(trace)).isNull();
     }
@@ -162,7 +161,7 @@ public class ResponseHeaderIT {
         // given
         container.getConfigService().setPluginProperty(PLUGIN_ID, "captureResponseHeaders", "");
         // when
-        Trace trace = container.execute(SetStandardResponseHeadersUsingAddHeader.class);
+        Trace trace = container.execute(SetStandardResponseHeadersUsingAddHeader.class, "Web");
         // then
         assertThat(getResponseHeaders(trace)).isNull();
     }
@@ -174,7 +173,7 @@ public class ResponseHeaderIT {
                 "One,Two,Date-One,Date-Two,Int-One,Int-Two,X-One");
 
         // when
-        Trace trace = container.execute(SetLotsOfResponseHeaders.class);
+        Trace trace = container.execute(SetLotsOfResponseHeaders.class, "Web");
 
         // then
         Map<String, Object> responseHeaders = getResponseHeaders(trace);
@@ -210,7 +209,37 @@ public class ResponseHeaderIT {
         // basically just testing that it should not generate any errors
     }
 
-    static @Nullable Map<String, Object> getDetailMap(Trace trace, String name) {
+    static Map<String, Object> getDetailMap(Trace trace, String name) {
+        Trace.DetailEntry detailEntry = getDetailEntry(trace, name);
+        if (detailEntry == null) {
+            return null;
+        }
+        Map<String, Object> detailMap = Maps.newLinkedHashMap();
+        for (Trace.DetailEntry detail : detailEntry.getChildEntryList()) {
+            List<Trace.DetailValue> values = detail.getValueList();
+            if (values.size() == 1) {
+                detailMap.put(detail.getName(), values.get(0).getString());
+            } else {
+                List<String> vals = Lists.newArrayList();
+                for (Trace.DetailValue value : values) {
+                    vals.add(value.getString());
+                }
+                detailMap.put(detail.getName(), vals);
+            }
+        }
+        return detailMap;
+    }
+
+    static String getDetailValue(Trace trace, String name) {
+        Trace.DetailEntry detailEntry = getDetailEntry(trace, name);
+        return detailEntry == null ? null : detailEntry.getValue(0).getString();
+    }
+
+    static Map<String, Object> getResponseHeaders(Trace trace) {
+        return getDetailMap(trace, "Response headers");
+    }
+
+    private static Trace.DetailEntry getDetailEntry(Trace trace, String name) {
         List<Trace.DetailEntry> details = trace.getHeader().getDetailEntryList();
         Trace.DetailEntry found = null;
         for (Trace.DetailEntry detail : details) {
@@ -219,27 +248,7 @@ public class ResponseHeaderIT {
                 break;
             }
         }
-        if (found == null) {
-            return null;
-        }
-        Map<String, Object> responseHeaders = Maps.newLinkedHashMap();
-        for (Trace.DetailEntry detail : found.getChildEntryList()) {
-            List<Trace.DetailValue> values = detail.getValueList();
-            if (values.size() == 1) {
-                responseHeaders.put(detail.getName(), values.get(0).getString());
-            } else {
-                List<String> vals = Lists.newArrayList();
-                for (Trace.DetailValue value : values) {
-                    vals.add(value.getString());
-                }
-                responseHeaders.put(detail.getName(), vals);
-            }
-        }
-        return responseHeaders;
-    }
-
-    private static @Nullable Map<String, Object> getResponseHeaders(Trace trace) {
-        return getDetailMap(trace, "Response headers");
+        return found;
     }
 
     @SuppressWarnings("serial")

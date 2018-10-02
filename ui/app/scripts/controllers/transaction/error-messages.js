@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2017 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,7 +41,9 @@ glowroot.controller('ErrorMessagesCtrl', [
     var errorMessageLimit = 25;
     var dataSeriesExtra;
 
-    $scope.$watchGroup(['range.chartFrom', 'range.chartTo', 'range.chartRefresh', 'range.chartAutoRefresh'],
+    // using $watch instead of $watchGroup because $watchGroup has confusing behavior regarding oldValues
+    // (see https://github.com/angular/angular.js/pull/12643)
+    $scope.$watch('[range.chartFrom, range.chartTo, range.chartRefresh, range.chartAutoRefresh]',
         function (newValues, oldValues) {
           $location.search('filter', $scope.filter || null);
           refreshData(newValues[3] !== oldValues[3]);
@@ -51,7 +53,7 @@ glowroot.controller('ErrorMessagesCtrl', [
       if (($scope.layout.central && !$scope.agentRollupId) || !$scope.transactionType) {
         return;
       }
-      $scope.parsingError = undefined;
+      delete $scope.parsingError;
       var parseResult = gtParseIncludesExcludes($scope.filter);
       if (parseResult.error) {
         $scope.parsingError = parseResult.error;
@@ -91,7 +93,7 @@ glowroot.controller('ErrorMessagesCtrl', [
             // reset axis in case user changed the date and then zoomed in/out to trigger this refresh
             chartState.plot.getAxes().xaxis.options.min = query.from;
             chartState.plot.getAxes().xaxis.options.max = query.to;
-            chartState.dataPointIntervalMillis = charts.getDataPointIntervalMillis(query.from, query.to);
+            chartState.dataPointIntervalMillis = data.dataPointIntervalMillis;
             if (data.dataSeries.data.length) {
               chartState.plot.setData([{data: data.dataSeries.data}]);
             } else {
@@ -134,7 +136,7 @@ glowroot.controller('ErrorMessagesCtrl', [
     };
 
     $scope.refresh = function () {
-      $scope.applyLast();
+      charts.applyLast($scope);
       appliedFilter = $scope.filter;
       $scope.range.chartRefresh++;
     };
@@ -154,7 +156,7 @@ glowroot.controller('ErrorMessagesCtrl', [
     var chartOptions = {
       yaxis: {
         max: 100,
-        label: 'error percentage'
+        label: 'error rate (%)'
       },
       tooltip: true,
       tooltipOpts: {
@@ -175,12 +177,11 @@ glowroot.controller('ErrorMessagesCtrl', [
           // this math is to deal with live aggregate
           from = Math.ceil(from / chartState.dataPointIntervalMillis) * chartState.dataPointIntervalMillis;
           var to = xval;
-          var html = '<div class="gt-chart-tooltip"><div style="font-weight: 600;">'
+          return '<div class="gt-chart-tooltip"><div style="font-weight: 600;">'
               + smartFormat(from) + ' to ' + smartFormat(to)
-              + '</div><div>Error percentage: ' + yval.toFixed(1)
-              + '</div><div>Error count: ' + dataSeriesExtra[xval][0]
+              + '</div><div>Error rate: ' + yval.toFixed(1)
+              + ' %</div><div>Error count: ' + dataSeriesExtra[xval][0]
               + '</div><div>Transaction count: ' + dataSeriesExtra[xval][1] + '</div></div>';
-          return html;
         }
       }
     };

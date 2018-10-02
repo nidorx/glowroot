@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2016 the original author or authors.
+ * Copyright 2013-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,19 +18,20 @@ package org.glowroot.agent.config;
 import java.util.List;
 import java.util.Map;
 
-import javax.annotation.Nullable;
-
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import com.google.common.base.Joiner;
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig.AlreadyInTransactionBehavior;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig.CaptureKind;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig.MethodModifier;
 import org.glowroot.wire.api.model.Proto.OptionalInt32;
@@ -41,31 +42,46 @@ public abstract class InstrumentationConfig {
     private static final Logger logger = LoggerFactory.getLogger(InstrumentationConfig.class);
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String className() {
         return "";
     }
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String classAnnotation() {
         return "";
     }
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
+    public String subTypeRestriction() {
+        return "";
+    }
+
+    @Value.Default
+    @JsonInclude(Include.NON_EMPTY)
+    public String superTypeRestriction() {
+        return "";
+    }
+
+    // pointcuts with methodDeclaringClassName are no longer supported in 0.9.16, but included here
+    // to help with transitioning of old instrumentation config
+    @Deprecated
+    @Value.Default
+    @JsonInclude(Include.NON_EMPTY)
     public String methodDeclaringClassName() {
         return "";
     }
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String methodName() {
         return "";
     }
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String methodAnnotation() {
         return "";
     }
@@ -74,23 +90,23 @@ public abstract class InstrumentationConfig {
     public abstract ImmutableList<String> methodParameterTypes();
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String methodReturnType() {
         return "";
     }
 
     // currently unused, but will have a purpose someday, e.g. to capture all public methods
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public abstract ImmutableList<MethodModifier> methodModifiers();
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String nestingGroup() {
         return "";
     }
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public int order() {
         return 0;
     }
@@ -98,68 +114,83 @@ public abstract class InstrumentationConfig {
     public abstract CaptureKind captureKind();
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String transactionType() {
         return "";
     }
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String transactionNameTemplate() {
         return "";
     }
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String transactionUserTemplate() {
         return "";
     }
 
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public abstract Map<String, String> transactionAttributeTemplates();
 
     // need to write zero since it is treated different from null
-    @JsonInclude(value = Include.NON_NULL)
+    @JsonInclude(Include.NON_NULL)
     public abstract @Nullable Integer transactionSlowThresholdMillis();
 
+    @JsonInclude(Include.NON_NULL)
+    public abstract @Nullable AlreadyInTransactionBehavior alreadyInTransactionBehavior();
+
+    // corrected for data prior to 0.10.10
+    @JsonIgnore
+    @Value.Derived
+    public @Nullable AlreadyInTransactionBehavior alreadyInTransactionBehaviorCorrected() {
+        if (captureKind() == CaptureKind.TRANSACTION) {
+            return MoreObjects.firstNonNull(alreadyInTransactionBehavior(),
+                    AlreadyInTransactionBehavior.CAPTURE_TRACE_ENTRY);
+        } else {
+            return null;
+        }
+    }
+
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public boolean transactionOuter() {
         return false;
     }
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String traceEntryMessageTemplate() {
         return "";
     }
 
     // need to write zero since it is treated different from null
-    @JsonInclude(value = Include.NON_NULL)
+    @JsonInclude(Include.NON_NULL)
     public abstract @Nullable Integer traceEntryStackThresholdMillis();
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public boolean traceEntryCaptureSelfNested() {
         return false;
     }
 
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String timerName() {
         return "";
     }
 
     // this is only for plugin authors (to be used in glowroot.plugin.json)
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String enabledProperty() {
         return "";
     }
 
     // this is only for plugin authors (to be used in glowroot.plugin.json)
     @Value.Default
-    @JsonInclude(value = Include.NON_EMPTY)
+    @JsonInclude(Include.NON_EMPTY)
     public String traceEntryEnabledProperty() {
         return "";
     }
@@ -208,6 +239,9 @@ public abstract class InstrumentationConfig {
         if (!timerName().matches("[a-zA-Z0-9 ]*")) {
             errors.add("timerName contains invalid characters: " + timerName());
         }
+        if (!methodDeclaringClassName().isEmpty()) {
+            errors.add("methodDeclaringClassName is no longer supported");
+        }
         return ImmutableList.copyOf(errors);
     }
 
@@ -224,12 +258,18 @@ public abstract class InstrumentationConfig {
                 AgentConfig.InstrumentationConfig.newBuilder()
                         .setClassName(className())
                         .setClassAnnotation(classAnnotation())
+                        .setSubTypeRestriction(subTypeRestriction())
+                        .setSuperTypeRestriction(superTypeRestriction())
+                        // pointcuts with methodDeclaringClassName are no longer supported in
+                        // 0.9.16, but included here to help with transitioning of old
+                        // instrumentation config
                         .setMethodDeclaringClassName(methodDeclaringClassName())
                         .setMethodName(methodName())
                         .setMethodAnnotation(methodAnnotation())
                         .addAllMethodParameterType(methodParameterTypes())
                         .setMethodReturnType(methodReturnType())
                         .addAllMethodModifier(methodModifiers())
+                        .setNestingGroup(nestingGroup())
                         .setOrder(order())
                         .setCaptureKind(captureKind())
                         .setTransactionType(transactionType())
@@ -240,6 +280,11 @@ public abstract class InstrumentationConfig {
         if (transactionSlowThresholdMillis != null) {
             builder.setTransactionSlowThresholdMillis(
                     OptionalInt32.newBuilder().setValue(transactionSlowThresholdMillis));
+        }
+        AlreadyInTransactionBehavior alreadyInTransactionBehavior =
+                alreadyInTransactionBehaviorCorrected();
+        if (alreadyInTransactionBehavior != null) {
+            builder.setAlreadyInTransactionBehavior(alreadyInTransactionBehavior);
         }
         builder.setTransactionOuter(transactionOuter())
                 .setTraceEntryMessageTemplate(traceEntryMessageTemplate());
@@ -256,15 +301,21 @@ public abstract class InstrumentationConfig {
     }
 
     public static InstrumentationConfig create(AgentConfig.InstrumentationConfig config) {
+        @SuppressWarnings("deprecation")
         ImmutableInstrumentationConfig.Builder builder = ImmutableInstrumentationConfig.builder()
                 .className(config.getClassName())
                 .classAnnotation(config.getClassAnnotation())
+                .subTypeRestriction(config.getSubTypeRestriction())
+                .superTypeRestriction(config.getSuperTypeRestriction())
+                // pointcuts with methodDeclaringClassName are no longer supported in 0.9.16, but
+                // included here to help with transitioning of old instrumentation config
                 .methodDeclaringClassName(config.getMethodDeclaringClassName())
                 .methodName(config.getMethodName())
                 .methodAnnotation(config.getMethodAnnotation())
                 .addAllMethodParameterTypes(config.getMethodParameterTypeList())
                 .methodReturnType(config.getMethodReturnType())
                 .addAllMethodModifiers(config.getMethodModifierList())
+                .nestingGroup(config.getNestingGroup())
                 .order(config.getOrder())
                 .captureKind(config.getCaptureKind())
                 .transactionType(config.getTransactionType())
@@ -274,6 +325,9 @@ public abstract class InstrumentationConfig {
         if (config.hasTransactionSlowThresholdMillis()) {
             builder.transactionSlowThresholdMillis(
                     config.getTransactionSlowThresholdMillis().getValue());
+        }
+        if (config.getCaptureKind() == CaptureKind.TRANSACTION) {
+            builder.alreadyInTransactionBehavior(config.getAlreadyInTransactionBehavior());
         }
         builder.transactionOuter(config.getTransactionOuter())
                 .traceEntryMessageTemplate(config.getTraceEntryMessageTemplate());

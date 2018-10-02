@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ package org.glowroot.agent.plugin.api;
 
 import java.util.concurrent.TimeUnit;
 
-import javax.annotation.Nullable;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 
 public interface ThreadContext {
 
@@ -36,8 +36,8 @@ public interface ThreadContext {
      * {@link MessageSupplier} in response to {@link TraceEntry#getMessageSupplier()}. Calling
      * {@link TraceEntry#end()} on the dummy entry ends the timer. If {@code endWithError} is called
      * on the dummy entry, then the dummy entry will be escalated to a real entry. If
-     * {@link TraceEntry#endWithStackTrace(long, TimeUnit)} is called on the dummy entry and the
-     * dummy entry total time exceeds the specified threshold, then the dummy entry will be
+     * {@link TraceEntry#endWithLocationStackTrace(long, TimeUnit)} is called on the dummy entry and
+     * the dummy entry total time exceeds the specified threshold, then the dummy entry will be
      * escalated to a real entry. If {@code endWithError} is called on the dummy entry, then the
      * dummy entry will be escalated to a real entry. A hard cap (
      * {@code maxTraceEntriesPerTransaction * 2}) on the total number of (real) entries is applied
@@ -283,10 +283,6 @@ public interface ThreadContext {
      * the error attribute on the transaction, which must be done with {@link #setTransactionError}
      * or with {@code endWithError} on the root entry.
      * 
-     * Since there is no throwable passed to this variant, a stack trace is captured and displayed
-     * in the UI as a location stack trace (as opposed to an exception stack trace), similar to
-     * {@link TraceEntry#endWithStackTrace(long, TimeUnit)}.
-     * 
      * This method bypasses the regular {@code maxTraceEntriesPerTransaction} check so that errors
      * after {@code maxTraceEntriesPerTransaction} will still be included in the trace. A hard cap (
      * {@code maxTraceEntriesPerTransaction * 2}) on the total number of entries is still applied,
@@ -313,44 +309,39 @@ public interface ThreadContext {
      */
     void addErrorEntry(@Nullable String message, Throwable t);
 
-    /**
-     * Special purpose method.
-     */
     @Nullable
-    MessageSupplier getServletMessageSupplier();
+    ServletRequestInfo getServletRequestInfo();
 
     /**
-     * Special purpose method.
+     * DO NOT USE.
+     * 
+     * This method should only ever be used by the servlet plugin.
      */
-    void setServletMessageSupplier(@Nullable MessageSupplier messageSupplier);
+    void setServletRequestInfo(@Nullable ServletRequestInfo servletRequestInfo);
 
-    /**
-     * @deprecated Replaced by {@link #setTransactionAsync()}.
-     */
-    @Deprecated
-    void setAsyncTransaction();
+    interface ServletRequestInfo {
+        String getMethod();
+        String getContextPath();
+        String getServletPath();
+        // getPathInfo() returns null when the servlet is mapped to "/" (not "/*") and therefore it
+        // is replacing the default servlet and in this case getServletPath() returns the full path
+        @Nullable
+        String getPathInfo();
+        String getUri();
+    }
 
-    /**
-     * @deprecated Replaced by {@link #setTransactionAsyncComplete()}.
-     */
-    @Deprecated
-    void completeAsyncTransaction();
+    public final class Priority {
 
-    /**
-     * @deprecated Replaced by {@link #setTransactionOuter()}.
-     */
-    @Deprecated
-    void setOuterTransaction();
-
-    interface Priority {
-        int CORE_PLUGIN = -100;
-        int USER_PLUGIN = 100;
-        int USER_API = 1000;
-        int USER_CONFIG = 10000;
+        public static final int CORE_PLUGIN = -100;
+        public static final int USER_PLUGIN = 100;
+        public static final int USER_API = 1000;
+        public static final int USER_CONFIG = 10000;
         // this is used for very special circumstances, currently only
         // when setting transaction name from HTTP header "Glowroot-Transaction-Type"
         // and for setting slow threshold (to zero) for Startup transactions
         // and for setting slow threshold for user-specific profiling
-        int CORE_MAX = 1000000;
+        public static final int CORE_MAX = 1000000;
+
+        private Priority() {}
     }
 }

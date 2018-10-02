@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import org.apache.commons.dbcp.DelegatingConnection;
 import org.apache.commons.dbcp.DelegatingStatement;
 import org.junit.After;
 import org.junit.AfterClass;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -33,6 +34,7 @@ import org.glowroot.agent.it.harness.AppUnderTest;
 import org.glowroot.agent.it.harness.Container;
 import org.glowroot.agent.it.harness.Containers;
 import org.glowroot.agent.it.harness.TransactionMarker;
+import org.glowroot.agent.plugin.jdbc.Connections.ConnectionType;
 import org.glowroot.wire.api.model.TraceOuterClass.Trace;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -42,6 +44,8 @@ public class BatchIT {
     private static final String PLUGIN_ID = "jdbc";
 
     private static Container container;
+    private static boolean driverCapturesBatchRows =
+            Connections.getConnectionType() != ConnectionType.ORACLE;
 
     @BeforeClass
     public static void setUp() throws Exception {
@@ -72,18 +76,59 @@ public class BatchIT {
         assertThat(entry.getMessage()).isEmpty();
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("insert into employee (name) values (?)");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: 3 x ");
-        assertThat(entry.getQueryEntryMessage().getSuffix())
-                .isEqualTo(" ['huckle'] ['sally'] ['sally'] => 3 rows");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: 3 x ");
+        if (driverCapturesBatchRows) {
+            assertThat(entry.getQueryEntryMessage().getSuffix())
+                    .isEqualTo(" ['huckle'] ['sally'] ['sally'] => 3 rows");
+        } else {
+            assertThat(entry.getQueryEntryMessage().getSuffix())
+                    .isEqualTo(" ['huckle'] ['sally'] ['sally']");
+        }
 
         entry = i.next();
         assertThat(entry.getDepth()).isEqualTo(0);
         assertThat(entry.getMessage()).isEmpty();
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("insert into employee (name) values (?)");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: 2 x ");
-        assertThat(entry.getQueryEntryMessage().getSuffix())
-                .isEqualTo(" ['lowly'] ['pig will'] => 2 rows");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: 2 x ");
+        if (driverCapturesBatchRows) {
+            assertThat(entry.getQueryEntryMessage().getSuffix())
+                    .isEqualTo(" ['lowly'] ['pig will'] => 2 rows");
+        } else {
+            assertThat(entry.getQueryEntryMessage().getSuffix())
+                    .isEqualTo(" ['lowly'] ['pig will']");
+        }
+
+        assertThat(i.hasNext()).isFalse();
+    }
+
+    @Test
+    public void testBatchPreparedExceedingLimitStatement() throws Exception {
+        // when
+        Trace trace = container.execute(ExecuteBatchExceedingLimitPreparedStatement.class);
+
+        // then
+        Iterator<Trace.Entry> i = trace.getEntryList().iterator();
+        List<Trace.SharedQueryText> sharedQueryTexts = trace.getSharedQueryTextList();
+
+        Trace.Entry entry = i.next();
+        assertThat(entry.getDepth()).isEqualTo(0);
+        assertThat(entry.getMessage()).isEmpty();
+        assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
+                .getFullText()).isEqualTo("insert into employee (name) values (?)");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: 2002 x ");
+        StringBuilder sb = new StringBuilder();
+        for (int j = 0; j < 1000; j++) {
+            sb.append(" ['name");
+            sb.append(j);
+            sb.append("']");
+        }
+        if (driverCapturesBatchRows) {
+            sb.append(" ... => 2002 rows");
+        } else {
+            sb.append(" ...");
+        }
+        assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(sb.toString());
 
         assertThat(i.hasNext()).isFalse();
     }
@@ -105,16 +150,24 @@ public class BatchIT {
         assertThat(entry.getMessage()).isEmpty();
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("insert into employee (name) values (?)");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: 3 x ");
-        assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 3 rows");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: 3 x ");
+        if (driverCapturesBatchRows) {
+            assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 3 rows");
+        } else {
+            assertThat(entry.getQueryEntryMessage().getSuffix()).isEmpty();
+        }
 
         entry = i.next();
         assertThat(entry.getDepth()).isEqualTo(0);
         assertThat(entry.getMessage()).isEmpty();
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("insert into employee (name) values (?)");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: 2 x ");
-        assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 2 rows");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: 2 x ");
+        if (driverCapturesBatchRows) {
+            assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 2 rows");
+        } else {
+            assertThat(entry.getQueryEntryMessage().getSuffix()).isEmpty();
+        }
 
         assertThat(i.hasNext()).isFalse();
     }
@@ -133,18 +186,28 @@ public class BatchIT {
         assertThat(entry.getMessage()).isEmpty();
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("insert into employee (name) values (?)");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: 2 x ");
-        assertThat(entry.getQueryEntryMessage().getSuffix())
-                .isEqualTo(" ['huckle'] ['sally'] => 2 rows");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: 2 x ");
+        if (driverCapturesBatchRows) {
+            assertThat(entry.getQueryEntryMessage().getSuffix())
+                    .isEqualTo(" ['huckle'] ['sally'] => 2 rows");
+        } else {
+            assertThat(entry.getQueryEntryMessage().getSuffix())
+                    .isEqualTo(" ['huckle'] ['sally']");
+        }
 
         entry = i.next();
         assertThat(entry.getDepth()).isEqualTo(0);
         assertThat(entry.getMessage()).isEmpty();
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("insert into employee (name) values (?)");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: 2 x ");
-        assertThat(entry.getQueryEntryMessage().getSuffix())
-                .isEqualTo(" ['lowly'] ['pig will'] => 2 rows");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: 2 x ");
+        if (driverCapturesBatchRows) {
+            assertThat(entry.getQueryEntryMessage().getSuffix())
+                    .isEqualTo(" ['lowly'] ['pig will'] => 2 rows");
+        } else {
+            assertThat(entry.getQueryEntryMessage().getSuffix())
+                    .isEqualTo(" ['lowly'] ['pig will']");
+        }
 
         assertThat(i.hasNext()).isFalse();
     }
@@ -166,16 +229,24 @@ public class BatchIT {
         assertThat(entry.getMessage()).isEmpty();
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("insert into employee (name) values (?)");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: 2 x ");
-        assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 2 rows");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: 2 x ");
+        if (driverCapturesBatchRows) {
+            assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 2 rows");
+        } else {
+            assertThat(entry.getQueryEntryMessage().getSuffix()).isEmpty();
+        }
 
         entry = i.next();
         assertThat(entry.getDepth()).isEqualTo(0);
         assertThat(entry.getMessage()).isEmpty();
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("insert into employee (name) values (?)");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: 2 x ");
-        assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 2 rows");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: 2 x ");
+        if (driverCapturesBatchRows) {
+            assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 2 rows");
+        } else {
+            assertThat(entry.getQueryEntryMessage().getSuffix()).isEmpty();
+        }
 
         assertThat(i.hasNext()).isFalse();
     }
@@ -195,7 +266,7 @@ public class BatchIT {
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("[batch] insert into employee (name) values ('huckle'),"
                         + " insert into employee (name) values ('sally')");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: ");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: ");
         assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 2 rows");
 
         entry = i.next();
@@ -204,7 +275,7 @@ public class BatchIT {
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("[batch] insert into employee (name) values ('lowly'),"
                         + " insert into employee (name) values ('pig will')");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: ");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: ");
         assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 2 rows");
 
         assertThat(i.hasNext()).isFalse();
@@ -224,7 +295,7 @@ public class BatchIT {
         assertThat(entry.getMessage()).isEmpty();
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("[batch] insert into employee (name) values ('1')");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: ");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: ");
         assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 1 row");
 
         assertThat(i.hasNext()).isFalse();
@@ -244,8 +315,49 @@ public class BatchIT {
         assertThat(entry.getMessage()).isEmpty();
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("[empty batch]");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: ");
-        assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 0 rows");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: ");
+        assertThat(entry.getQueryEntryMessage().getSuffix()).isEmpty();
+
+        assertThat(i.hasNext()).isFalse();
+    }
+
+    @Test
+    public void testBatchPreparedStatementWithNoBatches() throws Exception {
+        // hsqldb driver (and maybe some others) throw error when executing a batch with no batches
+        Assume.assumeTrue(Connections.getConnectionType() == ConnectionType.H2);
+
+        // when
+        Trace trace = container.execute(ExecuteBatchPreparedStatementWithNoBatches.class);
+
+        // then
+        Iterator<Trace.Entry> i = trace.getEntryList().iterator();
+        List<Trace.SharedQueryText> sharedQueryTexts = trace.getSharedQueryTextList();
+
+        Trace.Entry entry = i.next();
+        assertThat(entry.getDepth()).isEqualTo(0);
+        assertThat(entry.getMessage()).isEmpty();
+        assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
+                .getFullText()).isEqualTo("[empty batch] insert into employee (name) values (?)");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: ");
+
+        assertThat(i.hasNext()).isFalse();
+    }
+
+    @Test
+    public void testBatchPreparedStatementWithSingleBatch() throws Exception {
+        // when
+        Trace trace = container.execute(ExecuteBatchPreparedStatementWithSingleBatch.class);
+
+        // then
+        Iterator<Trace.Entry> i = trace.getEntryList().iterator();
+        List<Trace.SharedQueryText> sharedQueryTexts = trace.getSharedQueryTextList();
+
+        Trace.Entry entry = i.next();
+        assertThat(entry.getDepth()).isEqualTo(0);
+        assertThat(entry.getMessage()).isEmpty();
+        assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
+                .getFullText()).isEqualTo("insert into employee (name) values (?)");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: ");
 
         assertThat(i.hasNext()).isFalse();
     }
@@ -265,7 +377,7 @@ public class BatchIT {
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("[batch] insert into employee (name) values ('huckle'),"
                         + " insert into employee (name) values ('sally')");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: ");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: ");
         assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 2 rows");
 
         entry = i.next();
@@ -274,7 +386,7 @@ public class BatchIT {
         assertThat(sharedQueryTexts.get(entry.getQueryEntryMessage().getSharedQueryTextIndex())
                 .getFullText()).isEqualTo("[batch] insert into employee (name) values ('lowly'),"
                         + " insert into employee (name) values ('pig will')");
-        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execution: ");
+        assertThat(entry.getQueryEntryMessage().getPrefix()).isEqualTo("jdbc execute: ");
         assertThat(entry.getQueryEntryMessage().getSuffix()).isEqualTo(" => 2 rows");
 
         assertThat(i.hasNext()).isFalse();
@@ -310,6 +422,35 @@ public class BatchIT {
                 preparedStatement.addBatch();
                 preparedStatement.setString(1, "pig will");
                 preparedStatement.addBatch();
+                preparedStatement.executeBatch();
+            } finally {
+                preparedStatement.close();
+            }
+        }
+    }
+
+    public static class ExecuteBatchExceedingLimitPreparedStatement
+            implements AppUnderTest, TransactionMarker {
+        private Connection connection;
+        @Override
+        public void executeApp() throws Exception {
+            connection = Connections.createConnection();
+            connection.setAutoCommit(false);
+            try {
+                transactionMarker();
+            } finally {
+                Connections.closeConnection(connection);
+            }
+        }
+        @Override
+        public void transactionMarker() throws Exception {
+            PreparedStatement preparedStatement =
+                    connection.prepareStatement("insert into employee (name) values (?)");
+            try {
+                for (int i = 0; i < 2002; i++) {
+                    preparedStatement.setString(1, "name" + i);
+                    preparedStatement.addBatch();
+                }
                 preparedStatement.executeBatch();
             } finally {
                 preparedStatement.close();
@@ -435,6 +576,58 @@ public class BatchIT {
                 statement.executeBatch();
             } finally {
                 statement.close();
+            }
+        }
+    }
+
+    public static class ExecuteBatchPreparedStatementWithNoBatches
+            implements AppUnderTest, TransactionMarker {
+        private Connection connection;
+        @Override
+        public void executeApp() throws Exception {
+            connection = Connections.createConnection();
+            connection.setAutoCommit(false);
+            try {
+                transactionMarker();
+            } finally {
+                Connections.closeConnection(connection);
+            }
+        }
+        @Override
+        public void transactionMarker() throws Exception {
+            PreparedStatement preparedStatement =
+                    connection.prepareStatement("insert into employee (name) values (?)");
+            try {
+                preparedStatement.executeBatch();
+            } finally {
+                preparedStatement.close();
+            }
+        }
+    }
+
+    public static class ExecuteBatchPreparedStatementWithSingleBatch
+            implements AppUnderTest, TransactionMarker {
+        private Connection connection;
+        @Override
+        public void executeApp() throws Exception {
+            connection = Connections.createConnection();
+            connection.setAutoCommit(false);
+            try {
+                transactionMarker();
+            } finally {
+                Connections.closeConnection(connection);
+            }
+        }
+        @Override
+        public void transactionMarker() throws Exception {
+            PreparedStatement preparedStatement =
+                    connection.prepareStatement("insert into employee (name) values (?)");
+            try {
+                preparedStatement.setString(1, "huckle");
+                preparedStatement.addBatch();
+                preparedStatement.executeBatch();
+            } finally {
+                preparedStatement.close();
             }
         }
     }

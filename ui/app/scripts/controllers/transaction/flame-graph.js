@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2016 the original author or authors.
+ * Copyright 2014-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-/* global glowroot, gtParseIncludesExcludes, d3, moment */
+/* global glowroot, gtParseIncludesExcludes, d3, moment, $ */
 
 glowroot.controller('TransactionFlameGraphCtrl', [
   '$scope',
@@ -86,13 +86,9 @@ glowroot.controller('TransactionFlameGraphCtrl', [
                 };
                 height++;
               }
-              var flameGraph = d3.flameGraph()
+              var flameGraph = d3.flamegraph()
                   .height(height * 18)
-                  .width(960)
-                  .cellHeight(18)
-                  .transitionDuration(750)
-                  .transitionEase('cubic-in-out')
-                  .title('');
+                  .width(960);
               d3.select('#chart')
                   .datum(chartData)
                   .call(flameGraph);
@@ -101,5 +97,10 @@ glowroot.controller('TransactionFlameGraphCtrl', [
             httpErrors.handle(response, $scope);
           });
     }
+
+    $scope.$on('$destroy', function () {
+      // otherwise tooltip will remain visible when going back to prior page via keyboard (Alt-LeftArrow)
+      $('.d3-flame-graph-tip').remove();
+    });
   }
 ]);

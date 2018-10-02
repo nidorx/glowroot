@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,11 @@
  */
 package org.glowroot.agent.impl;
 
-import javax.annotation.Nullable;
-
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.glowroot.agent.model.AsyncTimerImpl;
+import org.glowroot.agent.model.AsyncTimer;
 import org.glowroot.agent.model.ErrorMessage;
 import org.glowroot.agent.model.QueryData;
 import org.glowroot.agent.plugin.api.MessageSupplier;
@@ -71,7 +70,7 @@ class TraceEntryComponent {
     }
 
     TraceEntryImpl pushEntry(long startTick, Object messageSupplier, TimerImpl syncTimer,
-            @Nullable AsyncTimerImpl asyncTimer, @Nullable QueryData queryData,
+            @Nullable AsyncTimer asyncTimer, @Nullable QueryData queryData,
             long queryExecutionCount) {
         TraceEntryImpl entry = new TraceEntryImpl(threadContext, activeEntry, messageSupplier,
                 queryData, queryExecutionCount, startTick, syncTimer, asyncTimer);
@@ -101,9 +100,8 @@ class TraceEntryComponent {
 
     TraceEntryImpl addErrorEntry(long startTick, long endTick, @Nullable Object messageSupplier,
             @Nullable QueryData queryData, ErrorMessage errorMessage) {
-        TraceEntryImpl entry = new TraceEntryImpl(threadContext, activeEntry, messageSupplier,
-                queryData, 1, startTick, null, null);
-        entry.immediateEndAsErrorEntry(errorMessage, endTick);
+        TraceEntryImpl entry = TraceEntryImpl.createCompletedErrorEntry(threadContext, activeEntry,
+                messageSupplier, queryData, errorMessage, startTick, endTick);
         tailEntry.setNextTraceEntry(entry);
         tailEntry = entry;
         return entry;

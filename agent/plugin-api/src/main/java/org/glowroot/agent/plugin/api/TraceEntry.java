@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,7 @@ package org.glowroot.agent.plugin.api;
 
 import java.util.concurrent.TimeUnit;
 
-import javax.annotation.Nullable;
-
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.weaving.OnReturn;
 
 /**
@@ -48,7 +47,7 @@ public interface TraceEntry {
      * thread, and so a stack trace at that time does not point to the code which executed triggered
      * the trace entry creation.
      */
-    void endWithStackTrace(long threshold, TimeUnit unit);
+    void endWithLocationStackTrace(long threshold, TimeUnit unit);
 
     /**
      * End the entry and mark the trace entry as an error with the specified throwable.
@@ -66,11 +65,6 @@ public interface TraceEntry {
 
     /**
      * End the entry and mark the trace entry as an error with the specified throwable.
-     * 
-     * A stack trace is captured and displayed in the UI as a location stack trace (as opposed to an
-     * exception stack trace), similar to {@link #endWithStackTrace(long, TimeUnit)}. Unless this is
-     * the root trace entry in which case no location stack trace is captured / displayed (since
-     * location stack trace is typically not mysterious for root trace entries).
      * 
      * If this is the root entry, then the error flag on the transaction is set.
      * 
@@ -101,6 +95,18 @@ public interface TraceEntry {
      * dummy entry into a real entry.
      */
     void endWithInfo(Throwable t);
+
+    /**
+     * Example of query and subsequent iterating over results which goes back to database and pulls
+     * more results.
+     * 
+     * Important note for async trace entries (those created by
+     * {@link ThreadContext#startAsyncTraceEntry(MessageSupplier, TimerName)} and
+     * {@link ThreadContext#startAsyncQueryEntry(String, String, QueryMessageSupplier, TimerName)}):
+     * this method should not be used by a thread other than the one that created the async trace
+     * entry.
+     */
+    Timer extend();
 
     /**
      * Returns the message supplier that was supplied when the {@code TraceEntry} was created.

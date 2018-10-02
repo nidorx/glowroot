@@ -1,5 +1,5 @@
 <!--
-  Copyright 2013-2017 the original author or authors.
+  Copyright 2013-2018 the original author or authors.
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -13,100 +13,122 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<div class="gt-header" style="margin-bottom: 6px;">
-  <div class="gt-header-page-name">
-    <div ng-show="hideAgentRollupDropdown()">
+<div class="gt-header">
+  <div class="gt-header-lhs"
+       ng-if="!layout.central && !layout.embeddedAgentRollup.display">
+    <h1 class="gt-header-text">
       JVM
+    </h1>
+  </div>
+  <div class="gt-header-lhs"
+       ng-if="layout.central || layout.embeddedAgentRollup.display">
+    <!-- ng-show needed here instead of ng-if because transaction.js binds directly to #agentRollupDropdown -->
+    <div class="gt-header-menu"
+         ng-show="layout.central">
+      <select gt-selectpicker
+              gt-title="agentRollup.display || '&amp;lt;select&amp;gt;'"
+              data-width="fit"
+              data-live-search="true"
+              data-style="btn-secondary"
+              id="agentRollupDropdown"
+              aria-label="Agent">
+        <option ng-repeat="item in agentRollups track by item.id"
+                data-href="{{agentRollupUrl(item.id)}}"
+                data-tokens="{{item.display}}"
+                value="{{item.id}}"
+                title="{{agentRollup.display}}"
+                ng-disabled="item.disabled"
+                ng-selected="item.id == agentRollup.id">
+          {{item.indentedDisplay}}
+        </option>
+        <option disabled
+                class="gt-agent-rollup-dropdown-message d-none"
+                style="font-style: italic; font-size: 1rem; cursor: inherit;"
+                ng-if="agentRollups.length === 0">
+          <!-- this content is set dynamically in jvm.js -->
+        </option>
+        <!-- can't use gt-spinner due to selectpicker behavior -->
+        <option disabled
+                class="gt-agent-rollup-dropdown-spinner d-none"
+                style="position: relative; height: 30px; cursor: inherit;">
+        </option>
+      </select>
     </div>
-    <div style="margin-top: -16px;" ng-hide="hideAgentRollupDropdown()">
-      <span class="gt-inline-block gt-header-menu">
-        <span class="dropdown">
-          <a href="#" role="button" data-toggle="dropdown" class="dropdown-toggle">
-            {{layout.agentRollups[agentRollupId].display || '&lt;agent&gt;'}}
-            <span class="gt-large-caret"></span>
-          </a>
-          <!-- margin-bottom helps when large menu that extends to the bottom of the page -->
-          <ul class="dropdown-menu"
-              role="menu"
-              style="margin-bottom: 100px;">
-            <!-- using layout.agentRollupValues instead of layout.agentRollups in case there are any agent rollup ids
-                 that start with '$', because angular silently ignores object keys starting with '$' -->
-            <li ng-repeat="agentRollup in layout.agentRollupValues">
-              <a role="menuitem"
-                 tabindex="-1"
-                 ng-href="{{agentRollupUrl(agentRollup)}}">
-                {{agentRollup.indentedDisplay}}
-              </a>
-            </li>
-          </ul>
-        </span>
-      </span>
-      <!-- don't use border to simulate vertical bar since this will jitter on reload (at least in Chrome)
-           while chrome guesses the placement of the border based on default font and then it moves slightly
-           once font is available -->
-      <span class="gt-inline-block gt-separator">
-        |
-      </span>
-      <span class="gt-inline-block">
-        JVM
-      </span>
+    <div class="gt-header-text"
+         ng-if="layout.embeddedAgentRollup.display">
+      {{layout.embeddedAgentRollup.display}}
     </div>
+    <!-- don't use border to simulate vertical bar since this will jitter on reload (at least in Chrome)
+         while chrome guesses the placement of the border based on default font and then it moves slightly
+         once font is available -->
+    <div class="gt-header-text gt-separator">
+      |
+    </div>
+    <h1 class="gt-header-text">
+      JVM
+    </h1>
   </div>
 </div>
 <div class="gt-sidebar hidden-print">
-  <div class="panel panel-default">
-    <ul class="list-group">
+  <div class="card">
+    <div class="list-group">
       <div gt-sidebar-item
            gt-display="Gauges"
-           gt-url="jvm/gauges{{agentQueryString()}}"
+           gt-url="jvm/gauges{{gaugeQueryString()}}"
            gt-active="currentUrl() === 'jvm/gauges'"
-           ng-if="agentPermissions.jvm.gauges || (layout.central && !agentRollupId)">
+           ng-if="agentRollup.permissions.jvm.gauges || (layout.central && !agentRollupId)">
       </div>
       <div gt-sidebar-item
            gt-display="Thread dump"
            gt-url="jvm/thread-dump{{agentQueryString()}}"
            gt-active="currentUrl() === 'jvm/thread-dump' || currentUrl() === 'jvm/jstack'"
-           ng-if="agentPermissions.jvm.threadDump && !layout.offlineViewer">
+           ng-if="agentRollup.permissions.jvm.threadDump && !isAgentRollup() && !layout.offlineViewer">
       </div>
       <div gt-sidebar-item
            gt-display="Heap dump"
            gt-url="jvm/heap-dump{{agentQueryString()}}"
            gt-active="currentUrl() === 'jvm/heap-dump'"
-           ng-if="agentPermissions.jvm.heapDump && !layout.offlineViewer">
+           ng-if="agentRollup.permissions.jvm.heapDump && !isAgentRollup() && !layout.offlineViewer">
       </div>
       <div gt-sidebar-item
            gt-display="Heap histogram"
            gt-url="jvm/heap-histogram{{agentQueryString()}}"
            gt-active="currentUrl() === 'jvm/heap-histogram'"
-           ng-if="agentPermissions.jvm.heapHistogram && !layout.offlineViewer">
+           ng-if="agentRollup.permissions.jvm.heapHistogram && !isAgentRollup() && !layout.offlineViewer">
+      </div>
+      <div gt-sidebar-item
+           gt-display="Force GC"
+           gt-url="jvm/force-gc{{agentQueryString()}}"
+           gt-active="currentUrl() === 'jvm/force-gc'"
+           ng-if="agentRollup.permissions.jvm.forceGC && !isAgentRollup() && !layout.offlineViewer">
       </div>
       <div gt-sidebar-item
            gt-display="MBean tree"
            gt-url="jvm/mbean-tree{{agentQueryString()}}"
            gt-active="currentUrl() === 'jvm/mbean-tree'"
-           ng-if="agentPermissions.jvm.mbeanTree && !layout.offlineViewer">
+           ng-if="agentRollup.permissions.jvm.mbeanTree && !isAgentRollup() && !layout.offlineViewer">
       </div>
       <div gt-sidebar-item
            gt-display="System properties"
            gt-url="jvm/system-properties{{agentQueryString()}}"
            gt-active="currentUrl() === 'jvm/system-properties'"
-           ng-if="agentPermissions.jvm.systemProperties && !layout.offlineViewer">
+           ng-if="agentRollup.permissions.jvm.systemProperties && !isAgentRollup() && !layout.offlineViewer">
       </div>
       <div gt-sidebar-item
            gt-display="Environment"
            gt-url="jvm/environment{{agentQueryString()}}"
            gt-active="currentUrl() === 'jvm/environment'"
-           ng-if="agentPermissions.jvm.environment">
+           ng-if="agentRollup.permissions.jvm.environment && !isAgentRollup()">
       </div>
-    </ul>
+    </div>
   </div>
 </div>
-<div class="panel panel-default gt-main-column">
-  <div class="panel-heading">
+<div class="card gt-main-column">
+  <div class="card-header">
     <h2>{{heading}}</h2>
   </div>
-  <div class="panel-body">
-    <div ui-view autoscroll="false" ng-hide="hideMainContent()">
+  <div class="card-body">
+    <div ui-view ng-hide="hideMainContent()">
     </div>
   </div>
 </div>

@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2016 the original author or authors.
+ * Copyright 2013-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,18 +18,18 @@ package org.glowroot.ui;
 import java.util.List;
 import java.util.Map;
 
-import javax.annotation.Nullable;
-
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Optional;
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.google.common.primitives.Ints;
 import io.netty.handler.codec.http.HttpResponseStatus;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,10 +37,11 @@ import org.slf4j.LoggerFactory;
 import org.glowroot.common.live.LiveJvmService;
 import org.glowroot.common.live.LiveJvmService.AgentNotConnectedException;
 import org.glowroot.common.live.LiveWeavingService;
-import org.glowroot.common.repo.ConfigRepository;
 import org.glowroot.common.util.ObjectMappers;
 import org.glowroot.common.util.Versions;
+import org.glowroot.common2.repo.ConfigRepository;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig.AlreadyInTransactionBehavior;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig.CaptureKind;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.InstrumentationConfig.MethodModifier;
 import org.glowroot.wire.api.model.DownstreamServiceOuterClass.GlobalMeta;
@@ -60,13 +61,15 @@ class InstrumentationConfigJsonService {
     private static final Ordering<InstrumentationConfig> ordering =
             new InstrumentationConfigOrdering();
 
+    private final boolean central;
     private final ConfigRepository configRepository;
     private final @Nullable LiveWeavingService liveWeavingService;
     private final @Nullable LiveJvmService liveJvmService;
 
-    InstrumentationConfigJsonService(ConfigRepository configRepository,
+    InstrumentationConfigJsonService(boolean central, ConfigRepository configRepository,
             @Nullable LiveWeavingService liveWeavingService,
             @Nullable LiveJvmService liveJvmService) {
+        this.central = central;
         this.configRepository = configRepository;
         this.liveWeavingService = liveWeavingService;
         this.liveJvmService = liveJvmService;
@@ -109,26 +112,30 @@ class InstrumentationConfigJsonService {
         if (liveWeavingService == null) {
             return;
         }
-        // HttpServer is configured with a very small thread pool to keep number of threads down
-        // (currently only a single thread), so spawn a background thread to perform the preloading
-        // so it doesn't block other http requests
-        Thread thread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    // TODO report checker framework issue that occurs without checkNotNull
-                    checkNotNull(liveWeavingService);
-                    liveWeavingService.preloadClasspathCache(agentId);
-                } catch (AgentNotConnectedException e) {
-                    logger.debug(e.getMessage(), e);
-                } catch (Exception e) {
-                    logger.error(e.getMessage(), e);
+        if (central) {
+            liveWeavingService.preloadClasspathCache(agentId);
+        } else {
+            // HttpServer is configured with a very small thread pool to keep number of threads down
+            // (currently only a single thread), so spawn a background thread to perform the
+            // preloading so it doesn't block other http requests
+            Thread thread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        // TODO report checker framework issue that occurs without checkNotNull
+                        checkNotNull(liveWeavingService);
+                        liveWeavingService.preloadClasspathCache(agentId);
+                    } catch (AgentNotConnectedException e) {
+                        logger.debug(e.getMessage(), e);
+                    } catch (Exception e) {
+                        logger.error(e.getMessage(), e);
+                    }
                 }
-            }
-        });
-        thread.setDaemon(true);
-        thread.setName("Glowroot-Temporary-Thread");
-        thread.start();
+            });
+            thread.setDaemon(true);
+            thread.setName("Glowroot-Temporary-Thread");
+            thread.start();
+        }
     }
 
     @GET(path = "/backend/config/new-instrumentation-check-agent-connected",
@@ -317,14 +324,21 @@ class InstrumentationConfigJsonService {
     }
 
     @Value.Immutable
-    @JsonInclude(value = Include.ALWAYS)
+    @JsonInclude(Include.ALWAYS)
     abstract static class InstrumentationConfigDto {
 
-        @JsonInclude(value = Include.NON_EMPTY)
-        abstract Optional<String> agentId(); // only used in request
         abstract String className();
         abstract String classAnnotation();
-        abstract String methodDeclaringClassName();
+        abstract String subTypeRestriction();
+        abstract String superTypeRestriction();
+        // pointcuts with methodDeclaringClassName are no longer supported in 0.9.16, but
+        // included here to help with transitioning of old instrumentation config
+        //
+        // also included here to support glowroot central 0.9.16 or newer running agent 0.9.15 or
+        // older
+        @Deprecated
+        @JsonInclude(Include.NON_NULL)
+        abstract @Nullable String methodDeclaringClassName();
         abstract String methodName();
         abstract String methodAnnotation();
         abstract ImmutableList<String> methodParameterTypes();
@@ -338,6 +352,7 @@ class InstrumentationConfigJsonService {
         abstract String transactionUserTemplate();
         abstract Map<String, String> transactionAttributeTemplates();
         abstract @Nullable Integer transactionSlowThresholdMillis();
+        abstract @Nullable AlreadyInTransactionBehavior alreadyInTransactionBehavior();
         abstract boolean transactionOuter();
         abstract String traceEntryMessageTemplate();
         abstract @Nullable Integer traceEntryStackThresholdMillis();
@@ -350,8 +365,17 @@ class InstrumentationConfigJsonService {
         private InstrumentationConfig convert() {
             InstrumentationConfig.Builder builder = InstrumentationConfig.newBuilder()
                     .setClassName(className())
-                    .setMethodDeclaringClassName(methodDeclaringClassName())
+                    .setClassAnnotation(classAnnotation())
+                    .setSubTypeRestriction(subTypeRestriction())
+                    .setSuperTypeRestriction(superTypeRestriction())
+                    // pointcuts with methodDeclaringClassName are no longer supported in 0.9.16,
+                    // but included here to help with transitioning of old instrumentation config
+                    //
+                    // also included here to support glowroot central 0.9.16 or newer running agent
+                    // 0.9.15 or older
+                    .setMethodDeclaringClassName(Strings.nullToEmpty(methodDeclaringClassName()))
                     .setMethodName(methodName())
+                    .setMethodAnnotation(methodAnnotation())
                     .addAllMethodParameterType(methodParameterTypes())
                     .setMethodReturnType(methodReturnType())
                     .addAllMethodModifier(methodModifiers())
@@ -366,6 +390,11 @@ class InstrumentationConfigJsonService {
             if (transactionSlowThresholdMillis != null) {
                 builder.setTransactionSlowThresholdMillis(
                         OptionalInt32.newBuilder().setValue(transactionSlowThresholdMillis));
+            }
+            AlreadyInTransactionBehavior alreadyInTransactionBehavior =
+                    alreadyInTransactionBehavior();
+            if (alreadyInTransactionBehavior != null) {
+                builder.setAlreadyInTransactionBehavior(alreadyInTransactionBehavior);
             }
             builder.setTransactionOuter(transactionOuter())
                     .setTraceEntryMessageTemplate(traceEntryMessageTemplate());
@@ -382,11 +411,21 @@ class InstrumentationConfigJsonService {
         }
 
         private static InstrumentationConfigDto create(InstrumentationConfig config) {
+            @SuppressWarnings("deprecation")
             ImmutableInstrumentationConfigDto.Builder builder =
                     ImmutableInstrumentationConfigDto.builder()
                             .className(config.getClassName())
                             .classAnnotation(config.getClassAnnotation())
-                            .methodDeclaringClassName(config.getMethodDeclaringClassName())
+                            .subTypeRestriction(config.getSubTypeRestriction())
+                            .superTypeRestriction(config.getSuperTypeRestriction())
+                            // pointcuts with methodDeclaringClassName are no longer supported in
+                            // 0.9.16, but included here to help with transitioning of old
+                            // instrumentation config
+                            //
+                            // also included here to support glowroot central 0.9.16 or newer
+                            // running agent 0.9.15 or older
+                            .methodDeclaringClassName(
+                                    Strings.emptyToNull(config.getMethodDeclaringClassName()))
                             .methodName(config.getMethodName())
                             .methodAnnotation(config.getMethodAnnotation())
                             .addAllMethodParameterTypes(config.getMethodParameterTypeList())
@@ -404,6 +443,9 @@ class InstrumentationConfigJsonService {
                 builder.transactionSlowThresholdMillis(
                         config.getTransactionSlowThresholdMillis().getValue());
             }
+            if (config.getCaptureKind() == CaptureKind.TRANSACTION) {
+                builder.alreadyInTransactionBehavior(config.getAlreadyInTransactionBehavior());
+            }
             builder.transactionOuter(config.getTransactionOuter())
                     .traceEntryMessageTemplate(config.getTraceEntryMessageTemplate());
             if (config.hasTraceEntryStackThresholdMillis()) {
@@ -420,7 +462,7 @@ class InstrumentationConfigJsonService {
     }
 
     @Value.Immutable
-    @JsonInclude(value = Include.ALWAYS)
+    @JsonInclude(Include.ALWAYS)
     abstract static class MethodSignatureDto {
 
         abstract String name();

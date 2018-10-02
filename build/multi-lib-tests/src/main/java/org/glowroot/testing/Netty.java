@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,21 +48,18 @@ public class Netty {
         for (int i = 0; i <= 9; i++) {
             runNetty("3.9." + i + ".Final", "netty-3.x");
         }
-        for (int i = 0; i <= 5; i++) {
+        for (int i = 0; i <= 6; i++) {
             runNetty("3.10." + i + ".Final", "netty-3.x");
         }
-        for (int i = 0; i <= 42; i++) {
+        for (int i = 0; i <= 56; i++) {
             runNetty("4.0." + i + ".Final", "netty-4.x");
         }
         for (int i = 1; i <= 7; i++) {
             runNetty("4.1.0.CR" + i, "netty-4.x");
         }
-        runNetty("4.1.0.Final", "netty-4.x");
-        runNetty("4.1.1.Final", "netty-4.x");
-        runNetty("4.1.2.Final", "netty-4.x");
-        runNetty("4.1.3.Final", "netty-4.x");
-        runNetty("4.1.4.Final", "netty-4.x");
-        runNetty("4.1.5.Final", "netty-4.x");
+        for (int i = 0; i <= 27; i++) {
+            runNetty("4.1." + i + ".Final", "netty-4.x");
+        }
     }
 
     private static void vertx() throws Exception {
@@ -87,6 +84,16 @@ public class Netty {
         runVertxJava8("3.1.0", "4.0.31.Final", "vertx-3.x");
         runVertxJava8("3.2.0", "4.0.33.Final", "vertx-3.x");
         runVertxJava8("3.2.1", "4.0.33.Final", "vertx-3.x");
+        runVertxJava8("3.3.0", "4.1.1.Final", "vertx-3.x");
+        runVertxJava8("3.3.1", "4.1.1.Final", "vertx-3.x");
+        runVertxJava8("3.3.2", "4.1.1.Final", "vertx-3.x");
+        runVertxJava8("3.3.3", "4.1.5.Final", "vertx-3.x");
+        runVertxJava8("3.4.0", "4.1.8.Final", "vertx-3.x");
+        runVertxJava8("3.4.1", "4.1.8.Final", "vertx-3.x");
+        runVertxJava8("3.4.2", "4.1.8.Final", "vertx-3.x");
+        runVertxJava8("3.5.0", "4.1.15.Final", "vertx-3.x");
+        runVertxJava8("3.5.1", "4.1.19.Final", "vertx-3.x");
+        runVertxJava8("3.5.2", "4.1.19.Final", "vertx-3.x");
     }
 
     private static void runNetty(String version, String... profile) throws Exception {

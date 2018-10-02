@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,31 +24,21 @@ public class Grails {
 
     public static void main(String[] args) throws Exception {
         for (int i = 6; i <= 17; i++) {
-            if (i == 7 || i == 8) {
-                // there is no 3.0.7 or 3.0.8 in maven central
-                continue;
-            }
             run("3.0." + i);
         }
-        for (int i = 0; i <= 13; i++) {
-            if (i == 1 || i == 8) {
-                // there is no 3.1.1 or 3.1.8 in maven central
-                continue;
-            }
+        for (int i = 0; i <= 16; i++) {
             run("3.1." + i);
         }
-        runSpecial320("3.2.0");
-        run("3.2.1");
-        run("3.2.4");
+        for (int i = 0; i <= 13; i++) {
+            run("3.2." + i);
+        }
+        for (int i = 0; i <= 8; i++) {
+            run("3.3." + i);
+        }
     }
 
     private static void run(String version) throws Exception {
         Util.updateLibVersion(MODULE_PATH, "grails.version", version);
         Util.runTests(MODULE_PATH, JAVA7, JAVA8);
-    }
-
-    private static void runSpecial320(String version) throws Exception {
-        Util.updateLibVersion(MODULE_PATH, "grails.version", version);
-        Util.runTests(MODULE_PATH, "grails-3.2.0", JAVA7, JAVA8);
     }
 }

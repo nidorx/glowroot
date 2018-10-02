@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,22 +22,24 @@ import java.util.List;
 import com.google.common.base.StandardSystemProperty;
 import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
+import com.google.common.base.Ticker;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.glowroot.agent.bytecode.api.ThreadContextThreadLocal;
 import org.glowroot.agent.config.ConfigService;
-import org.glowroot.agent.impl.ThreadContextImpl;
 import org.glowroot.agent.impl.TimerNameCache;
 import org.glowroot.agent.impl.TransactionRegistry;
-import org.glowroot.agent.plugin.api.util.FastThreadLocal;
 import org.glowroot.agent.plugin.api.weaving.Mixin;
 import org.glowroot.agent.plugin.api.weaving.OptionalReturn;
 import org.glowroot.agent.plugin.api.weaving.Pointcut;
 import org.glowroot.agent.plugin.api.weaving.Shim;
 import org.glowroot.agent.weaving.ClassLoaders.LazyDefinedClass;
+import org.glowroot.agent.weaving.SomeAspect.AnotherAnnotationBasedAdvice;
+import org.glowroot.agent.weaving.SomeAspect.AnotherAnnotationBasedAdviceButWrong;
 import org.glowroot.agent.weaving.SomeAspect.BasicAdvice;
 import org.glowroot.agent.weaving.SomeAspect.BasicAnnotationBasedAdvice;
 import org.glowroot.agent.weaving.SomeAspect.BasicHighOrderAdvice;
@@ -67,8 +69,11 @@ import org.glowroot.agent.weaving.SomeAspect.BrokenAdvice;
 import org.glowroot.agent.weaving.SomeAspect.ChangeReturnAdvice;
 import org.glowroot.agent.weaving.SomeAspect.CircularClassDependencyAdvice;
 import org.glowroot.agent.weaving.SomeAspect.ClassNamePatternAdvice;
+import org.glowroot.agent.weaving.SomeAspect.ComplexSuperTypeRestrictionAdvice;
 import org.glowroot.agent.weaving.SomeAspect.FinalMethodAdvice;
 import org.glowroot.agent.weaving.SomeAspect.GenericMiscAdvice;
+import org.glowroot.agent.weaving.SomeAspect.HackedConstructorBytecodeAdvice;
+import org.glowroot.agent.weaving.SomeAspect.HackedConstructorBytecodeJumpingAdvice;
 import org.glowroot.agent.weaving.SomeAspect.HasString;
 import org.glowroot.agent.weaving.SomeAspect.HasStringClassMixin;
 import org.glowroot.agent.weaving.SomeAspect.HasStringInterfaceMixin;
@@ -93,10 +98,12 @@ import org.glowroot.agent.weaving.SomeAspect.PrimitiveWithAutoboxAdvice;
 import org.glowroot.agent.weaving.SomeAspect.PrimitiveWithWildcardAdvice;
 import org.glowroot.agent.weaving.SomeAspect.Shimmy;
 import org.glowroot.agent.weaving.SomeAspect.StaticAdvice;
+import org.glowroot.agent.weaving.SomeAspect.SubTypeRestrictionAdvice;
+import org.glowroot.agent.weaving.SomeAspect.SubTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice;
+import org.glowroot.agent.weaving.SomeAspect.SubTypeRestrictionWhereMethodNotReImplementedInSubSubClassAdvice;
 import org.glowroot.agent.weaving.SomeAspect.SuperBasicAdvice;
-import org.glowroot.agent.weaving.SomeAspect.TargetedAdvice;
-import org.glowroot.agent.weaving.SomeAspect.TargetedFromAbstractBaseAdvice;
-import org.glowroot.agent.weaving.SomeAspect.TargetedFromSubAbstractBaseAdvice;
+import org.glowroot.agent.weaving.SomeAspect.SuperTypeRestrictionAdvice;
+import org.glowroot.agent.weaving.SomeAspect.SuperTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice;
 import org.glowroot.agent.weaving.SomeAspect.TestBytecodeWithStackFramesAdvice;
 import org.glowroot.agent.weaving.SomeAspect.TestBytecodeWithStackFramesAdvice2;
 import org.glowroot.agent.weaving.SomeAspect.TestBytecodeWithStackFramesAdvice3;
@@ -113,6 +120,7 @@ import org.glowroot.agent.weaving.SomeAspectThreadLocals.IntegerThreadLocal;
 import org.glowroot.agent.weaving.other.ArrayMisc;
 import org.glowroot.agent.weaving.targets.AbstractMisc.ExtendsAbstractMisc;
 import org.glowroot.agent.weaving.targets.AbstractNotMisc.ExtendsAbstractNotMisc;
+import org.glowroot.agent.weaving.targets.AbstractNotMiscWithFinal.ExtendsAbstractNotMiscWithFinal;
 import org.glowroot.agent.weaving.targets.AccessibilityMisc;
 import org.glowroot.agent.weaving.targets.BasicMisc;
 import org.glowroot.agent.weaving.targets.BytecodeWithStackFramesMisc;
@@ -130,8 +138,10 @@ import org.glowroot.agent.weaving.targets.OnlyThrowingMisc;
 import org.glowroot.agent.weaving.targets.PrimitiveMisc;
 import org.glowroot.agent.weaving.targets.ShimmedMisc;
 import org.glowroot.agent.weaving.targets.StaticMisc;
+import org.glowroot.agent.weaving.targets.StaticSubbedMisc;
 import org.glowroot.agent.weaving.targets.SubBasicMisc;
 import org.glowroot.agent.weaving.targets.SubException;
+import org.glowroot.agent.weaving.targets.SubMisc;
 import org.glowroot.agent.weaving.targets.SuperBasic;
 import org.glowroot.agent.weaving.targets.SuperBasicMisc;
 import org.glowroot.agent.weaving.targets.ThrowingMisc;
@@ -706,12 +716,12 @@ public class WeaverTest {
         assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(1);
     }
 
-    // ===================== @Pointcut.methodDeclaringClassName =====================
+    // ===================== @Pointcut.subTypeRestriction =====================
 
     @Test
-    public void shouldExecuteTargetedAdvice() throws Exception {
+    public void shouldExecuteSubTypeRestrictionAdvice() throws Exception {
         // given
-        Misc test = newWovenObject(BasicMisc.class, Misc.class, TargetedAdvice.class);
+        Misc test = newWovenObject(BasicMisc.class, Misc.class, SubTypeRestrictionAdvice.class);
         // when
         test.execute1();
         // then
@@ -722,9 +732,9 @@ public class WeaverTest {
     }
 
     @Test
-    public void shouldExecuteSubTargetedAdvice() throws Exception {
+    public void shouldExecuteSubTypeRestrictionAdvice2() throws Exception {
         // given
-        Misc test = newWovenObject(SubBasicMisc.class, Misc.class, TargetedAdvice.class);
+        Misc test = newWovenObject(SubBasicMisc.class, Misc.class, SubTypeRestrictionAdvice.class);
         // when
         test.execute1();
         // then
@@ -735,9 +745,9 @@ public class WeaverTest {
     }
 
     @Test
-    public void shouldNotExecuteNotTargetedAdvice() throws Exception {
+    public void shouldNotExecuteSubTypeRestrictionAdvice() throws Exception {
         // given
-        Misc test = newWovenObject(NestingMisc.class, Misc.class, TargetedAdvice.class);
+        Misc test = newWovenObject(NestingMisc.class, Misc.class, SubTypeRestrictionAdvice.class);
         // when
         test.execute1();
         // then
@@ -748,10 +758,11 @@ public class WeaverTest {
     }
 
     @Test
-    public void shouldExecuteTargetedAdviceFromAbstractBase() throws Exception {
+    public void shouldExecuteSubTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice()
+            throws Exception {
         // given
         SuperBasic test = newWovenObject(BasicMisc.class, SuperBasic.class,
-                TargetedFromAbstractBaseAdvice.class);
+                SubTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice.class);
         // when
         test.callSuperBasic();
         // then
@@ -762,10 +773,11 @@ public class WeaverTest {
     }
 
     @Test
-    public void shouldExecuteSubTargetedAdviceFromAbstractBase() throws Exception {
+    public void shouldExecuteSubTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice2()
+            throws Exception {
         // given
         SuperBasic test = newWovenObject(SubBasicMisc.class, SuperBasic.class,
-                TargetedFromAbstractBaseAdvice.class);
+                SubTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice.class);
         // when
         test.callSuperBasic();
         // then
@@ -776,10 +788,11 @@ public class WeaverTest {
     }
 
     @Test
-    public void shouldNotExecuteNotTargetedAdviceFromAbstractBase() throws Exception {
+    public void shouldNotExecuteSubTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice()
+            throws Exception {
         // given
         SuperBasic test = newWovenObject(SuperBasicMisc.class, SuperBasic.class,
-                TargetedFromAbstractBaseAdvice.class);
+                SubTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice.class);
         // when
         test.callSuperBasic();
         // then
@@ -790,10 +803,11 @@ public class WeaverTest {
     }
 
     @Test
-    public void shouldExecuteSubTargetedAdviceFromSubAbstractBase() throws Exception {
+    public void shouldExecuteSubTypeRestrictionWhereMethodNotReImplementedInSubSubClassAdvice()
+            throws Exception {
         // given
         Misc test = newWovenObject(SubBasicMisc.class, Misc.class,
-                TargetedFromSubAbstractBaseAdvice.class);
+                SubTypeRestrictionWhereMethodNotReImplementedInSubSubClassAdvice.class);
         // when
         test.execute1();
         // then
@@ -804,10 +818,11 @@ public class WeaverTest {
     }
 
     @Test
-    public void shouldNotExecuteTargetedAdviceFromSubAbstractBase() throws Exception {
+    public void shouldExecuteSubTypeRestrictionWhereMethodNotReImplementedInSubSubClassAdvice2()
+            throws Exception {
         // given
         Misc test = newWovenObject(BasicMisc.class, Misc.class,
-                TargetedFromSubAbstractBaseAdvice.class);
+                SubTypeRestrictionWhereMethodNotReImplementedInSubSubClassAdvice.class);
         // when
         test.execute1();
         // then
@@ -818,10 +833,11 @@ public class WeaverTest {
     }
 
     @Test
-    public void shouldNotExecuteNotTargetedAdviceFromSubAbstractBase() throws Exception {
+    public void shouldNotExecuteSubTypeRestrictionWhereMethodNotReImplementedInSubSubClassAdvice()
+            throws Exception {
         // given
         Misc test = newWovenObject(NestingMisc.class, Misc.class,
-                TargetedFromSubAbstractBaseAdvice.class);
+                SubTypeRestrictionWhereMethodNotReImplementedInSubSubClassAdvice.class);
         // when
         test.execute1();
         // then
@@ -829,6 +845,107 @@ public class WeaverTest {
         assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(0);
         assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
         assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(0);
+    }
+
+    // ===================== @Pointcut.superTypeRestriction =====================
+
+    @Test
+    public void shouldExecuteSuperTypeRestrictionAdvice() throws Exception {
+        // given
+        Misc test = newWovenObject(BasicMisc.class, Misc.class, SuperTypeRestrictionAdvice.class);
+        // when
+        test.execute1();
+        // then
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    public void shouldExecuteSuperTypeRestrictionAdvice2() throws Exception {
+        // given
+        Misc test =
+                newWovenObject(SubBasicMisc.class, Misc.class, SuperTypeRestrictionAdvice.class);
+        // when
+        test.execute1();
+        // then
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    public void shouldNotExecuteSuperTypeRestrictionAdvice() throws Exception {
+        // given
+        Misc test = newWovenObject(NestingMisc.class, Misc.class, SuperTypeRestrictionAdvice.class);
+        // when
+        test.execute1();
+        // then
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(0);
+    }
+
+    @Test
+    public void shouldNotExecuteSuperTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice()
+            throws Exception {
+        // given
+        SuperBasic test = newWovenObject(BasicMisc.class, SuperBasic.class,
+                SuperTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice.class);
+        // when
+        test.callSuperBasic();
+        // then
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(0);
+    }
+
+    @Test
+    public void shouldNotExecuteSuperTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice2()
+            throws Exception {
+        // given
+        SuperBasic test = newWovenObject(SubBasicMisc.class, SuperBasic.class,
+                SuperTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice.class);
+        // when
+        test.callSuperBasic();
+        // then
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(0);
+    }
+
+    @Test
+    public void shouldStillNotExecuteSuperTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice()
+            throws Exception {
+        // given
+        SuperBasic test = newWovenObject(SuperBasicMisc.class, SuperBasic.class,
+                SuperTypeRestrictionWhereMethodNotReImplementedInSubClassAdvice.class);
+        // when
+        test.callSuperBasic();
+        // then
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(0);
+    }
+
+    @Test
+    public void shouldExecuteComplexSuperTypeRestrictedPointcut() throws Exception {
+        // given
+        SubMisc test = newWovenObject(BasicMisc.class, SubMisc.class,
+                ComplexSuperTypeRestrictionAdvice.class);
+        // when
+        test.sub();
+        // then
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(1);
     }
 
     // ===================== annotation-based pointcuts =====================
@@ -844,6 +961,33 @@ public class WeaverTest {
         assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(1);
         assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
         assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    public void shouldExecuteAnotherAnnotationBasedPointcut() throws Exception {
+        // given
+        Misc test = newWovenObject(BasicMisc.class, Misc.class, AnotherAnnotationBasedAdvice.class);
+        // when
+        test.executeWithReturn();
+        // then
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    public void shouldExecuteAnotherAnnotationButWrongBasedPointcut() throws Exception {
+        // given
+        Misc test = newWovenObject(BasicMisc.class, Misc.class,
+                AnotherAnnotationBasedAdviceButWrong.class);
+        // when
+        test.executeWithReturn();
+        // then
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(0);
     }
 
     // ===================== throw in lower priority @OnBefore =====================
@@ -874,10 +1018,10 @@ public class WeaverTest {
                 ImmutableList.<ShimType>of(), ImmutableList.<MixinType>of());
         TransactionRegistry transactionRegistry = mock(TransactionRegistry.class);
         when(transactionRegistry.getCurrentThreadContextHolder())
-                .thenReturn(new FastThreadLocal<ThreadContextImpl>().getHolder());
+                .thenReturn(new ThreadContextThreadLocal().getHolder());
         Weaver weaver = new Weaver(advisorsSupplier, ImmutableList.<ShimType>of(),
                 ImmutableList.<MixinType>of(), analyzedWorld, transactionRegistry,
-                new TimerNameCache(), mock(ConfigService.class));
+                Ticker.systemTicker(), new TimerNameCache(), mock(ConfigService.class));
         isolatedWeavingClassLoader.setWeaver(weaver);
         Misc test = isolatedWeavingClassLoader.newInstance(BasicMisc.class, Misc.class);
         // when
@@ -966,6 +1110,19 @@ public class WeaverTest {
         assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(1);
         assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
         assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    public void shouldNotWeaveStaticSubbedMethod() throws Exception {
+        // given
+        Misc test = newWovenObject(StaticSubbedMisc.class, Misc.class, StaticAdvice.class);
+        // when
+        test.execute1();
+        // then
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(0);
     }
 
     // ===================== primitive args =====================
@@ -1173,7 +1330,8 @@ public class WeaverTest {
     @Test
     public void shouldHandleConstructorPointcut() throws Exception {
         // given
-        Misc test = newWovenObject(BasicMisc.class, Misc.class, BasicMiscConstructorAdvice.class);
+        Misc test = newWovenObject(BasicMisc.class, Misc.class,
+                enhanceConstructorAdviceClass(BasicMiscConstructorAdvice.class));
         // reset thread locals after instantiated BasicMisc, to avoid counting that constructor call
         SomeAspectThreadLocals.resetThreadLocals();
         // when
@@ -1192,8 +1350,8 @@ public class WeaverTest {
     @Test
     public void shouldVerifyConstructorPointcutsAreNotNested() throws Exception {
         // given
-        Misc test =
-                newWovenObject(BasicMisc.class, Misc.class, BasicMiscAllConstructorAdvice.class);
+        Misc test = newWovenObject(BasicMisc.class, Misc.class,
+                enhanceConstructorAdviceClass(BasicMiscAllConstructorAdvice.class));
         // reset thread locals after instantiated BasicMisc, to avoid counting that constructor call
         SomeAspectThreadLocals.resetThreadLocals();
         // when
@@ -1205,7 +1363,7 @@ public class WeaverTest {
         assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
         assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(2);
         assertThat(SomeAspectThreadLocals.orderedEvents.get()).containsExactly("isEnabled",
-                "onBefore", "onReturn", "onAfter", "isEnabled", "onBefore", "onReturn", "onAfter");
+                "isEnabled", "onBefore", "onReturn", "onAfter", "onBefore", "onReturn", "onAfter");
     }
 
     @Test
@@ -1219,6 +1377,17 @@ public class WeaverTest {
         assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(1);
         assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
         assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    public void shouldNotCrashOnInheritedFinalMethodFulfillingAnInterface() throws Exception {
+        // given
+        Misc test = newWovenObject(ExtendsAbstractNotMiscWithFinal.class, Misc.class,
+                BasicAdvice.class);
+        // when
+        test.execute1();
+        // then
+        // do not crash with java.lang.VerifyError
     }
 
     @Test
@@ -1547,6 +1716,77 @@ public class WeaverTest {
         assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(1);
     }
 
+    @Test
+    public void shouldExecuteAdviceOnStillMoreNotPerfectBytecode() throws Exception {
+        // given
+        LazyDefinedClass implClass =
+                GenerateStillMoreNotPerfectBytecode.generateStillMoreNotPerfectBytecode();
+        GenerateStillMoreNotPerfectBytecode.Test test = newWovenObject(implClass,
+                GenerateStillMoreNotPerfectBytecode.Test.class, MoreNotPerfectBytecodeAdvice.class);
+        // when
+        test.execute();
+        // then
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    public void shouldExecuteAdviceOnHackedConstructorBytecode() throws Exception {
+        // given
+        LazyDefinedClass implClass =
+                GenerateHackedConstructorBytecode.generateHackedConstructorBytecode();
+        newWovenObject(implClass, GenerateHackedConstructorBytecode.Test.class,
+                enhanceConstructorAdviceClass(HackedConstructorBytecodeAdvice.class));
+        // when
+        // (advice is on constructor, so already captured above)
+        // then
+        assertThat(SomeAspectThreadLocals.enabledCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    public void shouldExecuteAdviceOnMoreHackedConstructorBytecode() throws Exception {
+        // given
+        LazyDefinedClass implClass =
+                GenerateMoreHackedConstructorBytecode.generateMoreHackedConstructorBytecode();
+        newWovenObject(implClass, GenerateMoreHackedConstructorBytecode.Test.class,
+                enhanceConstructorAdviceClass(HackedConstructorBytecodeAdvice.class));
+        // when
+        // (advice is on constructor, so already captured above)
+        // then
+        assertThat(SomeAspectThreadLocals.enabledCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onBeforeCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onReturnCount.get()).isEqualTo(1);
+        assertThat(SomeAspectThreadLocals.onThrowCount.get()).isEqualTo(0);
+        assertThat(SomeAspectThreadLocals.onAfterCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    public void shouldExecuteSingleJumpAdviceOnHackedConstructorBytecode() throws Exception {
+        // given
+        LazyDefinedClass implClass =
+                GenerateHackedConstructorBytecode.generateHackedConstructorBytecode();
+
+        // when
+        Exception exception = null;
+        try {
+            newWovenObject(implClass, GenerateHackedConstructorBytecode.Test.class,
+                    enhanceConstructorAdviceClass(HackedConstructorBytecodeJumpingAdvice.class));
+        } catch (Exception e) {
+            exception = e;
+        }
+
+        // then
+        // this is just to confirm VerifyError is not encountered above due to bad class frames
+        assertThat(exception.getCause().getCause().getMessage())
+                .startsWith("Bytecode service retrieved ");
+    }
+
     public static <S, T extends S> S newWovenObject(Class<T> implClass, Class<S> bridgeClass,
             Class<?> adviceOrShimOrMixinClass, Class<?>... extraBridgeClasses) throws Exception {
         // SomeAspectThreadLocals is passed as bridgeable so that the static thread locals will be
@@ -1577,9 +1817,10 @@ public class WeaverTest {
         AnalyzedWorld analyzedWorld = new AnalyzedWorld(advisorsSupplier, shimTypes, mixinTypes);
         TransactionRegistry transactionRegistry = mock(TransactionRegistry.class);
         when(transactionRegistry.getCurrentThreadContextHolder())
-                .thenReturn(new FastThreadLocal<ThreadContextImpl>().getHolder());
+                .thenReturn(new ThreadContextThreadLocal().getHolder());
         Weaver weaver = new Weaver(advisorsSupplier, shimTypes, mixinTypes, analyzedWorld,
-                transactionRegistry, new TimerNameCache(), mock(ConfigService.class));
+                transactionRegistry, Ticker.systemTicker(), new TimerNameCache(),
+                mock(ConfigService.class));
         isolatedWeavingClassLoader.setWeaver(weaver);
         return isolatedWeavingClassLoader.newInstance(implClass, bridgeClass);
     }
@@ -1616,9 +1857,10 @@ public class WeaverTest {
                 new AnalyzedWorld(advisorsSupplier, shimTypes, mixinTypes);
         TransactionRegistry transactionRegistry = mock(TransactionRegistry.class);
         when(transactionRegistry.getCurrentThreadContextHolder())
-                .thenReturn(new FastThreadLocal<ThreadContextImpl>().getHolder());
+                .thenReturn(new ThreadContextThreadLocal().getHolder());
         Weaver weaver = new Weaver(advisorsSupplier, shimTypes, mixinTypes, analyzedWorld,
-                transactionRegistry, new TimerNameCache(), mock(ConfigService.class));
+                transactionRegistry, Ticker.systemTicker(), new TimerNameCache(),
+                mock(ConfigService.class));
         isolatedWeavingClassLoader.setWeaver(weaver);
 
         String className = toBeDefinedImplClass.type().getClassName();
@@ -1626,6 +1868,12 @@ public class WeaverTest {
         @SuppressWarnings("unchecked")
         Class<T> implClass = (Class<T>) Class.forName(className, false, isolatedWeavingClassLoader);
         return isolatedWeavingClassLoader.newInstance(implClass, bridgeClass);
+    }
+
+    private static Class<?> enhanceConstructorAdviceClass(Class<?> adviceClass)
+            throws ClassNotFoundException {
+        IsolatedWeavingClassLoader isolatedWeavingClassLoader = new IsolatedWeavingClassLoader();
+        return Class.forName(adviceClass.getName(), false, isolatedWeavingClassLoader);
     }
 
     private static void assumeJdk7() {

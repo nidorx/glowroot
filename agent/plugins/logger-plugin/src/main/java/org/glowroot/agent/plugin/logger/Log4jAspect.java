@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2017 the original author or authors.
+ * Copyright 2014-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,17 +17,16 @@ package org.glowroot.agent.plugin.logger;
 
 import java.util.Enumeration;
 
-import javax.annotation.Nullable;
-
 import org.glowroot.agent.plugin.api.Agent;
+import org.glowroot.agent.plugin.api.Message;
 import org.glowroot.agent.plugin.api.MessageSupplier;
 import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.TimerName;
 import org.glowroot.agent.plugin.api.TraceEntry;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
 import org.glowroot.agent.plugin.api.weaving.BindReceiver;
 import org.glowroot.agent.plugin.api.weaving.BindTraveler;
-import org.glowroot.agent.plugin.api.weaving.IsEnabled;
 import org.glowroot.agent.plugin.api.weaving.OnAfter;
 import org.glowroot.agent.plugin.api.weaving.OnBefore;
 import org.glowroot.agent.plugin.api.weaving.Pointcut;
@@ -48,11 +47,14 @@ public class Log4jAspect {
 
     @Shim("org.apache.log4j.Category")
     public interface Logger {
+
         @Nullable
         String getName();
+
         @Shim("org.apache.log4j.Category getParent()")
         @Nullable
         Logger glowroot$getParent();
+
         @Nullable
         Enumeration<?> getAllAppenders();
     }
@@ -70,27 +72,6 @@ public class Log4jAspect {
 
         private static final TimerName timerName = Agent.getTimerName(ForcedLogAdvice.class);
 
-        @IsEnabled
-        @SuppressWarnings("unboxing.of.nullable")
-        public static boolean isEnabled(@BindReceiver Logger logger) {
-            // check to see if no appenders, then don't capture (this is just to avoid confusion)
-            // log4j itself will log a warning:
-            // "No appenders could be found for logger, Please initialize the log4j system properly"
-            // (see org.apache.log4j.Hierarchy.emitNoAppenderWarning())
-            Logger curr = logger;
-            while (true) {
-                Enumeration<?> e = curr.getAllAppenders();
-                if (e != null && e.hasMoreElements()) {
-                    // has at least one appender
-                    return true;
-                }
-                curr = curr.glowroot$getParent();
-                if (curr == null) {
-                    return false;
-                }
-            }
-        }
-
         @OnBefore
         @SuppressWarnings("unused")
         public static TraceEntry onBefore(ThreadContext context, @BindReceiver Logger logger,
@@ -101,9 +82,8 @@ public class Log4jAspect {
             if (LoggerPlugin.markTraceAsError(lvl >= ERROR_INT, lvl >= WARN_INT, t != null)) {
                 context.setTransactionError(messageText, t);
             }
-            String loggerName = LoggerPlugin.getAbbreviatedLoggerName(logger.getName());
-            return context.startTraceEntry(MessageSupplier.create("log {}: {} - {}",
-                    getLevelStr(lvl), loggerName, messageText), timerName);
+            return context.startTraceEntry(
+                    new LogMessageSupplier(lvl, logger.getName(), messageText), timerName);
         }
 
         @OnAfter
@@ -124,6 +104,25 @@ public class Log4jAspect {
             } else {
                 traceEntry.end();
             }
+        }
+    }
+
+    private static class LogMessageSupplier extends MessageSupplier {
+
+        private final int level;
+        private final @Nullable String loggerName;
+        private final String messageText;
+
+        private LogMessageSupplier(int level, @Nullable String loggerName, String messageText) {
+            this.level = level;
+            this.loggerName = loggerName;
+            this.messageText = messageText;
+        }
+
+        @Override
+        public Message get() {
+            return Message.create("log {}: {} - {}", getLevelStr(level),
+                    LoggerPlugin.getAbbreviatedLoggerName(loggerName), messageText);
         }
 
         private static String getLevelStr(int lvl) {

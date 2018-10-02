@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2016 the original author or authors.
+ * Copyright 2014-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,14 +15,12 @@
  */
 package org.glowroot.agent.plugin.servlet;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
-import javax.annotation.Nullable;
-
-import com.google.common.collect.ImmutableList;
-
 import org.glowroot.agent.plugin.api.ThreadContext;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.weaving.BindClassMeta;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
 import org.glowroot.agent.plugin.api.weaving.BindReceiver;
@@ -42,11 +40,11 @@ public class ResponseHeaderAspect {
         }
         @OnAfter
         public static void onAfter(ThreadContext context, @BindParameter int value) {
-            if (!captureResponseHeader("Content-Length")) {
+            if (!ServletPluginProperties.captureContentLengthResponseHeader()) {
                 return;
             }
             ServletMessageSupplier messageSupplier =
-                    (ServletMessageSupplier) context.getServletMessageSupplier();
+                    (ServletMessageSupplier) context.getServletRequestInfo();
             if (messageSupplier != null) {
                 messageSupplier.setResponseIntHeader("Content-Length", value);
             }
@@ -63,11 +61,11 @@ public class ResponseHeaderAspect {
         }
         @OnAfter
         public static void onAfter(ThreadContext context, @BindParameter long value) {
-            if (!captureResponseHeader("Content-Length")) {
+            if (!ServletPluginProperties.captureContentLengthResponseHeader()) {
                 return;
             }
             ServletMessageSupplier messageSupplier =
-                    (ServletMessageSupplier) context.getServletMessageSupplier();
+                    (ServletMessageSupplier) context.getServletRequestInfo();
             if (messageSupplier != null) {
                 messageSupplier.setResponseLongHeader("Content-Length", value);
             }
@@ -90,11 +88,11 @@ public class ResponseHeaderAspect {
                 // seems nothing sensible to do here other than ignore
                 return;
             }
-            if (!captureResponseHeader("Content-Type")) {
+            if (!ServletPluginProperties.captureContentTypeResponseHeader()) {
                 return;
             }
             ServletMessageSupplier messageSupplier =
-                    (ServletMessageSupplier) context.getServletMessageSupplier();
+                    (ServletMessageSupplier) context.getServletRequestInfo();
             if (messageSupplier != null) {
                 if (responseInvoker.hasGetContentTypeMethod()) {
                     String contentType = responseInvoker.getContentType(response);
@@ -117,11 +115,11 @@ public class ResponseHeaderAspect {
         @OnAfter
         public static void onAfter(ThreadContext context, @BindReceiver Object response,
                 @BindClassMeta ResponseInvoker responseInvoker) {
-            if (!captureResponseHeader("Content-Type")) {
+            if (!ServletPluginProperties.captureContentTypeResponseHeader()) {
                 return;
             }
             ServletMessageSupplier messageSupplier =
-                    (ServletMessageSupplier) context.getServletMessageSupplier();
+                    (ServletMessageSupplier) context.getServletRequestInfo();
             if (messageSupplier != null && responseInvoker.hasGetContentTypeMethod()) {
                 String contentType = responseInvoker.getContentType(response);
                 messageSupplier.setResponseHeader("Content-Type", contentType);
@@ -145,13 +143,14 @@ public class ResponseHeaderAspect {
                 // seems nothing sensible to do here other than ignore
                 return;
             }
-            boolean captureContentLanguage = captureResponseHeader("Content-Language");
-            boolean captureContentType = captureResponseHeader("Content-Type");
+            boolean captureContentLanguage =
+                    ServletPluginProperties.captureContentLanguageResponseHeader();
+            boolean captureContentType = ServletPluginProperties.captureContentTypeResponseHeader();
             if (!captureContentLanguage && !captureContentType) {
                 return;
             }
             ServletMessageSupplier messageSupplier =
-                    (ServletMessageSupplier) context.getServletMessageSupplier();
+                    (ServletMessageSupplier) context.getServletRequestInfo();
             if (messageSupplier != null) {
                 if (captureContentLanguage) {
                     messageSupplier.setResponseHeader("Content-Language", locale.toString());
@@ -184,7 +183,7 @@ public class ResponseHeaderAspect {
                 return;
             }
             ServletMessageSupplier messageSupplier =
-                    (ServletMessageSupplier) context.getServletMessageSupplier();
+                    (ServletMessageSupplier) context.getServletRequestInfo();
             if (messageSupplier != null) {
                 messageSupplier.setResponseHeader(name, value);
             }
@@ -211,7 +210,7 @@ public class ResponseHeaderAspect {
                 return;
             }
             ServletMessageSupplier messageSupplier =
-                    (ServletMessageSupplier) context.getServletMessageSupplier();
+                    (ServletMessageSupplier) context.getServletRequestInfo();
             if (messageSupplier != null) {
                 messageSupplier.setResponseDateHeader(name, value);
             }
@@ -237,7 +236,7 @@ public class ResponseHeaderAspect {
                 return;
             }
             ServletMessageSupplier messageSupplier =
-                    (ServletMessageSupplier) context.getServletMessageSupplier();
+                    (ServletMessageSupplier) context.getServletRequestInfo();
             if (messageSupplier != null) {
                 messageSupplier.setResponseIntHeader(name, value);
             }
@@ -264,7 +263,7 @@ public class ResponseHeaderAspect {
                 return;
             }
             ServletMessageSupplier messageSupplier =
-                    (ServletMessageSupplier) context.getServletMessageSupplier();
+                    (ServletMessageSupplier) context.getServletRequestInfo();
             if (messageSupplier != null) {
                 messageSupplier.addResponseHeader(name, value);
             }
@@ -291,7 +290,7 @@ public class ResponseHeaderAspect {
                 return;
             }
             ServletMessageSupplier messageSupplier =
-                    (ServletMessageSupplier) context.getServletMessageSupplier();
+                    (ServletMessageSupplier) context.getServletRequestInfo();
             if (messageSupplier != null) {
                 messageSupplier.addResponseDateHeader(name, value);
             }
@@ -317,7 +316,7 @@ public class ResponseHeaderAspect {
                 return;
             }
             ServletMessageSupplier messageSupplier =
-                    (ServletMessageSupplier) context.getServletMessageSupplier();
+                    (ServletMessageSupplier) context.getServletRequestInfo();
             if (messageSupplier != null) {
                 messageSupplier.addResponseIntHeader(name, value);
             }
@@ -325,7 +324,7 @@ public class ResponseHeaderAspect {
     }
 
     private static boolean captureResponseHeader(String name) {
-        ImmutableList<Pattern> capturePatterns = ServletPluginProperties.captureResponseHeaders();
+        List<Pattern> capturePatterns = ServletPluginProperties.captureResponseHeaders();
         // converted to lower case for case-insensitive matching (patterns are lower case)
         String keyLowerCase = name.toLowerCase(Locale.ENGLISH);
         return DetailCapture.matchesOneOf(keyLowerCase, capturePatterns);

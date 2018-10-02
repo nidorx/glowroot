@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,10 +23,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import javax.annotation.Nullable;
-
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterators;
@@ -35,6 +34,7 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.PeekingIterator;
 import com.google.common.collect.Queues;
 import com.google.common.io.CharStreams;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -75,14 +75,6 @@ public class MutableProfile {
     }
 
     public void merge(List<StackTraceElement> stackTraceElements, Thread.State threadState) {
-
-        for (StackTraceElement stackTraceElement : stackTraceElements) {
-            if (stackTraceElement.getMethodName() == null) {
-                // methodName can be null after hotswapping under Eclipse debugger
-                // in which case seems best to just ignore the stack trace capture altogether
-                return;
-            }
-        }
         PeekingIterator<StackTraceElement> i =
                 Iterators.peekingIterator(Lists.reverse(stackTraceElements).iterator());
         ProfileNode lastMatchedNode = null;
@@ -105,8 +97,8 @@ public class MutableProfile {
             int packageNameIndex = getNameIndex(packageName, packageNameIndexes, packageNames);
             int classNameIndex = getNameIndex(className, classNameIndexes, classNames);
             int methodNameIndex =
-                    getNameIndex(Strings.nullToEmpty(stackTraceElement.getMethodName()),
-                            methodNameIndexes, methodNames);
+                    getNameIndex(MoreObjects.firstNonNull(stackTraceElement.getMethodName(),
+                            "<null method name>"), methodNameIndexes, methodNames);
             int fileNameIndex = getNameIndex(Strings.nullToEmpty(stackTraceElement.getFileName()),
                     fileNameIndexes, fileNames);
             int lineNumber = stackTraceElement.getLineNumber();
@@ -181,6 +173,10 @@ public class MutableProfile {
         }
     }
 
+    public boolean isEmpty() {
+        return rootNodes.isEmpty();
+    }
+
     public long getSampleCount() {
         long sampleCount = 0;
         for (ProfileNode rootNode : rootNodes) {
@@ -233,21 +229,24 @@ public class MutableProfile {
     public String toFlameGraphJson() throws IOException {
         StringBuilder sb = new StringBuilder();
         JsonGenerator jg = mapper.getFactory().createGenerator(CharStreams.asWriter(sb));
-        jg.writeStartObject();
-        jg.writeNumberField("totalSampleCount", getSampleCount());
-        jg.writeArrayFieldStart("rootNodes");
-        int height = 0;
-        for (ProfileNode rootNode : rootNodes) {
-            if (rootNode.sampleCount > rootNode.ellipsedSampleCount) {
-                FlameGraphWriter flameGraphWriter = new FlameGraphWriter(rootNode, jg);
-                flameGraphWriter.traverse();
-                height = Math.max(height, flameGraphWriter.height);
+        try {
+            jg.writeStartObject();
+            jg.writeNumberField("totalSampleCount", getSampleCount());
+            jg.writeArrayFieldStart("rootNodes");
+            int height = 0;
+            for (ProfileNode rootNode : rootNodes) {
+                if (rootNode.sampleCount > rootNode.ellipsedSampleCount) {
+                    FlameGraphWriter flameGraphWriter = new FlameGraphWriter(rootNode, jg);
+                    flameGraphWriter.traverse();
+                    height = Math.max(height, flameGraphWriter.height);
+                }
             }
+            jg.writeEndArray();
+            jg.writeNumberField("height", height);
+            jg.writeEndObject();
+        } finally {
+            jg.close();
         }
-        jg.writeEndArray();
-        jg.writeNumberField("height", height);
-        jg.writeEndObject();
-        jg.close();
         return sb.toString();
     }
 
@@ -262,7 +261,7 @@ public class MutableProfile {
         return index;
     }
 
-    private static Profile.LeafThreadState getThreadState(@Nullable Thread.State state) {
+    private static Profile.LeafThreadState getThreadState(Thread. /*@Nullable*/ State state) {
         if (state == null) {
             return Profile.LeafThreadState.NONE;
         }
@@ -543,7 +542,7 @@ public class MutableProfile {
             }
         }
 
-        private boolean hasOnlyMatchedChildren(ProfileNode node) {
+        private static boolean hasOnlyMatchedChildren(ProfileNode node) {
             for (ProfileNode childNode : node.childNodes) {
                 if (!childNode.matched) {
                     return false;
@@ -552,7 +551,7 @@ public class MutableProfile {
             return true;
         }
 
-        private boolean hasNoMatchedChildren(ProfileNode node) {
+        private static boolean hasNoMatchedChildren(ProfileNode node) {
             for (ProfileNode childNode : node.childNodes) {
                 if (childNode.matched) {
                     return false;
@@ -575,11 +574,11 @@ public class MutableProfile {
         }
     }
 
-    private class ProfileWriter extends Traverser<ProfileNode, IOException> {
+    private static class ProfileWriter extends Traverser<ProfileNode, IOException> {
 
         private final JsonGenerator jg;
 
-        private ProfileWriter(ProfileNode rootNode, JsonGenerator jg) throws IOException {
+        private ProfileWriter(ProfileNode rootNode, JsonGenerator jg) {
             super(rootNode);
             this.jg = jg;
         }
@@ -613,12 +612,12 @@ public class MutableProfile {
         }
     }
 
-    private class FlameGraphWriter extends Traverser<ProfileNode, IOException> {
+    private static class FlameGraphWriter extends Traverser<ProfileNode, IOException> {
 
         private final JsonGenerator jg;
         private int height;
 
-        private FlameGraphWriter(ProfileNode rootNode, JsonGenerator jg) throws IOException {
+        private FlameGraphWriter(ProfileNode rootNode, JsonGenerator jg) {
             super(rootNode);
             this.jg = jg;
         }

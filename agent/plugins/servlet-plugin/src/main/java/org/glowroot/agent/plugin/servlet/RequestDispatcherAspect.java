@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,12 @@
  */
 package org.glowroot.agent.plugin.servlet;
 
-import javax.annotation.Nullable;
-
 import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.MessageSupplier;
 import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.TimerName;
 import org.glowroot.agent.plugin.api.TraceEntry;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
 import org.glowroot.agent.plugin.api.weaving.BindReceiver;
 import org.glowroot.agent.plugin.api.weaving.BindReturn;
@@ -35,12 +34,11 @@ import org.glowroot.agent.plugin.api.weaving.Pointcut;
 
 public class RequestDispatcherAspect {
 
-    // the field and method names are verbose to avoid conflict since they will become fields
-    // and methods in all classes that extend javax.servlet.RequestDispatcher
+    // the field and method names are verbose since they will be mixed in to existing classes
     @Mixin("javax.servlet.RequestDispatcher")
     public abstract static class RequestDispatcherImpl implements RequestDispatcherMixin {
 
-        private @Nullable String glowroot$path;
+        private transient @Nullable String glowroot$path;
 
         @Override
         public @Nullable String glowroot$getPath() {
@@ -49,12 +47,11 @@ public class RequestDispatcherAspect {
 
         @Override
         public void glowroot$setPath(@Nullable String path) {
-            this.glowroot$path = path;
+            glowroot$path = path;
         }
     }
 
-    // the method names are verbose to avoid conflict since they will become methods in all classes
-    // that extend javax.servlet.RequestDispatcher
+    // the method names are verbose since they will be mixed in to existing classes
     public interface RequestDispatcherMixin {
 
         @Nullable
@@ -63,12 +60,17 @@ public class RequestDispatcherAspect {
         void glowroot$setPath(@Nullable String path);
     }
 
-    @Pointcut(className = "javax.servlet.ServletRequest", methodName = "getRequestDispatcher",
+    @Pointcut(className = "javax.servlet.ServletRequest|javax.servlet.ServletContext",
+            methodName = "getRequestDispatcher|getNamedDispatcher",
             methodParameterTypes = {"java.lang.String"}, nestingGroup = "servlet-inner-call")
     public static class GetParameterAdvice {
         @OnReturn
-        public static void onReturn(@BindReturn RequestDispatcherMixin requestDispatcher,
+        public static void onReturn(@BindReturn @Nullable RequestDispatcherMixin requestDispatcher,
                 @BindParameter @Nullable String path) {
+            if (requestDispatcher == null) {
+                // seems nothing sensible to do here other than ignore
+                return;
+            }
             requestDispatcher.glowroot$setPath(path);
         }
     }

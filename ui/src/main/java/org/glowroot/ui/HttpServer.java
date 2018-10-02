@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,17 +16,13 @@
 package org.glowroot.ui;
 
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
-import java.util.regex.Pattern;
 
-import javax.annotation.Nullable;
-
+import com.google.common.base.Supplier;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
@@ -43,17 +39,21 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.stream.ChunkedWriteHandler;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
+import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.checkerframework.checker.nullness.qual.RequiresNonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.glowroot.common.repo.ConfigRepository;
-import org.glowroot.common.util.Clock;
-
-import static java.util.concurrent.TimeUnit.SECONDS;
+import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 class HttpServer {
 
     private static final Logger logger = LoggerFactory.getLogger(HttpServer.class);
+
+    // log startup messages using logger name "org.glowroot"
+    private static final Logger startupLogger = LoggerFactory.getLogger("org.glowroot");
 
     private final ServerBootstrap bootstrap;
     private final HttpServerHandler handler;
@@ -61,16 +61,17 @@ class HttpServer {
     private final EventLoopGroup workerGroup;
 
     private final String bindAddress;
-    private final File baseDir;
+    private final List<File> confDirs;
+
+    private final boolean offlineViewer;
 
     private volatile @Nullable SslContext sslContext;
-    private volatile Channel serverChannel;
-    private volatile int port;
+    private volatile @MonotonicNonNull Channel serverChannel;
+    private volatile @MonotonicNonNull Integer port;
 
-    HttpServer(String bindAddress, int port, int numWorkerThreads, LayoutService layoutService,
-            ConfigRepository configRepository, Map<Pattern, HttpService> httpServices,
-            HttpSessionManager httpSessionManager, List<Object> jsonServices, File baseDir,
-            Clock clock) throws Exception {
+    HttpServer(String bindAddress, boolean https, Supplier<String> contextPathSupplier,
+            int numWorkerThreads, CommonHandler commonHandler, List<File> confDirs, boolean central,
+            boolean offlineViewer) throws Exception {
 
         InternalLoggerFactory.setDefaultFactory(Slf4JLoggerFactory.INSTANCE);
 
@@ -85,16 +86,29 @@ class HttpServer {
         bossGroup = new NioEventLoopGroup(1, bossThreadFactory);
         workerGroup = new NioEventLoopGroup(numWorkerThreads, workerThreadFactory);
 
-        final HttpServerHandler handler = new HttpServerHandler(layoutService, configRepository,
-                httpServices, httpSessionManager, jsonServices, clock);
+        final HttpServerHandler handler = new HttpServerHandler(contextPathSupplier, commonHandler);
 
-        if (configRepository.getWebConfig().https()) {
-            sslContext = SslContextBuilder
-                    .forServer(new File(baseDir, "certificate.pem"),
-                            new File(baseDir, "private.pem"))
+        if (https) {
+            // upgrade from 0.9.26 to 0.9.27
+            renameHttpsConfFileIfNeeded(confDirs, "certificate.pem", "ui-cert.pem", "certificate");
+            renameHttpsConfFileIfNeeded(confDirs, "private.pem", "ui-key.pem", "private key");
+
+            File certificateFile;
+            File privateKeyFile;
+            if (central) {
+                certificateFile = getRequiredHttpsConfFile(confDirs.get(0), "ui-cert.pem",
+                        "cert.pem", "certificate");
+                privateKeyFile = getRequiredHttpsConfFile(confDirs.get(0), "ui-key.pem", "key.pem",
+                        "private key");
+            } else {
+                certificateFile = getRequiredHttpsConfFile(confDirs, "ui-cert.pem");
+                privateKeyFile = getRequiredHttpsConfFile(confDirs, "ui-key.pem");
+            }
+            sslContext = SslContextBuilder.forServer(certificateFile, privateKeyFile)
                     .build();
         }
-        this.baseDir = baseDir;
+        this.confDirs = confDirs;
+        this.offlineViewer = offlineViewer;
 
         bootstrap = new ServerBootstrap();
         bootstrap.group(bossGroup, workerGroup).channel(NioServerSocketChannel.class)
@@ -106,12 +120,12 @@ class HttpServer {
                         if (sslContextLocal != null) {
                             p.addLast(sslContextLocal.newHandler(ch.alloc()));
                         }
-                        // bumping maxInitialLineLength (first arg below) from default 4096 to 32768
-                        // in order to handle long urls on /jvm/gauges view
-                        // bumping maxHeaderSize (second arg below) from default 8192 to 32768 for
+                        // bumping maxInitialLineLength (first arg below) from default 4096 to 65536
+                        // in order to handle long urls on /jvm/gauges and /report/adhoc views
+                        // bumping maxHeaderSize (second arg below) from default 8192 to 65536 for
                         // same reason due to "Referer" header once url becomes huge
                         // leaving maxChunkSize (third arg below) at default 8192
-                        p.addLast(new HttpServerCodec(32768, 32768, 8192));
+                        p.addLast(new HttpServerCodec(65536, 65536, 8192));
                         p.addLast(new HttpObjectAggregator(1048576));
                         p.addLast(new ConditionalHttpContentCompressor());
                         p.addLast(new ChunkedWriteHandler());
@@ -119,28 +133,48 @@ class HttpServer {
                     }
                 });
         this.handler = handler;
-        logger.debug("<init>(): binding http server to port {}", port);
         this.bindAddress = bindAddress;
-        Channel serverChannel;
+    }
+
+    void bindEventually(int port) {
         try {
             serverChannel =
                     bootstrap.bind(new InetSocketAddress(bindAddress, port)).sync().channel();
+            onBindSuccess();
         } catch (Exception e) {
-            // FailedChannelFuture.sync() is using UNSAFE to re-throw checked exceptions
-            bossGroup.shutdownGracefully(0, 0, SECONDS);
-            workerGroup.shutdownGracefully(0, 0, SECONDS);
-            throw new SocketBindException(e);
+            // note: FailedChannelFuture.sync() is using UNSAFE to re-throw checked exceptions
+            startupLogger.error("Error binding to {}:{}, the UI is not available (will keep trying"
+                    + " to bind...): {}", bindAddress, port, e.getMessage());
+            logger.debug(e.getMessage(), e);
+            Thread thread = new Thread(new BindEventually(port));
+            thread.setName("Glowroot-Init-Bind");
+            thread.setDaemon(true);
+            thread.start();
         }
-        this.serverChannel = serverChannel;
-        this.port = ((InetSocketAddress) serverChannel.localAddress()).getPort();
-        logger.debug("<init>(): http server bound");
+    }
+
+    @RequiresNonNull("serverChannel")
+    private void onBindSuccess() {
+        port = ((InetSocketAddress) serverChannel.localAddress()).getPort();
+        String listener = offlineViewer ? "Offline viewer" : "UI";
+        String optionalHttps = sslContext == null ? "" : " (HTTPS)";
+        if (bindAddress.equals("127.0.0.1")) {
+            startupLogger.info("{} listening on {}:{}{} (to access the UI from remote machines,"
+                    + " change the bind address to 0.0.0.0, either in the Glowroot UI under"
+                    + " Configuration > Web or directly in the admin.json file, and then restart"
+                    + " JVM to take effect)", listener, bindAddress, port, optionalHttps);
+        } else {
+            startupLogger.info("{} listening on {}:{}{}", listener, bindAddress, port,
+                    optionalHttps);
+        }
     }
 
     String getBindAddress() {
         return bindAddress;
     }
 
-    int getPort() {
+    @Nullable
+    Integer getPort() {
         return port;
     }
 
@@ -148,34 +182,26 @@ class HttpServer {
         return sslContext != null;
     }
 
-    void changePort(int newPort) throws PortChangeFailedException {
-        // need to call from separate thread, since netty throws exception if I/O thread (serving
-        // http request) calls awaitUninterruptibly(), which is called by bind() below
-        Channel previousServerChannel = this.serverChannel;
-        ChangePort changePort = new ChangePort(newPort);
-        ThreadFactory threadFactory = new ThreadFactoryBuilder()
-                .setDaemon(true)
-                .setNameFormat("Glowroot-Temporary-Thread")
-                .build();
-        ExecutorService executor = Executors.newSingleThreadExecutor(threadFactory);
+    void changePort(int newPort) throws Exception {
+        checkNotNull(serverChannel);
+        Channel previousServerChannel = serverChannel;
+        InetSocketAddress localAddress = new InetSocketAddress(bindAddress, newPort);
         try {
-            // calling get() will wait until ChangePort is complete and will re-throw any exceptions
-            // thrown by ChangePort
-            executor.submit(changePort).get();
+            serverChannel = bootstrap.bind(localAddress).sync().channel();
         } catch (Exception e) {
+            // note: FailedChannelFuture.sync() is using UNSAFE to re-throw checked exceptions
             throw new PortChangeFailedException(e);
-        } finally {
-            executor.shutdown();
         }
-        previousServerChannel.close();
+        port = newPort;
+        previousServerChannel.close().get();
         handler.closeAllButCurrent();
     }
 
-    void changeProtocol(boolean ssl) throws Exception {
-        if (ssl) {
+    void changeProtocol(boolean https) throws Exception {
+        if (https) {
             sslContext = SslContextBuilder
-                    .forServer(new File(baseDir, "certificate.pem"),
-                            new File(baseDir, "private.pem"))
+                    .forServer(getRequiredHttpsConfFile(confDirs, "ui-cert.pem"),
+                            getRequiredHttpsConfFile(confDirs, "ui-key.pem"))
                     .build();
         } else {
             sslContext = null;
@@ -184,40 +210,125 @@ class HttpServer {
     }
 
     // used by tests and by central ui
-    void close(boolean waitForChannelClose) {
+    void close() throws Exception {
         logger.debug("close(): stopping http server");
-        if (waitForChannelClose) {
-            serverChannel.close().awaitUninterruptibly();
-        } else {
-            serverChannel.close().awaitUninterruptibly(1, SECONDS);
-        }
-        bossGroup.shutdownGracefully();
-        workerGroup.shutdownGracefully();
-        handler.close(waitForChannelClose);
+        workerGroup.shutdownGracefully().get();
+        bossGroup.shutdownGracefully().get();
         logger.debug("close(): http server stopped");
     }
 
-    private class ChangePort implements Callable</*@Nullable*/ Void> {
-
-        private final int newPort;
-
-        ChangePort(int newPort) {
-            this.newPort = newPort;
-        }
-
-        @Override
-        public @Nullable Void call() throws InterruptedException {
-            InetSocketAddress localAddress = new InetSocketAddress(bindAddress, newPort);
-            HttpServer.this.serverChannel = bootstrap.bind(localAddress).sync().channel();
-            HttpServer.this.port = newPort;
-            return null;
+    // used by embedded agent
+    private static File getRequiredHttpsConfFile(List<File> confDirs, String fileName)
+            throws FileNotFoundException {
+        File confFile = getHttpsConfFile(confDirs, fileName);
+        if (confFile == null) {
+            // build and throw nice exception message
+            StringBuilder sb = new StringBuilder("HTTPS is enabled, but " + fileName
+                    + " was not found under ");
+            if (confDirs.size() == 2) {
+                sb.append("either of ");
+            } else if (confDirs.size() > 2) {
+                sb.append("any of ");
+            }
+            for (int i = 0; i < confDirs.size(); i++) {
+                if (i > 0) {
+                    sb.append(", '");
+                }
+                sb.append(confDirs.get(i).getAbsolutePath());
+                sb.append("'");
+            }
+            throw new FileNotFoundException(sb.toString());
+        } else {
+            return confFile;
         }
     }
 
-    @SuppressWarnings("serial")
-    static class SocketBindException extends Exception {
-        private SocketBindException(Exception cause) {
-            super(cause);
+    // used by central
+    private static File getRequiredHttpsConfFile(File confDir, String fileName, String altFileName,
+            String display) throws FileNotFoundException {
+        File confFile = new File(confDir, fileName);
+        if (confFile.exists()) {
+            return confFile;
+        }
+        if (altFileName == null) {
+            throw new FileNotFoundException("HTTPS is enabled, but " + fileName
+                    + " was not found under '" + confDir.getAbsolutePath() + "'");
+        }
+        File altConfFile = new File(confDir, altFileName);
+        if (altConfFile.exists()) {
+            return altConfFile;
+        }
+        throw new FileNotFoundException("HTTPS is enabled, but " + fileName + " (or "
+                + altFileName + " if using the same " + display + " for both ui and"
+                + " grpc) was not found under '" + confDir.getAbsolutePath() + "'");
+    }
+
+    private static @Nullable File getHttpsConfFile(List<File> confDirs, String fileName) {
+        for (File confDir : confDirs) {
+            File confFile = new File(confDir, fileName);
+            if (confFile.exists()) {
+                return confFile;
+            }
+        }
+        return null;
+    }
+
+    private static void renameHttpsConfFileIfNeeded(List<File> confDirs, String oldFileName,
+            String newFileName, String display) throws IOException {
+        for (File confDir : confDirs) {
+            File newConfFile = new File(confDir, newFileName);
+            if (newConfFile.exists()) {
+                return;
+            }
+            File oldConfFile = new File(confDir, oldFileName);
+            if (oldConfFile.exists()) {
+                rename(oldConfFile, newConfFile, display);
+                return;
+            }
+        }
+    }
+
+    private static void rename(File oldConfFile, File newConfFile, String display)
+            throws IOException {
+        if (oldConfFile.renameTo(newConfFile)) {
+            throw new IOException("Unable to rename " + display + " file from '"
+                    + oldConfFile.getAbsolutePath() + "' to '" + newConfFile.getAbsolutePath()
+                    + "' as part of upgrade to 0.9.27 or later");
+        }
+    }
+
+    private class BindEventually implements Runnable {
+
+        private final int port;
+
+        private BindEventually(int port) {
+            this.port = port;
+        }
+
+        @Override
+        public void run() {
+            long backoffMillis = 1000;
+            while (true) {
+                try {
+                    MILLISECONDS.sleep(backoffMillis);
+                } catch (InterruptedException f) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                backoffMillis = Math.min(backoffMillis * 2, 60000);
+                try {
+                    serverChannel = bootstrap.bind(new InetSocketAddress(bindAddress, port)).sync()
+                            .channel();
+                    onBindSuccess();
+                    return;
+                } catch (Exception e) {
+                    // note: FailedChannelFuture.sync() is using UNSAFE to re-throw checked
+                    // exceptions
+                    startupLogger.error("Error binding to {}:{}, the UI is not available (will keep"
+                            + " trying to bind...): {}", bindAddress, port, e.getMessage());
+                    logger.debug(e.getMessage(), e);
+                }
+            }
         }
     }
 

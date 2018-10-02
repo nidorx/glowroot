@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 the original author or authors.
+ * Copyright 2016-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,6 @@ package org.glowroot.agent.plugin.httpclient;
 
 import java.net.URL;
 
-import javax.annotation.Nullable;
-
 import org.glowroot.agent.plugin.api.Agent;
 import org.glowroot.agent.plugin.api.AsyncTraceEntry;
 import org.glowroot.agent.plugin.api.AuxThreadContext;
@@ -26,6 +24,7 @@ import org.glowroot.agent.plugin.api.MessageSupplier;
 import org.glowroot.agent.plugin.api.ThreadContext;
 import org.glowroot.agent.plugin.api.TimerName;
 import org.glowroot.agent.plugin.api.TraceEntry;
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.api.weaving.BindClassMeta;
 import org.glowroot.agent.plugin.api.weaving.BindParameter;
 import org.glowroot.agent.plugin.api.weaving.BindReceiver;
@@ -48,13 +47,12 @@ public class OkHttpClientAspect {
         URL url();
     }
 
-    // the field and method names are verbose to avoid conflict since they will become fields
-    // and methods in all classes that extend com.squareup.okhttp.Callback
+    // the field and method names are verbose since they will be mixed in to existing classes
     @Mixin("com.squareup.okhttp.Callback")
     public abstract static class CallbackImpl implements CallbackMixin {
 
-        private volatile @Nullable AsyncTraceEntry glowroot$asyncTraceEntry;
-        private volatile @Nullable AuxThreadContext glowroot$auxContext;
+        private transient volatile @Nullable AsyncTraceEntry glowroot$asyncTraceEntry;
+        private transient volatile @Nullable AuxThreadContext glowroot$auxContext;
 
         @Override
         public @Nullable AsyncTraceEntry glowroot$getAsyncTraceEntry() {
@@ -63,7 +61,7 @@ public class OkHttpClientAspect {
 
         @Override
         public void glowroot$setAsyncTraceEntry(@Nullable AsyncTraceEntry asyncTraceEntry) {
-            this.glowroot$asyncTraceEntry = asyncTraceEntry;
+            glowroot$asyncTraceEntry = asyncTraceEntry;
         }
 
         @Override
@@ -73,12 +71,11 @@ public class OkHttpClientAspect {
 
         @Override
         public void glowroot$setAuxContext(@Nullable AuxThreadContext auxContext) {
-            this.glowroot$auxContext = auxContext;
+            glowroot$auxContext = auxContext;
         }
     }
 
-    // the method names are verbose to avoid conflict since they will become methods in all classes
-    // that extend com.squareup.okhttp.Callback
+    // the method names are verbose since they will be mixed in to existing classes
     public interface CallbackMixin {
 
         @Nullable
@@ -127,10 +124,10 @@ public class OkHttpClientAspect {
             }
         }
         @OnThrow
-        public static void onThrow(@BindThrowable Throwable throwable,
+        public static void onThrow(@BindThrowable Throwable t,
                 @BindTraveler @Nullable TraceEntry traceEntry) {
             if (traceEntry != null) {
-                traceEntry.endWithError(throwable);
+                traceEntry.endWithError(t);
             }
         }
     }
@@ -180,11 +177,11 @@ public class OkHttpClientAspect {
             }
         }
         @OnThrow
-        public static void onThrow(@BindThrowable Throwable throwable,
+        public static void onThrow(@BindThrowable Throwable t,
                 @BindTraveler @Nullable AsyncTraceEntry asyncTraceEntry) {
             if (asyncTraceEntry != null) {
                 asyncTraceEntry.stopSyncTimer();
-                asyncTraceEntry.endWithError(throwable);
+                asyncTraceEntry.endWithError(t);
             }
         }
     }

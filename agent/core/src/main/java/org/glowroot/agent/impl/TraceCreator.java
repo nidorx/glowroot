@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,20 +15,22 @@
  */
 package org.glowroot.agent.impl;
 
-import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 
-import javax.annotation.Nullable;
+import com.google.common.base.Strings;
+import com.google.common.collect.Lists;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
-import com.google.common.collect.Maps;
-
-import org.glowroot.agent.live.LiveTraceRepositoryImpl;
+import org.glowroot.agent.collector.Collector.TraceReader;
+import org.glowroot.agent.collector.Collector.TraceVisitor;
+import org.glowroot.agent.impl.Transaction.TraceEntryVisitor;
 import org.glowroot.agent.model.DetailMapWriter;
 import org.glowroot.agent.model.ErrorMessage;
+import org.glowroot.agent.model.MergedThreadTimer;
 import org.glowroot.common.util.Styles;
+import org.glowroot.wire.api.model.AggregateOuterClass.Aggregate;
 import org.glowroot.wire.api.model.ProfileOuterClass.Profile;
 import org.glowroot.wire.api.model.ProfileOuterClass.Profile.ProfileNode;
 import org.glowroot.wire.api.model.Proto;
@@ -39,78 +41,53 @@ public class TraceCreator {
 
     private TraceCreator() {}
 
-    public static Trace createPartialTrace(Transaction transaction, long captureTime,
-            long captureTick) throws IOException {
-        return createFullTrace(transaction, true, true, captureTime, captureTick);
+    public static TraceReader createTraceReaderForPartial(Transaction transaction, long captureTime,
+            long captureTick) {
+        return new TraceReaderImpl(transaction, true, captureTime, captureTick,
+                transaction.getTraceId(), true, transaction.isPartiallyStored());
     }
 
-    public static Trace createCompletedTrace(Transaction transaction, boolean slow)
-            throws IOException {
-        return createFullTrace(transaction, slow, false, transaction.getCaptureTime(),
-                transaction.getEndTick());
+    public static TraceReader createTraceReaderForCompleted(Transaction transaction, boolean slow) {
+        return new TraceReaderImpl(transaction, slow, transaction.getCaptureTime(),
+                transaction.getEndTick(), transaction.getTraceId(), false,
+                transaction.isPartiallyStored());
     }
 
     public static Trace.Header createPartialTraceHeader(Transaction transaction, long captureTime,
-            long captureTick) throws IOException {
-        // TODO optimize, this is excessive to construct entries just to get count
-        Map<String, Integer> sharedQueryTextIndexes = Maps.newLinkedHashMap();
-        int entryCount =
-                getEntryCount(transaction.getEntriesProtobuf(captureTick, sharedQueryTextIndexes));
+            long captureTick) {
+        int entryCount = transaction.getEntryCount(captureTick);
+        int queryCount = transaction.getQueryCount();
         long mainThreadProfileSampleCount = transaction.getMainThreadProfileSampleCount();
         long auxThreadProfileSampleCount = transaction.getAuxThreadProfileSampleCount();
         // only slow transactions reach this point, so setting slow=true (second arg below)
-        return createTraceHeader(transaction, true, true, captureTime, captureTick, entryCount,
-                mainThreadProfileSampleCount, auxThreadProfileSampleCount);
+        return createTraceHeader(transaction, true, true, captureTime, captureTick,
+                entryCount, queryCount, mainThreadProfileSampleCount, auxThreadProfileSampleCount);
     }
 
-    public static Trace.Header createCompletedTraceHeader(Transaction transaction)
-            throws IOException {
-        // TODO optimize, this is excessive to construct entries just to get count
-        Map<String, Integer> sharedQueryTextIndexes = Maps.newLinkedHashMap();
-        int entryCount = getEntryCount(
-                transaction.getEntriesProtobuf(transaction.getEndTick(), sharedQueryTextIndexes));
+    public static Trace.Header createCompletedTraceHeader(Transaction transaction) {
+        int entryCount = transaction.getEntryCount(transaction.getEndTick());
+        int queryCount = transaction.getQueryCount();
         long mainProfileSampleCount = transaction.getMainThreadProfileSampleCount();
         long auxProfileSampleCount = transaction.getAuxThreadProfileSampleCount();
         // only slow transactions reach this point, so setting slow=true (second arg below)
         return createTraceHeader(transaction, true, false, transaction.getCaptureTime(),
-                transaction.getEndTick(), entryCount, mainProfileSampleCount,
+                transaction.getEndTick(), entryCount, queryCount, mainProfileSampleCount,
                 auxProfileSampleCount);
     }
 
-    // timings for traces that are still active are normalized to the capture tick in order to
-    // *attempt* to present a picture of the trace at that exact tick
-    // (without using synchronization to block updates to the trace while it is being read)
-    private static Trace createFullTrace(Transaction transaction, boolean slow, boolean partial,
-            long captureTime, long captureTick) throws IOException {
-        Map<String, Integer> sharedQueryTextIndexes = Maps.newLinkedHashMap();
-        List<Trace.Entry> entries =
-                transaction.getEntriesProtobuf(captureTick, sharedQueryTextIndexes);
-        int entryCount = getEntryCount(entries);
-        Profile mainThreadProfile = transaction.getMainThreadProfileProtobuf();
-        long mainThreadProfileSampleCount = getProfileSampleCount(mainThreadProfile);
-        Profile auxThreadProfile = transaction.getAuxThreadProfileProtobuf();
-        long auxThreadProfileSampleCount = getProfileSampleCount(auxThreadProfile);
-        Trace.Header header =
-                createTraceHeader(transaction, slow, partial, captureTime, captureTick, entryCount,
-                        mainThreadProfileSampleCount, auxThreadProfileSampleCount);
-        Trace.Builder builder = Trace.newBuilder()
-                .setId(transaction.getTraceId())
-                .setHeader(header)
-                .addAllEntry(entries)
-                .addAllSharedQueryText(LiveTraceRepositoryImpl.toProto(sharedQueryTextIndexes));
-        if (mainThreadProfile != null) {
-            builder.setMainThreadProfile(mainThreadProfile);
+    public static List<Trace.SharedQueryText> toProto(List<String> sharedQueryTexts) {
+        List<Trace.SharedQueryText> protos = Lists.newArrayList();
+        for (String sharedQueryText : sharedQueryTexts) {
+            protos.add(Trace.SharedQueryText.newBuilder()
+                    .setFullText(sharedQueryText)
+                    .build());
         }
-        if (auxThreadProfile != null) {
-            builder.setAuxThreadProfile(auxThreadProfile);
-        }
-        return builder.setUpdate(transaction.isPartiallyStored())
-                .build();
+        return protos;
     }
 
     private static Trace.Header createTraceHeader(Transaction transaction, boolean slow,
             boolean partial, long captureTime, long captureTick, int entryCount,
-            long mainProfileSampleCount, long auxProfileSampleCount) throws IOException {
+            int queryCount, long mainThreadProfileSampleCount, long auxThreadProfileSampleCount) {
         Trace.Header.Builder builder = Trace.Header.newBuilder();
         builder.setPartial(partial);
         builder.setSlow(slow);
@@ -123,13 +100,24 @@ public class TraceCreator {
         builder.setTransactionName(transaction.getTransactionName());
         builder.setHeadline(transaction.getHeadline());
         builder.setUser(transaction.getUser());
-        for (Entry<String, Collection<String>> entry : transaction.getAttributes().asMap()
+        for (Map.Entry<String, Collection<String>> entry : transaction.getAttributes().asMap()
                 .entrySet()) {
             builder.addAttributeBuilder()
                     .setName(entry.getKey())
                     .addAllValue(entry.getValue());
         }
         builder.addAllDetailEntry(DetailMapWriter.toProto(transaction.getDetail()));
+        List<StackTraceElement> locationStackTrace = transaction.getLocationStackTrace();
+        if (locationStackTrace != null) {
+            for (StackTraceElement stackTraceElement : locationStackTrace) {
+                builder.addLocationStackTraceElementBuilder()
+                        .setClassName(stackTraceElement.getClassName())
+                        .setMethodName(Strings.nullToEmpty(stackTraceElement.getMethodName()))
+                        .setFileName(Strings.nullToEmpty(stackTraceElement.getFileName()))
+                        .setLineNumber(stackTraceElement.getLineNumber())
+                        .build();
+            }
+        }
         if (errorMessage != null) {
             Trace.Error.Builder errorBuilder = builder.getErrorBuilder();
             errorBuilder.setMessage(errorMessage.message());
@@ -141,55 +129,171 @@ public class TraceCreator {
         }
         TimerImpl mainThreadRootTimer = transaction.getMainThreadRootTimer();
         builder.setMainThreadRootTimer(mainThreadRootTimer.toProto());
-        RootTimerCollectorImpl auxThreadRootTimers = new RootTimerCollectorImpl();
-        transaction.mergeAuxThreadTimersInto(auxThreadRootTimers);
-        builder.addAllAuxThreadRootTimer(auxThreadRootTimers.toProto());
+        ThreadStatsCollectorImpl mainThreadStats = new ThreadStatsCollectorImpl();
+        mainThreadStats.mergeThreadStats(transaction.getMainThreadStats());
+        builder.setMainThreadStats(mainThreadStats.toProto());
+        if (transaction.hasAuxThreadContexts()) {
+            MergedThreadTimer auxThreadRootTimer = MergedThreadTimer.createAuxThreadRootTimer();
+            transaction.mergeAuxThreadTimersInto(auxThreadRootTimer);
+            builder.setAuxThreadRootTimer(auxThreadRootTimer.toProto());
+            ThreadStatsCollectorImpl auxThreadStats = new ThreadStatsCollectorImpl();
+            transaction.mergeAuxThreadStatsInto(auxThreadStats);
+            builder.setAuxThreadStats(auxThreadStats.toProto());
+        }
         RootTimerCollectorImpl asyncTimers = new RootTimerCollectorImpl();
         transaction.mergeAsyncTimersInto(asyncTimers);
         builder.addAllAsyncTimer(asyncTimers.toProto());
-        ThreadStatsCollectorImpl mainThreadStats = new ThreadStatsCollectorImpl();
-        mainThreadStats.mergeThreadStats(transaction.getMainThreadStats());
-        if (!mainThreadStats.isNA()) {
-            builder.setMainThreadStats(mainThreadStats.toProto());
-        }
-        ThreadStatsCollectorImpl auxThreadStats = new ThreadStatsCollectorImpl();
-        transaction.mergeAuxThreadStatsInto(auxThreadStats);
-        if (!auxThreadStats.isNA()) {
-            builder.setAuxThreadStats(auxThreadStats.toProto());
-        }
-        builder.setEntryCount(entryCount);
-        builder.setEntryLimitExceeded(transaction.isEntryLimitExceeded());
-        builder.setMainThreadProfileSampleCount(mainProfileSampleCount);
-        builder.setMainThreadProfileSampleLimitExceeded(
-                transaction.isMainThreadProfileSampleLimitExceeded());
-        builder.setAuxThreadProfileSampleCount(auxProfileSampleCount);
-        builder.setAuxThreadProfileSampleLimitExceeded(
-                transaction.isAuxThreadProfileSampleLimitExceeded());
+        addCounts(builder, transaction, entryCount, queryCount,
+                mainThreadProfileSampleCount, auxThreadProfileSampleCount);
         return builder.build();
     }
 
-    // don't count "auxiliary thread" entries since those are not counted in
-    // maxTraceEntriesPerTransaction limit (and it's confusing when entry count exceeds the limit)
-    private static int getEntryCount(List<Trace.Entry> entries) {
-        int count = 0;
-        for (Trace.Entry entry : entries) {
-            if (!entry.getMessage().equals(Transaction.AUXILIARY_THREAD_MESSAGE)) {
-                count++;
-            }
-        }
-        return count;
+    private static void addCounts(Trace.Header.Builder builder, Transaction transaction,
+            int entryCount, int queryCount, long mainThreadProfileSampleCount,
+            long auxThreadProfileSampleCount) {
+        builder.setEntryCount(entryCount);
+        builder.setEntryLimitExceeded(transaction.isEntryLimitExceeded(entryCount));
+        builder.setQueryCount(queryCount);
+        builder.setQueryLimitExceeded(transaction.isQueryLimitExceeded(queryCount));
+        builder.setMainThreadProfileSampleCount(mainThreadProfileSampleCount);
+        builder.setMainThreadProfileSampleLimitExceeded(
+                transaction.isMainThreadProfileSampleLimitExceeded(mainThreadProfileSampleCount));
+        builder.setAuxThreadProfileSampleCount(auxThreadProfileSampleCount);
+        builder.setAuxThreadProfileSampleLimitExceeded(
+                transaction.isAuxThreadProfileSampleLimitExceeded(auxThreadProfileSampleCount));
     }
 
-    private static long getProfileSampleCount(@Nullable Profile profile) {
-        if (profile == null) {
-            return 0;
+    private static class TraceReaderImpl implements TraceReader {
+
+        private final Transaction transaction;
+        private final boolean slow;
+        private final long captureTime;
+        private final long captureTick;
+        private final String traceId;
+        private final boolean partial;
+        private final boolean update;
+
+        private Trace. /*@Nullable*/ Header header;
+
+        private TraceReaderImpl(Transaction transaction, boolean slow, long captureTime,
+                long captureTick, String traceId, boolean partial, boolean update) {
+            this.transaction = transaction;
+            this.slow = slow;
+            this.captureTime = captureTime;
+            this.captureTick = captureTick;
+            this.traceId = traceId;
+            this.partial = partial;
+            this.update = update;
         }
-        long profileSampleCount = 0;
-        for (ProfileNode node : profile.getNodeList()) {
-            if (node.getDepth() == 0) {
-                profileSampleCount += node.getSampleCount();
+
+        @Override
+        public void accept(TraceVisitor traceVisitor) throws Exception {
+            // timings for traces that are still active are normalized to the capture tick in order
+            // to *attempt* to present a picture of the trace at that exact tick
+            // (without using synchronization to block updates to the trace while it is being read)
+            CountingEntryVisitorWrapper entryVisitorWrapper =
+                    new CountingEntryVisitorWrapper(traceVisitor);
+            transaction.visitEntries(captureTick, entryVisitorWrapper);
+
+            List<Aggregate.Query> queries = transaction.getQueries();
+            traceVisitor.visitQueries(queries);
+
+            traceVisitor.visitSharedQueryTexts(transaction.getSharedQueryTexts());
+
+            Profile mainThreadProfile = transaction.getMainThreadProfileProtobuf();
+            if (mainThreadProfile != null) {
+                traceVisitor.visitMainThreadProfile(mainThreadProfile);
+            }
+            long mainThreadProfileSampleCount = getProfileSampleCount(mainThreadProfile);
+            // mainThreadProfile can be gc'd at this point
+
+            Profile auxThreadProfile = transaction.getAuxThreadProfileProtobuf();
+            if (auxThreadProfile != null) {
+                traceVisitor.visitAuxThreadProfile(auxThreadProfile);
+            }
+            long auxThreadProfileSampleCount = getProfileSampleCount(auxThreadProfile);
+            // auxThreadProfile can be gc'd at this point
+
+            int entryCount = entryVisitorWrapper.count;
+            int queryCount = queries.size();
+
+            if (header == null) {
+                traceVisitor.visitHeader(createTraceHeader(transaction, slow, partial, captureTime,
+                        captureTick, entryCount, queryCount, mainThreadProfileSampleCount,
+                        auxThreadProfileSampleCount));
+            } else {
+                Trace.Header.Builder builder = header.toBuilder();
+                addCounts(builder, transaction, entryCount, queryCount,
+                        mainThreadProfileSampleCount, auxThreadProfileSampleCount);
+                traceVisitor.visitHeader(builder.build());
             }
         }
-        return profileSampleCount;
+
+        @Override
+        public Trace.Header readHeader() {
+            if (header == null) {
+                header = createTraceHeader(transaction, true, partial, captureTime, captureTick, 0,
+                        0, 0, 0);
+            }
+            return header;
+        }
+
+        @Override
+        public long captureTime() {
+            return captureTime;
+        }
+
+        @Override
+        public String traceId() {
+            return traceId;
+        }
+
+        @Override
+        public boolean partial() {
+            return partial;
+        }
+
+        @Override
+        public boolean update() {
+            return update;
+        }
+
+        private static long getProfileSampleCount(@Nullable Profile profile) {
+            if (profile == null) {
+                return 0;
+            }
+            long profileSampleCount = 0;
+            for (ProfileNode node : profile.getNodeList()) {
+                if (node.getDepth() == 0) {
+                    profileSampleCount += node.getSampleCount();
+                }
+            }
+            return profileSampleCount;
+        }
+    }
+
+    private static class CountingEntryVisitorWrapper implements TraceEntryVisitor {
+
+        private final TraceVisitor delegate;
+        private int count;
+
+        private CountingEntryVisitorWrapper(TraceVisitor delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void visitEntry(Trace.Entry entry) {
+            if (countEntry(entry)) {
+                count++;
+            }
+            delegate.visitEntry(entry);
+        }
+
+        private static boolean countEntry(Trace.Entry entry) {
+            // don't count "auxiliary thread" entries since those are not counted in
+            // maxTraceEntriesPerTransaction limit (and it's confusing when entry count exceeds the
+            // limit)
+            return !entry.getMessage().equals(Transaction.AUXILIARY_THREAD_MESSAGE);
+        }
     }
 }

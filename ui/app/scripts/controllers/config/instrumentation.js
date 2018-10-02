@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2016 the original author or authors.
+ * Copyright 2012-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,6 +84,28 @@ glowroot.controller('ConfigInstrumentationCtrl', [
       }
     }
 
+    var NEW_CONFIG = {
+      // when these are updated, make sure to update similar list in importFromJson
+      // (see instrumentation-list.js)
+      classAnnotation: '',
+      subTypeRestriction: '',
+      superTypeRestriction: '',
+      methodAnnotation: '',
+      nestingGroup: '',
+      order: 0,
+      captureKind: 'transaction',
+      alreadyInTransactionBehavior: 'capture-trace-entry',
+      transactionType: '',
+      transactionNameTemplate: '',
+      transactionUserTemplate: '',
+      transactionOuter: false,
+      traceEntryMessageTemplate: '',
+      traceEntryCaptureSelfNested: false,
+      timerName: '',
+      enabledProperty: '',
+      traceEntryEnabledProperty: ''
+    };
+
     if (version) {
       $http.get('backend/config/instrumentation?agent-id=' + encodeURIComponent($scope.agentId) + '&version=' + version)
           .then(function (response) {
@@ -93,44 +115,25 @@ glowroot.controller('ConfigInstrumentationCtrl', [
           }, function (response) {
             httpErrors.handle(response, $scope);
           });
-    } else {
+    } else if ($scope.layout.central) {
       $http.get('backend/config/new-instrumentation-check-agent-connected?agent-id=' + encodeURIComponent($scope.agentId))
           .then(function (response) {
             $scope.loaded = true;
             $scope.agentNotConnected = !response.data;
-            if ($scope.agentNotConnected) {
-              $scope.methodSignatures = [{
-                name: '',
-                parameterTypes: ['..'],
-                returnType: '',
-                modifiers: []
-              }];
-              $scope.selectedMethodSignature = $scope.methodSignatures[0];
-            }
+            resetMethodSignatures('');
             onNewData({
-              config: {
-                // when these are updated, make sure to update similar list in importFromJson
-                // (see instrumentation-list.js)
-                classAnnotation: '',
-                methodDeclaringClassName: '',
-                methodAnnotation: '',
-                nestingGroup: '',
-                order: 0,
-                captureKind: 'transaction',
-                transactionType: '',
-                transactionNameTemplate: '',
-                transactionUserTemplate: '',
-                transactionOuter: false,
-                traceEntryMessageTemplate: '',
-                traceEntryCaptureSelfNested: false,
-                timerName: '',
-                enabledProperty: '',
-                traceEntryEnabledProperty: ''
-              }
+              config: NEW_CONFIG
             });
           }, function (response) {
             httpErrors.handle(response, $scope);
           });
+    } else {
+      $scope.loaded = true;
+      $scope.agentNotConnected = false;
+      resetMethodSignatures('');
+      onNewData({
+        config: NEW_CONFIG
+      });
     }
 
     $scope.hasChanges = function () {
@@ -138,12 +141,6 @@ glowroot.controller('ConfigInstrumentationCtrl', [
           && !angular.equals($scope.config, $scope.originalConfig);
     };
     var removeConfirmIfHasChangesListener = $scope.$on('$locationChangeStart', confirmIfHasChanges($scope));
-
-    $scope.hasMethodSignatureError = function () {
-      // checking $scope.formCtrl below is to protect against javascript error when moving away from page
-      return !$scope.methodSignatures || !$scope.methodSignatures.length
-          || ($scope.formCtrl && $scope.formCtrl.selectedMethodSignature.$invalid);
-    };
 
     $scope.showClassNameSpinner = 0;
     $scope.showMethodNameSpinner = 0;
@@ -239,35 +236,33 @@ glowroot.controller('ConfigInstrumentationCtrl', [
     };
 
     function resetMethodSignatures(methodName) {
-      if ($scope.agentNotConnected) {
-        $scope.methodSignatures = [{
-          name: methodName,
-          parameterTypes: ['..'],
-          returnType: '',
-          modifiers: []
-        }];
-      } else {
-        $scope.methodSignatures = [];
-      }
+      $scope.methodSignatures = [{
+        name: methodName,
+        parameterTypes: ['..'],
+        returnType: '',
+        modifiers: []
+      }];
+      $scope.selectedMethodSignature = $scope.methodSignatures[0];
     }
 
     $scope.onBlurMethodName = function () {
+      if (!$scope.config.className) {
+        return;
+      }
       if ($scope.config.methodName) {
         onBlurDebouncer = $timeout(function () {
           $scope.onSelectMethodName();
         }, 100);
       } else {
         // the user cleared the text input and tabbed away
-        resetMethodSignatures();
-        $scope.selectedMethodSignature = undefined;
+        resetMethodSignatures('');
       }
     };
 
     $scope.methodSignatureText = function (methodSignature) {
-      if (methodSignature.name.indexOf('*') !== -1 || methodSignature.name.indexOf('|') !== -1) {
-        return 'any signature';
-      }
-      if (isSignatureAll(methodSignature)) {
+      if (methodSignature === undefined || methodSignature.name === undefined
+          || methodSignature.name.indexOf('*') !== -1 || methodSignature.name.indexOf('|') !== -1
+          || isSignatureAll(methodSignature)) {
         return 'any signature';
       }
       var text = '';
@@ -335,14 +330,13 @@ glowroot.controller('ConfigInstrumentationCtrl', [
           });
     };
 
-    $scope.exportToJson = function () {
+    $scope.exportToJson = function (deferred) {
+      deferred.resolve();
       var config = angular.copy($scope.config);
       instrumentationExport.clean(config);
       $scope.jsonExport = JSON.stringify(config, null, 2);
 
-      gtClipboard('#jsonExportModal .fa-clipboard', function () {
-        return document.getElementById('jsonExport');
-      }, function () {
+      gtClipboard('#jsonExportModal .fa-clipboard', '#jsonExportModal', function () {
         return $scope.jsonExport;
       });
 
@@ -373,33 +367,39 @@ glowroot.controller('ConfigInstrumentationCtrl', [
               returnType: '',
               modifiers: []
             });
-            if (response.data.length === 1) {
-              $scope.selectedMethodSignature = response.data[0];
-            } else {
-              $scope.selectedMethodSignature = undefined;
-            }
+            $scope.selectedMethodSignature = $scope.methodSignatures[0];
           }, function (response) {
             httpErrors.handle(response, $scope);
           });
     }
 
-    $scope.$watch('config.captureKind', function (newValue) {
+    $scope.$watchGroup(['config.captureKind', 'config.alreadyInTransactionBehavior'], function (newValue) {
       if (!$scope.config) {
         return;
       }
-      $scope.captureKindTransaction = newValue === 'transaction';
-      $scope.showTimer = newValue === 'timer' || newValue === 'trace-entry' || newValue === 'transaction';
-      $scope.showTraceEntry = newValue === 'trace-entry' || newValue === 'transaction';
-      $scope.showTraceEntryStackThreshold = newValue === 'trace-entry';
+      var newCaptureKind = newValue[0];
+      var newAlreadyInTransactionBehavior = newValue[1];
+      $scope.captureKindTransaction = newCaptureKind === 'transaction';
+      $scope.showTimer = newCaptureKind === 'timer' || newCaptureKind === 'trace-entry' || newCaptureKind === 'transaction';
+      $scope.showTraceEntry = newCaptureKind === 'trace-entry' || newCaptureKind === 'transaction';
+      $scope.showTraceEntryStackThresholdMillis = newCaptureKind === 'trace-entry'
+          || (newCaptureKind === 'transaction' && newAlreadyInTransactionBehavior !== 'do-nothing');
+      $scope.showTraceEntryCaptureSelfNested = newCaptureKind === 'trace-entry'
+          || (newCaptureKind === 'transaction' && newAlreadyInTransactionBehavior === 'capture-trace-entry');
       if (!$scope.showTimer) {
         $scope.config.timerName = '';
       }
       if (!$scope.showTraceEntry) {
         $scope.config.traceEntryMessageTemplate = '';
-        $scope.config.traceEntryCaptureSelfNested = false;
       }
-      if (!$scope.showTraceEntryStackThreshold) {
-        $scope.config.traceEntryStackThresholdMillis = '';
+      if (!$scope.showTraceEntry) {
+        $scope.config.traceEntryCaptureSelfNested = false;
+        $scope.config.traceEntryStackThresholdMillis = null;
+      }
+      if (!$scope.captureKindTransaction) {
+        $scope.config.alreadyInTransactionBehavior = null;
+      } else if (!$scope.config.alreadyInTransactionBehavior) {
+        $scope.config.alreadyInTransactionBehavior = 'capture-trace-entry';
       }
     });
 

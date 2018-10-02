@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,18 +16,17 @@
 package org.glowroot.agent.plugin.jdbc;
 
 import java.util.Collection;
+import java.util.Collections;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
-import javax.annotation.Nullable;
-
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Queues;
-import com.google.common.hash.HashCode;
-
+import org.glowroot.agent.plugin.api.checker.Nullable;
 import org.glowroot.agent.plugin.jdbc.message.BindParameterList;
 
 // used to capture and mirror the state of prepared statements since the underlying
 // PreparedStatement values cannot be inspected after they have been set
 class PreparedStatementMirror extends StatementMirror {
+
+    private static final int CAPTURED_BATCH_SIZE_LIMIT = 1000;
 
     private static final int PARAMETERS_INITIAL_CAPACITY = 4;
 
@@ -35,50 +34,54 @@ class PreparedStatementMirror extends StatementMirror {
     // ok for this field to be non-volatile since it is only temporary storage for a single thread
     // while that thread is setting parameter values into the prepared statement and executing it
     private BindParameterList parameters;
-    private boolean parametersCopied;
+    private boolean parametersShared;
     // ok for this field to be non-volatile since it is only temporary storage for a single thread
     // while that thread is setting parameter values into the prepared statement and executing it
     private @Nullable Collection<BindParameterList> batchedParameters;
+    private int batchSize;
 
-    public PreparedStatementMirror(String sql) {
+    PreparedStatementMirror(String sql) {
         this.sql = sql;
         // TODO delay creation to optimize case when bind parameter capture is disabled
         parameters = new BindParameterList(PARAMETERS_INITIAL_CAPACITY);
     }
 
-    public void addBatch() {
+    void addBatch() {
         // synchronization isn't an issue here as this method is called only by the monitored thread
         if (batchedParameters == null) {
-            batchedParameters = Queues.newConcurrentLinkedQueue();
+            batchedParameters = new ConcurrentLinkedQueue<BindParameterList>();
         }
-        batchedParameters.add(parameters);
-        parametersCopied = true;
+        if (batchSize++ < CAPTURED_BATCH_SIZE_LIMIT) {
+            batchedParameters.add(parameters);
+            parametersShared = true;
+        }
     }
 
-    public Collection<BindParameterList> getBatchedParameters() {
+    Collection<BindParameterList> getBatchedParameters() {
         if (batchedParameters == null) {
-            return ImmutableList.of();
+            return Collections.emptyList();
         } else {
             return batchedParameters;
         }
     }
 
-    public @Nullable BindParameterList getParametersCopy() {
-        parametersCopied = true;
+    @Nullable
+    BindParameterList getParameters() {
+        parametersShared = true;
         return parameters;
     }
 
-    public String getSql() {
+    String getSql() {
         return sql;
     }
 
     int getBatchSize() {
-        return batchedParameters == null ? 0 : batchedParameters.size();
+        return batchSize;
     }
 
     // remember parameterIndex starts at 1 not 0
-    public void setParameterValue(int parameterIndex, @Nullable Object object) {
-        if (parametersCopied) {
+    void setParameterValue(int parameterIndex, @Nullable Object object) {
+        if (parametersShared) {
             // separate method for less common path to not impact inlining budget of fast(er) path
             copyParameters();
         }
@@ -87,13 +90,13 @@ class PreparedStatementMirror extends StatementMirror {
 
     private void copyParameters() {
         parameters = BindParameterList.copyOf(parameters);
-        parametersCopied = false;
+        parametersShared = false;
     }
 
-    public void clearParameters() {
-        if (parametersCopied) {
+    void clearParameters() {
+        if (parametersShared) {
             parameters = new BindParameterList(parameters.size());
-            parametersCopied = false;
+            parametersShared = false;
         } else {
             parameters.clear();
         }
@@ -101,27 +104,39 @@ class PreparedStatementMirror extends StatementMirror {
 
     @Override
     public void clearBatch() {
-        if (parametersCopied) {
+        if (parametersShared) {
             parameters = new BindParameterList(parameters.size());
-            parametersCopied = false;
+            parametersShared = false;
         } else {
             parameters.clear();
         }
         batchedParameters = null;
+        batchSize = 0;
     }
 
     static class ByteArrayParameterValue {
+
+        private static final char[] hexDigits = "0123456789abcdef".toCharArray();
+
         private final int length;
-        private final byte /*@Nullable*/[] bytes;
-        public ByteArrayParameterValue(byte[] bytes, boolean displayAsHex) {
+        private final byte /*@Nullable*/ [] bytes;
+
+        ByteArrayParameterValue(byte[] bytes, boolean displayAsHex) {
             length = bytes.length;
             // only retain bytes if needed for displaying as hex
             this.bytes = displayAsHex ? bytes : null;
         }
+
         @Override
         public String toString() {
             if (bytes != null) {
-                return "0x" + HashCode.fromBytes(bytes).toString();
+                StringBuilder sb = new StringBuilder(2 + 2 * bytes.length);
+                sb.append("0x");
+                for (byte b : bytes) {
+                    // this logic copied from com.google.common.hash.HashCode.toString()
+                    sb.append(hexDigits[(b >> 4) & 0xf]).append(hexDigits[b & 0xf]);
+                }
+                return sb.toString();
             } else {
                 return "{" + length + " bytes}";
             }
@@ -129,10 +144,13 @@ class PreparedStatementMirror extends StatementMirror {
     }
 
     static class StreamingParameterValue {
+
         private final Class<?> clazz;
-        public StreamingParameterValue(Class<?> clazz) {
+
+        StreamingParameterValue(Class<?> clazz) {
             this.clazz = clazz;
         }
+
         @Override
         public String toString() {
             return "{stream:" + clazz.getSimpleName() + "}";

@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2016 the original author or authors.
+ * Copyright 2011-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -77,7 +77,7 @@ public class StartupIT {
         Trace.Entry entry = i.next();
         assertThat(entry.getDepth()).isEqualTo(0);
         assertThat(entry.getMessage())
-                .isEqualTo("listener init: " + TestServletContextListener.class.getName());
+                .isEqualTo("Listener init: " + TestServletContextListener.class.getName());
 
         assertThat(i.hasNext()).isFalse();
     }
@@ -93,7 +93,7 @@ public class StartupIT {
         Trace.Entry entry = i.next();
         assertThat(entry.getDepth()).isEqualTo(0);
         assertThat(entry.getMessage())
-                .isEqualTo("servlet init: " + TestServletInit.class.getName());
+                .isEqualTo("Servlet init: " + TestServletInit.class.getName());
 
         assertThat(i.hasNext()).isFalse();
     }
@@ -108,7 +108,7 @@ public class StartupIT {
 
         Trace.Entry entry = i.next();
         assertThat(entry.getDepth()).isEqualTo(0);
-        assertThat(entry.getMessage()).isEqualTo("filter init: " + TestFilterInit.class.getName());
+        assertThat(entry.getMessage()).isEqualTo("Filter init: " + TestFilterInit.class.getName());
 
         assertThat(i.hasNext()).isFalse();
     }
@@ -124,7 +124,7 @@ public class StartupIT {
         Trace.Entry entry = i.next();
         assertThat(entry.getDepth()).isEqualTo(0);
         assertThat(entry.getMessage()).isEqualTo(
-                "container initializer: " + TestServletContainerInitializer.class.getName());
+                "Container initializer: " + TestServletContainerInitializer.class.getName());
 
         assertThat(i.hasNext()).isFalse();
     }

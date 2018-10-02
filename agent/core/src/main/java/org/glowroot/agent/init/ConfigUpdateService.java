@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,13 +24,17 @@ import com.google.common.collect.Maps;
 
 import org.glowroot.agent.collector.Collector.AgentConfigUpdater;
 import org.glowroot.agent.config.AdvancedConfig;
+import org.glowroot.agent.config.AlertConfig;
 import org.glowroot.agent.config.ConfigService;
 import org.glowroot.agent.config.GaugeConfig;
 import org.glowroot.agent.config.InstrumentationConfig;
+import org.glowroot.agent.config.JvmConfig;
 import org.glowroot.agent.config.PluginCache;
 import org.glowroot.agent.config.PluginConfig;
 import org.glowroot.agent.config.PluginDescriptor;
+import org.glowroot.agent.config.SyntheticMonitorConfig;
 import org.glowroot.agent.config.TransactionConfig;
+import org.glowroot.agent.config.UiDefaultsConfig;
 import org.glowroot.agent.config.UserRecordingConfig;
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig;
 
@@ -46,15 +50,36 @@ class ConfigUpdateService implements AgentConfigUpdater {
         this.pluginCache = pluginCache;
     }
 
+    // ui config, synthetic monitor configs and alert configs are not used by agent, but updated
+    // here to keep config.json in sync with central, to allow copying to another deployment
     @Override
     public void update(AgentConfig agentConfig) throws IOException {
         synchronized (lock) {
             configService.updateTransactionConfig(
                     TransactionConfig.create(agentConfig.getTransactionConfig()));
+            configService.updateJvmConfig(JvmConfig.create(agentConfig.getJvmConfig()));
+            configService.updateUiDefaultsConfig(
+                    UiDefaultsConfig.create(agentConfig.getUiDefaultsConfig()));
             configService.updateUserRecordingConfig(
                     UserRecordingConfig.create(agentConfig.getUserRecordingConfig()));
             configService
                     .updateAdvancedConfig(AdvancedConfig.create(agentConfig.getAdvancedConfig()));
+            List<GaugeConfig> gaugeConfigs = Lists.newArrayList();
+            for (AgentConfig.GaugeConfig gaugeConfig : agentConfig.getGaugeConfigList()) {
+                gaugeConfigs.add(GaugeConfig.create(gaugeConfig));
+            }
+            configService.updateGaugeConfigs(gaugeConfigs);
+            List<SyntheticMonitorConfig> syntheticMonitorConfigs = Lists.newArrayList();
+            for (AgentConfig.SyntheticMonitorConfig syntheticMonitorConfig : agentConfig
+                    .getSyntheticMonitorConfigList()) {
+                syntheticMonitorConfigs.add(SyntheticMonitorConfig.create(syntheticMonitorConfig));
+            }
+            configService.updateSyntheticMonitorConfigs(syntheticMonitorConfigs);
+            List<AlertConfig> alertConfigs = Lists.newArrayList();
+            for (AgentConfig.AlertConfig alertConfig : agentConfig.getAlertConfigList()) {
+                alertConfigs.add(AlertConfig.create(alertConfig));
+            }
+            configService.updateAlertConfigs(alertConfigs);
             Map<String, AgentConfig.PluginConfig> map = Maps.newHashMap();
             for (AgentConfig.PluginConfig pluginConfig : agentConfig.getPluginConfigList()) {
                 map.put(pluginConfig.getId(), pluginConfig);
@@ -77,11 +102,6 @@ class ConfigUpdateService implements AgentConfigUpdater {
                 instrumentationConfigs.add(InstrumentationConfig.create(instrumentationConfig));
             }
             configService.updateInstrumentationConfigs(instrumentationConfigs);
-            List<GaugeConfig> gaugeConfigs = Lists.newArrayList();
-            for (AgentConfig.GaugeConfig gaugeConfig : agentConfig.getGaugeConfigList()) {
-                gaugeConfigs.add(GaugeConfig.create(gaugeConfig));
-            }
-            configService.updateGaugeConfigs(gaugeConfigs);
         }
     }
 }

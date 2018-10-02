@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2017 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,16 @@
  */
 package org.glowroot.tests;
 
+import com.machinepublishers.jbrowserdriver.JBrowserDriver;
 import org.junit.Test;
 import org.openqa.selenium.WebElement;
 
 import org.glowroot.tests.admin.ChangePasswordPage;
 import org.glowroot.tests.admin.UserConfigPage;
 import org.glowroot.tests.config.ConfigSidebar;
-import org.glowroot.tests.util.Utils;
 
-import static org.openqa.selenium.By.linkText;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.openqa.selenium.By.xpath;
 
 public class LoginIT extends WebDriverIT {
@@ -35,16 +36,14 @@ public class LoginIT extends WebDriverIT {
         ConfigSidebar configSidebar = new ConfigSidebar(driver);
 
         app.open();
-        globalNavbar.getAdminConfigLink().click();
-        configSidebar.getUsersLink().click();
+        globalNavbar.clickAdminConfigLink();
+        configSidebar.clickUsersLink();
 
         createUser();
 
         login(globalNavbar, "test", "p");
 
-        globalNavbar.getSignOutLink().click();
-        // wait for sign in link to appear
-        globalNavbar.getSignInLink();
+        globalNavbar.clickSignOutLink();
     }
 
     @Test
@@ -54,15 +53,15 @@ public class LoginIT extends WebDriverIT {
         ConfigSidebar configSidebar = new ConfigSidebar(driver);
 
         app.open();
-        globalNavbar.getAdminConfigLink().click();
-        configSidebar.getUsersLink().click();
+        globalNavbar.clickAdminConfigLink();
+        configSidebar.clickUsersLink();
 
         createUser();
 
         login(globalNavbar, "test", "p");
 
-        globalNavbar.getChangeMyPasswordLink().click();
-        configSidebar.getChangePasswordLink().click();
+        globalNavbar.clickChangeMyPasswordLink();
+        configSidebar.clickChangePasswordLink();
         ChangePasswordPage changePasswordPage = new ChangePasswordPage(driver);
         sendKeys(changePasswordPage.getCurrentPasswordTextField(), "p");
         sendKeys(changePasswordPage.getNewPasswordTextField(), "q");
@@ -71,40 +70,42 @@ public class LoginIT extends WebDriverIT {
         // TODO validate password change success
         // until then, need to sleep a long time since secure password hashing can take some time on
         // slow travis ci machines
-        Thread.sleep(2000);
-        globalNavbar.getAdminConfigLink().click();
-        Thread.sleep(200);
+        SECONDS.sleep(2);
+        globalNavbar.clickAdminConfigLink();
+        MILLISECONDS.sleep(200);
 
-        globalNavbar.getSignOutLink().click();
+        globalNavbar.clickSignOutLink();
 
         login(globalNavbar, "test", "q");
 
-        globalNavbar.getSignOutLink().click();
-        // wait for sign in link to appear
-        globalNavbar.getSignInLink();
+        globalNavbar.clickSignOutLink();
     }
 
     private void createUser() {
-        Utils.withWait(driver, xpath("//a[@href='admin/user?new']")).click();
+        clickWithWait(xpath("//a[@href='admin/user?new']"));
         UserConfigPage userPage = new UserConfigPage(driver);
         sendKeys(userPage.getUsernameTextField(), "test");
         sendKeys(userPage.getPasswordTextField(), "p");
         sendKeys(userPage.getVerifyPasswordTextField(), "p");
-        Utils.withWait(driver, xpath("//input[@ng-model='role.checked']")).click();
-        userPage.getAddButton().click();
-        // getDeleteButton() waits for the save/redirect
-        // (the delete button does not appear until after the save/redirect)
-        userPage.getDeleteButton();
-        driver.findElement(linkText("Return to list")).click();
+        clickWithWait(xpath("//input[@ng-model='role.checked']/.."));
+        userPage.clickAddButton();
+        // the delete button does not appear until after the save/redirect
+        userPage.waitForDeleteButton();
+        clickLink("Return to list");
     }
 
-    private void login(GlobalNavbar globalNavbar, String username, String password) {
-        globalNavbar.getSignInLink().click();
+    private void login(GlobalNavbar globalNavbar, String username, String password)
+            throws InterruptedException {
+        globalNavbar.clickSignInLink();
         sendKeys(globalNavbar.getLoginUsernameTextField(), username);
         sendKeys(globalNavbar.getLoginPasswordTextField(), password);
-        globalNavbar.getLoginButton().click();
-        // wait for sign out button to appear, means login success
-        globalNavbar.getSignOutLink();
+        if (driver instanceof JBrowserDriver) {
+            // previously tried waiting for button to be not(@disabled)
+            // but that didn't resolve sporadic issue with login action never occurring
+            // (and being left on login page, timing out waiting for "sign out" link below
+            MILLISECONDS.sleep(500);
+        }
+        globalNavbar.clickLoginButton();
     }
 
     private void sendKeys(WebElement element, String text) {

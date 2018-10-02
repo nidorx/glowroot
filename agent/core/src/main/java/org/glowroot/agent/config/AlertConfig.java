@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 the original author or authors.
+ * Copyright 2015-2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,100 +15,242 @@
  */
 package org.glowroot.agent.config;
 
-import javax.annotation.Nullable;
-
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonSubTypes.Type;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.google.common.collect.ImmutableList;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.immutables.value.Value;
 
 import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig;
-import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AlertConfig.AlertKind;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AlertConfig.AlertNotification;
+import org.glowroot.wire.api.model.AgentConfigOuterClass.AgentConfig.AlertConfig.AlertSeverity;
 import org.glowroot.wire.api.model.Proto.OptionalDouble;
-import org.glowroot.wire.api.model.Proto.OptionalInt32;
 
 @Value.Immutable
 public abstract class AlertConfig {
 
-    public abstract AlertKind kind();
-
-    // transaction alert
-    public abstract @Nullable String transactionType();
-    public abstract @Nullable Double transactionPercentile();
-    public abstract @Nullable Integer transactionThresholdMillis();
-    public abstract @Nullable Integer minTransactionCount();
-
-    // gauge alert
-    @JsonInclude(value = Include.NON_EMPTY)
-    public abstract @Nullable String gaugeName();
-    public abstract @Nullable Double gaugeThreshold();
-
-    // both
-    public abstract int timePeriodSeconds();
-
-    public abstract ImmutableList<String> emailAddresses();
+    public abstract AlertCondition condition();
+    public abstract AlertSeverity severity();
+    public abstract @Nullable ImmutableEmailNotification emailNotification();
+    public abstract @Nullable ImmutablePagerDutyNotification pagerDutyNotification();
 
     public static AlertConfig create(AgentConfig.AlertConfig config) {
         ImmutableAlertConfig.Builder builder = ImmutableAlertConfig.builder()
-                .kind(config.getKind());
-        String transactionType = config.getTransactionType();
-        if (!transactionType.isEmpty()) {
-            builder.transactionType(transactionType);
+                .condition(create(config.getCondition()))
+                .severity(config.getSeverity());
+        AlertNotification notification = config.getNotification();
+        if (notification.hasEmailNotification()) {
+            builder.emailNotification(create(notification.getEmailNotification()));
         }
-        if (config.hasTransactionPercentile()) {
-            builder.transactionPercentile(config.getTransactionPercentile().getValue());
+        if (notification.hasPagerDutyNotification()) {
+            builder.pagerDutyNotification(create(notification.getPagerDutyNotification()));
         }
-        if (config.hasTransactionThresholdMillis()) {
-            builder.transactionThresholdMillis(config.getTransactionThresholdMillis().getValue());
-        }
-        if (config.hasMinTransactionCount()) {
-            builder.minTransactionCount(config.getMinTransactionCount().getValue());
-        }
-        String gaugeName = config.getGaugeName();
-        if (!gaugeName.isEmpty()) {
-            builder.gaugeName(gaugeName);
-        }
-        if (config.hasGaugeThreshold()) {
-            builder.gaugeThreshold(config.getGaugeThreshold().getValue());
-        }
-        return builder.timePeriodSeconds(config.getTimePeriodSeconds())
-                .addAllEmailAddresses(config.getEmailAddressList())
-                .build();
+        return builder.build();
     }
 
     public AgentConfig.AlertConfig toProto() {
         AgentConfig.AlertConfig.Builder builder = AgentConfig.AlertConfig.newBuilder()
-                .setKind(kind());
-        String transactionType = transactionType();
+                .setCondition(toProto(condition()))
+                .setSeverity(severity());
+        EmailNotification emailNotification = emailNotification();
+        if (emailNotification != null) {
+            builder.getNotificationBuilder().setEmailNotification(toProto(emailNotification));
+        }
+        PagerDutyNotification pagerDutyNotification = pagerDutyNotification();
+        if (pagerDutyNotification != null) {
+            builder.getNotificationBuilder()
+                    .setPagerDutyNotification(toProto(pagerDutyNotification));
+        }
+        return builder.build();
+    }
+
+    private static AlertCondition create(AgentConfig.AlertConfig.AlertCondition alertCondition) {
+        switch (alertCondition.getValCase()) {
+            case METRIC_CONDITION:
+                return create(alertCondition.getMetricCondition());
+            case SYNTHETIC_MONITOR_CONDITION:
+                return create(alertCondition.getSyntheticMonitorCondition());
+            case HEARTBEAT_CONDITION:
+                return create(alertCondition.getHeartbeatCondition());
+            default:
+                throw new IllegalStateException(
+                        "Unexpected condition kind: " + alertCondition.getValCase().name());
+        }
+    }
+
+    private static ImmutableEmailNotification create(
+            AgentConfig.AlertConfig.AlertNotification.EmailNotification emailNotification) {
+        return ImmutableEmailNotification.builder()
+                .addAllEmailAddresses(emailNotification.getEmailAddressList())
+                .build();
+    }
+
+    private static ImmutablePagerDutyNotification create(
+            AgentConfig.AlertConfig.AlertNotification.PagerDutyNotification pagerDutyNotification) {
+        return ImmutablePagerDutyNotification.builder()
+                .pagerDutyIntegrationKey(pagerDutyNotification.getPagerDutyIntegrationKey())
+                .build();
+    }
+
+    private static AgentConfig.AlertConfig.AlertCondition toProto(AlertCondition condition) {
+        if (condition instanceof MetricCondition) {
+            return AgentConfig.AlertConfig.AlertCondition.newBuilder()
+                    .setMetricCondition(toProto((MetricCondition) condition))
+                    .build();
+        }
+        if (condition instanceof SyntheticMonitorCondition) {
+            return AgentConfig.AlertConfig.AlertCondition.newBuilder()
+                    .setSyntheticMonitorCondition(toProto((SyntheticMonitorCondition) condition))
+                    .build();
+        }
+        if (condition instanceof HeartbeatCondition) {
+            return AgentConfig.AlertConfig.AlertCondition.newBuilder()
+                    .setHeartbeatCondition(toProto((HeartbeatCondition) condition))
+                    .build();
+        }
+        throw new IllegalStateException(
+                "Unexpected alert condition type: " + condition.getClass().getName());
+    }
+
+    private static AgentConfig.AlertConfig.AlertNotification.EmailNotification toProto(
+            EmailNotification emailNotification) {
+        return AgentConfig.AlertConfig.AlertNotification.EmailNotification.newBuilder()
+                .addAllEmailAddress(emailNotification.emailAddresses())
+                .build();
+    }
+
+    private static AgentConfig.AlertConfig.AlertNotification.PagerDutyNotification toProto(
+            PagerDutyNotification pagerDutyNotification) {
+        return AgentConfig.AlertConfig.AlertNotification.PagerDutyNotification.newBuilder()
+                .setPagerDutyIntegrationKey(pagerDutyNotification.pagerDutyIntegrationKey())
+                .build();
+    }
+
+    private static MetricCondition create(
+            AgentConfig.AlertConfig.AlertCondition.MetricCondition condition) {
+        ImmutableMetricCondition.Builder builder = ImmutableMetricCondition.builder()
+                .metric(condition.getMetric());
+        String transactionType = condition.getTransactionType();
+        if (transactionType != null) {
+            builder.transactionType(transactionType);
+        }
+        String transactionName = condition.getTransactionName();
+        if (transactionName != null) {
+            builder.transactionName(transactionName);
+        }
+        if (condition.hasPercentile()) {
+            builder.percentile(condition.getPercentile().getValue());
+        }
+        return builder.threshold(condition.getThreshold())
+                .lowerBoundThreshold(condition.getLowerBoundThreshold())
+                .timePeriodSeconds(condition.getTimePeriodSeconds())
+                .minTransactionCount(condition.getMinTransactionCount())
+                .build();
+    }
+
+    private static SyntheticMonitorCondition create(
+            AgentConfig.AlertConfig.AlertCondition.SyntheticMonitorCondition condition) {
+        return ImmutableSyntheticMonitorCondition.builder()
+                .syntheticMonitorId(condition.getSyntheticMonitorId())
+                .thresholdMillis(condition.getThresholdMillis())
+                .build();
+    }
+
+    private static HeartbeatCondition create(
+            AgentConfig.AlertConfig.AlertCondition.HeartbeatCondition condition) {
+        return ImmutableHeartbeatCondition.builder()
+                .timePeriodSeconds(condition.getTimePeriodSeconds())
+                .build();
+    }
+
+    private static AgentConfig.AlertConfig.AlertCondition.MetricCondition toProto(
+            MetricCondition condition) {
+        AgentConfig.AlertConfig.AlertCondition.MetricCondition.Builder builder =
+                AgentConfig.AlertConfig.AlertCondition.MetricCondition.newBuilder()
+                        .setMetric(condition.metric());
+        String transactionType = condition.transactionType();
         if (transactionType != null) {
             builder.setTransactionType(transactionType);
         }
-        Double transactionPercentile = transactionPercentile();
-        if (transactionPercentile != null) {
-            builder.setTransactionPercentile(OptionalDouble.newBuilder()
-                    .setValue(transactionPercentile));
+        String transactionName = condition.transactionName();
+        if (transactionName != null) {
+            builder.setTransactionName(transactionName);
         }
-        Integer transactionThresholdMillis = transactionThresholdMillis();
-        if (transactionThresholdMillis != null) {
-            builder.setTransactionThresholdMillis(OptionalInt32.newBuilder()
-                    .setValue(transactionThresholdMillis));
+        Double percentile = condition.percentile();
+        if (percentile != null) {
+            builder.setPercentile(OptionalDouble.newBuilder().setValue(percentile));
         }
-        Integer minTransactionCount = minTransactionCount();
-        if (minTransactionCount != null) {
-            builder.setMinTransactionCount(OptionalInt32.newBuilder()
-                    .setValue(minTransactionCount));
-        }
-        String gaugeName = gaugeName();
-        if (gaugeName != null) {
-            builder.setGaugeName(gaugeName);
-        }
-        Double gaugeThreshold = gaugeThreshold();
-        if (gaugeThreshold != null) {
-            builder.setGaugeThreshold(OptionalDouble.newBuilder()
-                    .setValue(gaugeThreshold));
-        }
-        return builder.setTimePeriodSeconds(timePeriodSeconds())
-                .addAllEmailAddress(emailAddresses())
+        return builder.setThreshold(condition.threshold())
+                .setLowerBoundThreshold(condition.lowerBoundThreshold())
+                .setTimePeriodSeconds(condition.timePeriodSeconds())
+                .setMinTransactionCount(condition.minTransactionCount())
                 .build();
+    }
+
+    private static AgentConfig.AlertConfig.AlertCondition.SyntheticMonitorCondition toProto(
+            SyntheticMonitorCondition condition) {
+        return AgentConfig.AlertConfig.AlertCondition.SyntheticMonitorCondition.newBuilder()
+                .setSyntheticMonitorId(condition.syntheticMonitorId())
+                .setThresholdMillis(condition.thresholdMillis())
+                .build();
+    }
+
+    private static AgentConfig.AlertConfig.AlertCondition.HeartbeatCondition toProto(
+            HeartbeatCondition condition) {
+        return AgentConfig.AlertConfig.AlertCondition.HeartbeatCondition.newBuilder()
+                .setTimePeriodSeconds(condition.timePeriodSeconds())
+                .build();
+    }
+
+    @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY,
+            property = "conditionType")
+    @JsonSubTypes({
+            @Type(value = ImmutableMetricCondition.class, name = "metric"),
+            @Type(value = ImmutableSyntheticMonitorCondition.class, name = "synthetic-monitor"),
+            @Type(value = ImmutableHeartbeatCondition.class, name = "heartbeat")})
+    interface AlertCondition {}
+
+    @Value.Immutable
+    abstract static class MetricCondition implements AlertCondition {
+        abstract String metric();
+        abstract @Nullable String transactionType();
+        abstract @Nullable String transactionName();
+        abstract @Nullable Double percentile();
+        abstract double threshold();
+        @Value.Default
+        @JsonInclude(value = Include.NON_EMPTY)
+        boolean lowerBoundThreshold() {
+            return false;
+        }
+        abstract int timePeriodSeconds();
+        @Value.Default
+        @JsonInclude(value = Include.NON_EMPTY)
+        long minTransactionCount() {
+            return 0;
+        }
+    }
+
+    @Value.Immutable
+    interface SyntheticMonitorCondition extends AlertCondition {
+        String syntheticMonitorId();
+        int thresholdMillis();
+    }
+
+    @Value.Immutable
+    interface HeartbeatCondition extends AlertCondition {
+        int timePeriodSeconds();
+    }
+
+    @Value.Immutable
+    interface EmailNotification {
+        ImmutableList<String> emailAddresses();
+    }
+
+    @Value.Immutable
+    interface PagerDutyNotification {
+        String pagerDutyIntegrationKey();
     }
 }
