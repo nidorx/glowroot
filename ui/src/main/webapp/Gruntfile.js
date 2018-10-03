@@ -20,6 +20,7 @@ function gruntConfig(grunt) {
     grunt.config.set('srcDir', 'src');
     grunt.config.set('mdlDir', 'modules');
     grunt.config.set('distDir', 'dist');
+    grunt.config.set('libDir', 'node_modules');   
 
 
     // Configuration of grunt-replace to allow automatic concat of dependencies

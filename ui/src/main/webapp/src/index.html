@@ -35,12 +35,12 @@
         <link rel="shortcut icon" href="favicon.ico">
 
         <!-- concat:css[:distVendorCSS] vendor/styles/vendor.min.css -->
-        <link rel="stylesheet" href="vendor/bootstrap/dist/css/bootstrap.min.css"/>        
-        <link rel="stylesheet" href="vendor/angular-block-ui/dist/angular-block-ui.min.css"/>
-        <link rel="stylesheet" href="vendor/patternfly/dist/css/patternfly.min.css"/>
-        <link rel="stylesheet" href="vendor/patternfly/dist/css/patternfly-additions.min.css"/>
-        <link rel="stylesheet" href="vendor/angular-patternfly/dist/styles/angular-patternfly.min.css"/>
-        <link rel="stylesheet" href="vendor/d3-flame-graph/src/d3.flameGraph.css">
+        <link rel="stylesheet" href="node_modules/bootstrap/dist/css/bootstrap.min.css"/>        
+        <link rel="stylesheet" href="node_modules/angular-block-ui/dist/angular-block-ui.min.css"/>
+        <link rel="stylesheet" href="node_modules/patternfly/dist/css/patternfly.min.css"/>
+        <link rel="stylesheet" href="node_modules/patternfly/dist/css/patternfly-additions.min.css"/>
+        <link rel="stylesheet" href="node_modules/angular-patternfly/dist/styles/angular-patternfly.min.css"/>
+        <link rel="stylesheet" href="node_modules/d3-flame-graph/src/d3.flameGraph.css">
         <!-- /concat -->
 
         <!-- build:remove -->
@@ -93,27 +93,27 @@
 
 
         <!-- concat:js[:distVendorJS] vendor/vendor.min.js -->
-        <script src="vendor/jquery/dist/jquery.min.js"></script>
-        <script src="vendor/bootstrap/dist/js/bootstrap.min.js"></script>
-        <script src="vendor/angular/angular.min.js"></script>
-        <script src="vendor/angular-sanitize/angular-sanitize.min.js"></script>
-        <script src="vendor/angular-messages/angular-messages.min.js"></script>
-        <script src="vendor/angular-ui-router/release/angular-ui-router.min.js"></script>
-        <script src="vendor/angular-block-ui/dist/angular-block-ui.min.js"></script>
-        <script src="vendor/angular-bootstrap/ui-bootstrap.min.js"></script>
-        <script src="vendor/angular-bootstrap/ui-bootstrap-tpls.min.js"></script>
-        <script src="vendor/oclazyload/dist/ocLazyLoad.min.js"></script>
-        <script src="vendor/moment/moment.js"></script>
-        <script src="vendor/moment-timezone/builds/moment-timezone-with-data-2010-2020.js"></script>
-        <script src="vendor/flot/src/jquery.flot.js"></script>
-        <script src="vendor/flot/lib/jquery.colorhelpers.js"></script>
-        <script src="vendor/flot/lib/jquery.mousewheel.js"></script>
-        <script src="vendor/flot/src/plugins/jquery.flot.navigate.js"></script>
-        <script src="vendor/flot/src/plugins/jquery.flot.selection.js"></script>
-        <script src="vendor/flot/src/plugins/jquery.flot.time.js"></script>
-        <script src="vendor/flot/src/plugins/jquery.flot.stack.js"></script>
-        <script src="vendor/flot.tooltip/js/jquery.flot.tooltip.js"></script>
-        <script src="vendor/sql-formatter/dist/sql-formatter.min.js"></script>
+        <script src="node_modules/jquery/dist/jquery.min.js"></script>
+        <script src="node_modules/bootstrap/dist/js/bootstrap.min.js"></script>
+        <script src="node_modules/angular/angular.min.js"></script>
+        <script src="node_modules/angular-sanitize/angular-sanitize.min.js"></script>
+        <script src="node_modules/angular-messages/angular-messages.min.js"></script>
+        <script src="node_modules/angular-ui-router/release/angular-ui-router.min.js"></script>
+        <script src="node_modules/angular-block-ui/dist/angular-block-ui.min.js"></script>
+        <script src="node_modules/angular-ui-bootstrap/dist/ui-bootstrap.js"></script>
+        <script src="node_modules/angular-ui-bootstrap/dist/ui-bootstrap-tpls.js"></script>
+        <script src="node_modules/oclazyload/dist/ocLazyLoad.min.js"></script>
+        <script src="node_modules/moment/moment.js"></script>
+        <script src="node_modules/moment-timezone/builds/moment-timezone-with-data-2012-2022.js"></script>
+        <script src="node_modules/flot/src/jquery.flot.js"></script>
+        <script src="node_modules/flot/lib/jquery.colorhelpers.js"></script>
+        <script src="node_modules/flot/lib/jquery.mousewheel.js"></script>
+        <script src="node_modules/flot/src/plugins/jquery.flot.navigate.js"></script>
+        <script src="node_modules/flot/src/plugins/jquery.flot.selection.js"></script>
+        <script src="node_modules/flot/src/plugins/jquery.flot.time.js"></script>
+        <script src="node_modules/flot/src/plugins/jquery.flot.stack.js"></script>
+        <!--<script src="node_modules/flot.tooltip/js/jquery.flot.tooltip.js"></script>-->
+        <script src="node_modules/sql-formatter/dist/sql-formatter.min.js"></script>
         <!-- /concat -->
 
         <!-- build:js modules/App/App.bundle.min.js -->
@@ -128,9 +128,9 @@
              (but can't mark these all async which then causes failures under grunt serve since d3-tip and d3-flame-graph
              can be loaded before d3, see grunt-usemin issue #391, and workaround in Grunfile.js)
              also, the angular route for the flame graph page waits for window.d3 to be present (see routes.js) -->
-        <script src="vendor/d3/d3.js"></script>
-        <script src="vendor/d3-tip/index.js"></script>
-        <script src="vendor/d3-flame-graph/src/d3.flameGraph.js"></script>
+        <script src="node_modules/d3/d3.js"></script>
+        <!--<script src="node_modules/d3-tip/index.js"></script>-->
+        <script src="node_modules/d3-flame-graph/src/d3.flameGraph.js"></script>
         <!-- endbuild -->
     </body>
 </html>

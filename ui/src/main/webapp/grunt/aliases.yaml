@@ -11,9 +11,9 @@ dist:
     - 'replace:concat'
     - 'processhtml:dist'
     - 'htmlmin:dist'
-    - 'concat:dist_vendor_js'
-    - 'concat:dist_vendor_css'
-    - 'copy:dist_vendor_fonts'
+    - 'concat:distVendorJS'
+    - 'concat:distVendorCSS'
+    - 'copy:distVendorFonts'
 
 dist-server:
     - 'dist'

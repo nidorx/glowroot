@@ -1,6 +1,25 @@
 # Glowroot UI
 
 
+### Instalation
+
+```
+npm install
+```
+
+### Run
+
+```
+grunt
+```
+
+### Build
+
+```
+grunt dist
+```
+
+
 ## Migration
 
 - [ ] Transactions(Background, Startup, Web)

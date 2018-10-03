@@ -48,7 +48,7 @@ module.exports = function (grunt) {
                                 if (!match) {
                                     break;
                                 }
-                                concatConfig[target].src.push('<%= srcDir %>/' + match[1]);
+                                concatConfig[target].src.push(match[1]);
                             }
                             out = '<script src="' + dest + '"></script>';
                         } else if (type === 'css') {
@@ -59,7 +59,7 @@ module.exports = function (grunt) {
                                 if (!match) {
                                     break;
                                 }
-                                concatConfig[target].src.push('<%= srcDir %>/' + match[1]);
+                                concatConfig[target].src.push( match[1]);
                             }
                             out = '<link rel="stylesheet" href="' + dest + '" />';
                         } else {
